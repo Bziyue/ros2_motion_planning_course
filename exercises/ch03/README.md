@@ -13,3 +13,10 @@ g++ -std=c++17 -I/usr/include/eigen3 -Iexercises/ch03/starter \
 ~~~
 
 参考解使用 solutions 替代 starter。正式演示使用已经完成的库函数，练习未完成不会影响运行。提示见 [hints.md](hints.md)，答案见 [solutions/segment_distance.hpp](solutions/segment_distance.hpp)。
+
+## 配套手算
+
+- 展开距离平方并求导，推导线段投影；分别计算点 (1,1)、(3,1)、(-1,1) 到线段 [(0,0),(2,0)] 的距离。
+- 算出三点 (0,0)、(1,1)、(2,0) 的转弯叉积，解释为什么中间点从凸包下链弹出。
+- 用面积比例推导半径 R/2 内样本的概率；再计算边长 0.25 m 方格的半对角线。
+- 将两个网格边长同时减半，比较额外膨胀量和总格数。

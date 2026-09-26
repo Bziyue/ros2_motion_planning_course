@@ -1,7 +1,7 @@
 \chapter{一个可复现的二维世界}\label{ch:world}
 \begin{notebox}
-\textbf{目标}\quad 生成随机圆与凸多边形，显示起终点，检查有半径的机器人能否放入世界。\\
-\textbf{先修}\quad 前两章；向量点积。凸包与距离的必要直觉在本章说明。
+\textbf{目标}\quad 生成随机圆与凸多边形，计算机器人到障碍的距离，并检查起终点是否连通。\\
+\textbf{先修}\quad 前两章、勾股定理和一元函数求导。本章从坐标运算引入点积与二维叉积。
 \end{notebox}
 
 \section{先看世界，再谈算法}
@@ -9,103 +9,192 @@
 \begin{lstlisting}[language=bash,numbers=none]
 ros2 launch motion2d_bringup ch03.launch.py
 \end{lstlisting}
-默认世界宽、高都是 20 m，边界以原点为中心。seed=42 时生成 8 个圆和 8 个凸多边形；机器人在 $(-8,-8)$，目标在 $(8,8)$。世界是静态的，机器人尚未运动。
+RViz2 的 Fixed Frame 设为 map，World 话题选择 \code{/visualization/world}。
+默认世界宽、高都是20 m，边界以原点为中心。seed=42 时生成8个圆和8个凸多边形；机器人在 $(-8,-8)$，目标在 $(8,8)$。
+本章先搭好静态场景，第4章再让机器人运动。
 
-此处显示的是仿真掌握的完整几何。后续激光只能看见无遮挡且在量程内的表面，建图不能直接读取这些障碍物顶点。理解这个数据边界，才能公平比较真值模式和 SLAM 模式。
-
+世界节点保存完整障碍几何，用它计算碰撞和模拟传感器。第5章的激光将把这些几何变成有限数量的距离观测；之后的建图程序通过观测逐步认识环境。
 \begin{figure}[ht]
 \centering
-\includegraphics[width=.85\linewidth]{figures/ch03_rviz.png}
-\caption{seed=42 的实际世界。圆和凸多边形可以重叠；Start 与 Goal 分别标出起终点。}
+\includegraphics[width=.70\linewidth]{figures/ch03_rviz.png}
+\caption{seed=42 的世界。Start 与 Goal 标出起终点；不同障碍可以重叠。}
 \end{figure}
 
-\clearpage
-\section{圆心不碰撞，不代表圆盘不碰撞}
-半径为 r 的圆盘中心位于 p，圆形障碍中心为 c、半径为 R。两者相切时，中心距为 $r+R$，本课程把接触计为碰撞：
+\section{用距离描述圆盘与障碍}
+我们用位置向量 $p=(p_x,p_y)^\top$ 表示圆心，单位为米。两点间距离由勾股定理给出：
 \begin{equation}
-\|p-c\|>r+R \quad\Longleftrightarrow\quad \text{与该障碍无碰撞}.
+\|p-c\|=\sqrt{(p_x-c_x)^2+(p_y-c_y)^2}.
 \end{equation}
-定义单个障碍的有符号距离 $d(p)$：外部为正、内部为负。自由区域中，圆盘需要 $d(p)>r$。如要额外留出安全裕量 $\delta$，使用 $d(p)>r+\delta$；物理半径与规划裕量是两个不同参数。
+双竖线表示向量长度。后面常用的点积是两个对应分量相乘再相加：
+$u^\top v=u_xv_x+u_yv_y$，所以 $\|u\|^2=u^\top u$。
 
-世界边界也限制可用空间。核心函数在自由域中取边界和所有障碍的最小距离，再比较半径：
+设机器人半径为 r，圆形障碍中心为 c、半径为 R。沿圆心连线，两圆之间的空隙为
+$\|p-c\|-R-r$。空隙大于零时分离，等于零时相切；课程把接触也计为碰撞。因此
+\begin{equation}
+\|p-c\|>R+r \quad\Longleftrightarrow\quad \text{两圆无碰撞}.
+\end{equation}
+把 $d(p)=\|p-c\|-R$ 称为该障碍的\textbf{有符号距离}：障碍外为正、边界为零、内部为负。
+圆盘需要 $d(p)>r$；加入规划安全裕量 $\delta$ 后，需要 $d(p)>r+\delta$。
+例如中心距1.4 m、障碍半径1 m时，圆心净空为0.4 m；半径0.3 m的机器人能放下，再留0.2 m裕量则空间不足。
+
+宽 W、高 H 的矩形世界还要求圆心远离外墙。内部点到四面墙的最小距离为
+\begin{equation}
+d_{\rm wall}(p)=\min(W/2-|p_x|,\ H/2-|p_y|).
+\end{equation}
+这是因为左右墙距离分别为 $W/2-p_x$、$W/2+p_x$，较小者为 $W/2-|p_x|$；上下墙同理。
+\code{clearance} 从外墙、所有圆和多边形中取最小值：
 \par\noindent\begin{minipage}{\linewidth}
 \lstinputlisting[language=C++,linerange={clearance_begin-clearance_end},
   includerangemarker=false]{../ros2_ws/src/motion2d/src/sim/world.cpp}
 \end{minipage}\par
-占据区或越界时，这个函数用于判断符号，不承诺给出并集内部的精确 ESDF；第 12 章会专门构建距离场。
+\code{isFree} 的一个比较就完成了圆盘检查。在自由区域，返回值表示圆心到最近障碍或外墙的距离；
+负值表示圆心已进入某个障碍或越出世界。第12章会将距离存成栅格，供规划反复查询。
 
-\section{点到线段的距离}
-多边形边界由线段组成。设边为 $a\to b$，把点 p 投影到直线上：
+\section{从最小化距离推导线段投影}
+多边形的每条边都是有限线段。设端点为 a、b，记 $e=b-a$，线段上的点可以写成
+$q(t)=a+te$，其中 $0\leq t\leq1$。先在整条直线上找离 p 最近的点。平方根单调递增，
+最小化距离与最小化距离平方会得到同一个 t；后者更方便求导：
+\begin{align}
+f(t)&=\|p-a-te\|^2\\
+ &=\|p-a\|^2-2t(p-a)^\top e+t^2\|e\|^2,\\
+f'(t)&=-2(p-a)^\top e+2t\|e\|^2.
+\end{align}
+当 $a\ne b$，$f''(t)=2\|e\|^2>0$，函数开口向上。令一阶导数为零得到
 \begin{equation}
-t^*=\frac{(p-a)^\top(b-a)}{\|b-a\|^2},\qquad
-t=\min(1,\max(0,t^*)),\qquad q=a+t(b-a).
+t^*=\frac{(p-a)^\top e}{\|e\|^2}.
 \end{equation}
-q 是线段上离 p 最近的点，距离是 $\|p-q\|$。限制 t 很重要：离线段延长线很近，不代表离有限线段很近。若 a=b，则线段退化为一个点。
+若 $t^*<0$，f 在 $[0,1]$ 内递增，最小值位于0；若 $t^*>1$，最小值位于1；
+其余情况直接用 $t^*$。这三种情况合成一个截断运算：
+\begin{equation}
+t=\min(1,\max(0,t^*)),\qquad q=a+te,\qquad d=\|p-q\|.
+\end{equation}
+例如 $a=(0,0),b=(2,0)$。对于 $p=(1,1)$，$t^*=2/4=1/2$，最近点为 $(1,0)$，距离1；
+对于 $p=(3,1)$，$t^*=6/4=1.5$，截断到1后最近点为 b，距离 $\sqrt2$。
+\begin{figure}[ht]
+\centering
+\begin{tikzpicture}[x=1.15cm,y=1.15cm,>=Stealth]
+\draw[thick,navy] (0,0)--(2,0);
+\draw[dashed,muted] (2.1,0)--(3.4,0);
+\draw[tealblue] (1,0)--(1,1);
+\draw[tealblue] (2,0)--(3,1);
+\draw[dashed,muted] (3,0)--(3,.9);
+\draw[muted] (1,.15)--(1.15,.15)--(1.15,0);
+\foreach \x/\y in {0/0,2/0,1/0,1/1,3/1}{\fill[navy] (\x,\y) circle(1.8pt);}
+\node[below] at (0,0) {$a$};\node[below] at (2,0) {$b$};
+\node[below] at (1,0) {$q_1$};
+\node[above] at (1,1) {$p_1=(1,1)$};\node[above] at (3,1) {$p_2=(3,1)$};
+\node[anchor=west,align=left] at (4,.5) {线内投影：$q_1=(1,0)$\\线外投影：最近点为 b};
+\end{tikzpicture}
+\caption{最近点必须在线段上。第二个点的垂足落在延长线上，端点 b 才是允许的最近点。}
+\end{figure}
+
 \par\noindent\begin{minipage}{\linewidth}
 \lstinputlisting[language=C++,linerange={distance_begin-distance_end},
   includerangemarker=false]{../ros2_ws/src/motion2d/src/geometry/obstacles.cpp}
 \end{minipage}\par
-对逆时针凸多边形，内部点位于每条有向边的左侧。若点在内部，距离取负；外部则取到全部边的最小距离。
+代码的 \code{dot} 对应点积，\code{squaredNorm} 对应长度平方，\code{clamp} 实现截断。
+当边长为零时，线段只剩端点 a，直接计算 $\|p-a\|$。这样每一种几何情形都对应一个清楚的分支。
 
-\section{随机多边形为什么从凸包开始？}
-随意把随机点连起来可能产生自交。我们的步骤是：在一个采样圆盘内生成点，再取凸包。可把凸包想成绕所有点拉紧的橡皮筋。实现先按 x/y 排序，再维护上、下两条只向同一方向拐弯的链。
+\section{用拐弯方向判断内外与凸包}
+求出到所有边的最小距离后，还需判断正负。对逆时针排列的凸多边形，内部点在每条边的左侧。
+怎样用坐标判断“左侧”？设两个非零向量的方向角分别为 $\alpha,\beta$，则
+\begin{align}
+\operatorname{cross}(u,v)&=u_xv_y-u_yv_x\\
+ &=\|u\|\|v\|(\cos\alpha\sin\beta-\sin\alpha\cos\beta)\\
+ &=\|u\|\|v\|\sin(\beta-\alpha).
+\end{align}
+这个数称为二维叉积；它等于有向平行四边形面积。从 u 转向 v 时，小于半圈的逆时针转动给出正值，顺时针给出负值，共线时为零。
+对边 $a\to b$，代入 $u=b-a,v=p-a$，正值就表示 p 在左侧。
+\code{signedDistance(Polygon,...)} 逐边计算距离并检查左侧条件；全部满足时，把最小距离取负。
 
-若 $u,v$ 独立服从 $[0,1)$ 均匀分布，使用
+生成多边形时，先在一个圆盘内抽取若干点，再求它们的凸包。可以把凸包想成包住全部点并拉紧的橡皮筋。
+\code{convexHull} 按 x 从小到大、同 x 时按 y 排序，先搭下边界，再反向搭上边界。
+每次添加新点 c，检查链末尾的 a、b、c 是否左转；若
+$\operatorname{cross}(b-a,c-b)\leq0$，就删掉中间的 b，再重新检查。
+
+例如依次处理 $(0,0),(1,1),(2,0)$，叉积为 $1\times(-1)-1\times1=-2$，中间点会被移出下边界：
+它在连接两端的线段上方，应该留给上边界。上下两条链各去掉一个重复端点后合并，就得到逆时针顶点序列。
+\code{polygon_samples=8} 指抽样点数；落在凸包内部的点会被舍去，所以最终边数通常更少。
+
+\section{怎样在圆盘面积上均匀采样}
+令 u、v 独立均匀取自 $[0,1)$。“均匀”表示落入长度为 $\ell$ 的区间的概率就是 $\ell$。
+角度覆盖一周，因此取 $\theta=2\pi u$。半径的分布需要考虑圆环面积：半径越大，同样厚度的圆环面积越大。
+面积均匀要求半径不超过 $\rho$ 的概率等于面积比例：
 \begin{equation}
-\theta=2\pi u,\qquad \rho=R\sqrt v,\qquad
-p=c+\rho(\cos\theta,\sin\theta)
+P(\text{采样半径}\leq\rho)=\frac{\pi\rho^2}{\pi R^2}=\frac{\rho^2}{R^2}.
 \end{equation}
-让采样点在圆盘面积上均匀。因为半径不超过 $\rho$ 的面积比例是 $\rho^2/R^2$，所以半径要取平方根。
-
-代码中 \code{polygon_samples=8} 表示采样八个点，凸包顶点通常更少。校验要求顶点有限、严格凸、逆时针；对每条边检查其余顶点都位于左侧，也能排除自交星形。
-
-不同障碍可以重叠，这仍是合法障碍并集。世界生成器只拒绝无效形状、越界和侵入起终点保护圆的候选。每个形状最多尝试 1000 次，失败明确报告，不偷偷换种子。
-
-\section{先检查可达，再讲最短路径}
-起点、终点各自无碰撞，并不意味着中间一定连通。我们先用粗网格和四邻接 flood fill 检查连通性：从起点所在格入队，反复访问相邻自由格，能到终点格即通过。它不寻找最短路径，也不替代第 11 章的 A*。
-
-不能仅检查格中心。对于宽 $\Delta x$、高 $\Delta y$ 的单元，中心到最远角点的距离为
+把这个比例设为均匀变量 v，再解出半径，就得到
 \begin{equation}
-\epsilon_{\rm cell}=\frac12\sqrt{\Delta x^2+\Delta y^2}.
+\rho=R\sqrt v,\qquad p=c+\rho(\cos\theta,\sin\theta).
 \end{equation}
-中心只有在净空大于 $r+\delta+\epsilon_{\rm cell}$ 时才标为自由。这保证整个单元能容纳圆盘，代价是窄通道可能被保守拒绝。
+例如半径小于 $R/2$ 的内圆只占总面积的 $1/4$，应接收约 $1/4$ 的样本；上式恰好在 $v\leq1/4$ 时进入内圆。
 
-默认检查分辨率 0.25 m。若失败，可以明确减小分辨率或关闭 \code{require_connected} 观察场景；同一个 seed 不会自动被替换成“更好看”的世界。记录失败案例也是学习的一部分。
+生成器还检查候选形状是否有效、是否越界、是否侵入起终点保护圆。重叠障碍按并集处理。
+每个形状最多尝试1000次；空间太拥挤时会报告生成失败，此时可减小数量或尺寸，再用原种子比较变化。
+同一参数、随机种子和标准库环境可复现同一个世界，因此实验时应保存配置和软件环境。
 
-\clearpage
-\section{参数、练习与验收}
-编辑 \path{ros2_ws/src/motion2d_bringup/config/ch03.yaml} 后重启。公共 x/y/radius 同时提供给坐标节点和世界节点；圆盘显示与碰撞不应使用两套不同半径。
+\section{让一个自由网格容纳整个圆盘}
+连接起终点前，先把世界分成小矩形格。若仅检查格中心，机器人移到角落时仍可能碰墙。
+设格中心为 c、宽高为 $\Delta x,\Delta y$，由勾股定理，格内任意点 p 都满足
+\begin{equation}
+\|p-c\|\leq\epsilon_{\rm cell}=\tfrac12\sqrt{\Delta x^2+\Delta y^2}.
+\end{equation}
+设 o 是任意障碍上的点。三角不等式给出
+$\|c-o\|\leq\|c-p\|+\|p-o\|$，移项可得
+$\|p-o\|\geq\|c-o\|-\|p-c\|$。
+再对障碍上的所有 o 取最小值，便有
+\begin{equation}
+d(p)\geq d(c)-\|p-c\|\geq d(c)-\epsilon_{\rm cell}.
+\end{equation}
+因此，只要中心净空满足
+\begin{equation}
+d(c)>r+\delta+\epsilon_{\rm cell},
+\end{equation}
+整个格内的圆心位置都会满足 $d(p)>r+\delta$。代码用 \code{padded_radius} 保存这个额外膨胀后的半径。
+\begin{figure}[ht]
+\centering
+\begin{tikzpicture}[x=1cm,y=1cm,>=Stealth]
+\fill[pale] (0,0) rectangle(2,2);
+\draw[navy,thick] (0,0) rectangle(2,2);
+\draw[tealblue,->] (1,1)--(1.94,1.94);
+\fill[tealblue] (1,1) circle(2pt);
+\node[below left] at (1,1) {$c$};\node[above] at (2,2) {$p$};
+\node[tealblue,left] at (1.2,1.65) {$\epsilon_{\rm cell}$};
+\draw[fill=gray!20] (3,-.2) rectangle(3.4,2.3);
+\node[above] at (3.2,2.3) {障碍};
+\draw[<->,muted] (1,-.45)--(3,-.45) node[midway,below] {$d(c)$};
+\node[anchor=west,align=left] at (4,1) {向角落移动后\\净空最多减少 $\epsilon_{\rm cell}$};
+\end{tikzpicture}
+\caption{格中心的距离需要覆盖格内位移。方格边长0.25 m时，额外留出的距离约为0.177 m。}
+\end{figure}
+
+\section{从自由网格中找出连通区域}
+\code{isReachable} 使用四邻接广度优先搜索，也称 flood fill。先把起点格放入队列并标记已访问；
+每次取出队首，把它上、下、左、右尚未访问的自由格依次加入队尾。像水逐格漫开一样，访问集合逐步覆盖起点所在的连通区域。
+如果取出了终点格，便找到连通关系；若队列先变空，终点在这个网格中不可达。每个格最多入队一次，所以过程会结束。
+
+相邻自由格共享一条边，圆心可以从一个格连续移动到另一个格；上一节的距离条件保护了整段移动。
+这种检查为随机世界筛选提供起点，第11章会用 A* 输出具体路径。
+默认网格分辨率为0.25 m。较大的格需要更大的额外净空，可能把真实窄通道封住；
+减小分辨率后，额外净空随之减小，代价是格数增加。也可关闭 \code{require_connected}，专门观察不连通场景。
+
+\section{动手修改与练习}
+编辑 \path{ros2_ws/src/motion2d_bringup/config/ch03.yaml} 后重启。
+公共 x/y/radius 同时供给坐标节点和世界节点，让显示圆盘与碰撞几何使用同一位置、半径。
 \begin{enumerate}
-\item \textbf{理解：}给一个圆心在自由空间、圆盘却碰撞的例子。解释相切和安全裕量。
-\item \textbf{代码：}实现 \path{exercises/ch03/starter/segment_distance.hpp} 的点线段距离。独立检查覆盖内点、端点外、线段上和退化线段；提示与参考解单独存放。
-\item \textbf{实验：}相同配置和 seed=42 启动两次，比较地图。然后改为 43，再把两类障碍各增至 20 个，记录可达性和起终点净空。
+\item \textbf{手算：}对 $a=(0,0),b=(2,0)$，计算 $p=(-1,1)$ 的最近点和距离；用一阶导数解释为什么选择端点 a。
+\item \textbf{代码：}补全 \path{exercises/ch03/starter/segment_distance.hpp} 的 \code{EXERCISE(ch03-1)}。依次检查垂足在线内、在线外和线段退化三种情况。
+\item \textbf{推导：}把格宽和格高都减半，额外膨胀量变成多少？同样大小的世界，格数变成多少？
+\item \textbf{实验：}用 seed=42 启动两次比较地图，再改为43；随后增加障碍数量，比较连通性随分辨率的变化。保存参数及失败场景，检查瓶颈处的通道宽度。
 \end{enumerate}
-代码练习从仓库根目录单独编译，不依赖 ROS：
+代码练习从仓库根目录独立编译：
 \begin{lstlisting}[language=bash,numbers=none]
 g++ -std=c++17 -I/usr/include/eigen3 \
   -Iexercises/ch03/starter \
   exercises/ch03/check.cpp -o /tmp/ch03_exercise
 /tmp/ch03_exercise
 \end{lstlisting}
-将 starter 替换为 solutions 可以检验参考解。先运行未完成的练习观察失败位置，再修改投影公式；不要通过删掉检查来得到“通过”。
+提示和参考解在同章练习目录。将 starter 替换为 solutions 可运行参考解。
+使用 \code{colcon test} 检查正式库；演示运行时，在工作空间执行
+\code{/usr/bin/python3 ../scripts/check_ch03.py} 核对默认世界消息。
 
-在同一标准库和参数下，固定种子复现相同世界；跨编译器标准库版本不保证分布函数的逐位一致。输出状态说明是否执行了连通性检查，避免把“没有检查”当成“已经通过”。
-
-运行 \code{colcon test} 检查几何、碰撞和可达性；演示运行时，在工作空间执行以下命令核对默认消息：
-\begin{lstlisting}[language=bash,numbers=none]
-/usr/bin/python3 ../scripts/check_ch03.py
-\end{lstlisting}
-RViz2 展示全部障碍、边界和起终点，图形并非激光建图结果。
-
-\begin{notebox}
-\textbf{常见问题}
-
-看不见障碍时，先确认 Fixed Frame 为 map、World 的话题为
-\code{/visualization/world}，再检查节点有没有因无效参数退出。改参数后要重启；
-本章尚不提供运行中重建世界。若可达性检查失败，保留 seed 和配置，再研究分辨率与通道宽度。
-\end{notebox}
-
-\textbf{主机观察：}本机 RViz2 曾在一次较长演示的关闭阶段崩溃，运行显示正常，
-后续复测未再出现，原因尚未确定。启动文件已避免重复关闭事件；若需要分开观察进程，
-用 \code{rviz:=false} 启动节点，再按本章 README 的命令独立打开 RViz2，
-先关闭 RViz2，再停止节点。
