@@ -9,6 +9,10 @@
   <depend>rclcpp</depend>
   <depend>visualization_msgs</depend>
   <depend>eigen</depend>
+  <depend>geometry_msgs</depend>
+  <depend>rosgraph_msgs</depend>
+  <depend>std_srvs</depend>
+  <depend>tf2_ros</depend>
   <test_depend>ament_cmake_gtest</test_depend>
   <export><build_type>ament_cmake</build_type></export>
 </package>

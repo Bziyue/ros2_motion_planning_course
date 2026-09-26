@@ -1,6 +1,6 @@
 \chapter{二维坐标、时间与接口}\label{ch:frames}
 \begin{notebox}
-\textbf{目标}\quad 读懂点的坐标系，正确旋转、平移和求逆。\\
+\textbf{目标}\quad 正确旋转、平移、求逆，并用一个仿真时钟驱动坐标树。\\
 \textbf{先修}\quad 第 1 章；二维向量和正弦、余弦。矩阵只需要理解本章的两行乘法。
 \end{notebox}
 
@@ -29,6 +29,7 @@ R(\psi)=\begin{bmatrix}\cos\psi&-\sin\psi\\ \sin\psi&\cos\psi\end{bmatrix},
 \end{tikzpicture}
 \end{center}
 
+\clearpage
 \section{从公式到一个小函数}
 \code{Pose2D} 只保存一个二维向量和一个角度。几何库不包含 ROS 头文件，可以单独用 C++17 编译、调试和测试。
 \lstinputlisting[language=C++,linerange={rotation_begin-rotation_end},
@@ -63,7 +64,68 @@ colcon test-result --verbose
 \section{练习：自己写一次逆变换}
 \begin{enumerate}
 \item \textbf{推导：}为何逆变换中不能只把 t 取负？用 $\psi=90^\circ,t=(1,2)$ 给一个反例。
-\item \textbf{代码：}补完 \code{exercises/ch02/starter/inverse_point.hpp} 的标记函数。它复用正式库的 \code{Pose2D}，检查包括两个旋转方向。
+\item \textbf{代码：}补完 \path{exercises/ch02/starter/inverse_point.hpp} 的标记函数。它复用正式库的 \code{Pose2D}，检查包括两个旋转方向。
 \item \textbf{实验：}把示例朝向换成 $-90^\circ$，预测地图点，再运行核对。还可以将激光外参设为机体前方 0.5 m，手算其地图位置。
 \end{enumerate}
 独立编译命令、分级提示和参考答案位于同章习题 README。数学库的自动测试另外覆盖手算变换、传感器偏移、200 次固定种子的往返和角度边界。
+
+\section{仿真时间与真实等待时间}
+假设每个仿真步长是 $\Delta t=0.005$ s。第 k 步的仿真时间为
+\begin{equation}
+t_k=k\Delta t.
+\end{equation}
+即使电脑偶尔调度得慢，状态仍然只前进一个固定步长。运行速度可能变慢，但数学实验的步长没有偷偷改变。实时性能是另一项需要测量的性质。
+
+\code{SimClock} 用整数 tick 和整数纳秒保存时间，避免反复执行浮点加法。暂停时自动 advance 返回 false，单步只在暂停时允许执行：
+\lstinputlisting[language=C++,linerange={clock_begin-clock_end},
+  includerangemarker=false]{../ros2_ws/src/motion2d/src/sim/sim_clock.cpp}
+本章由 \code{frame_demo_node} 唯一发布 \code{/clock}；RViz2 和节点都设置 \code{use_sim_time=true}。
+暂停后仍会重复发送相同时间值，便于新订阅者获得当前时间，但状态和时间戳不再前进。不要把消息数量误认为仿真步数。
+
+\section{把坐标放到 ROS 的 TF 树中}
+\[
+\texttt{map}\to\texttt{odom}\to\texttt{base\_link}
+\to\{\texttt{laser},\texttt{imu\_link}\}.
+\]
+本章 map 到 odom 为单位变换；传感器位于圆心、与机体系对齐，也是单位变换。这三条静态边通过 \code{/tf_static} 发布。odom 到 base\_link 是带采样时刻的动态边，通过 \code{/tf} 发布。
+
+为观察旋转效果，示例固定圆心 $(1,2)$，采用解析朝向
+\begin{equation}
+\psi(t)=\frac{\pi}{2}+0.2t.
+\end{equation}
+这是一套坐标演示装置，还没有受力动力学和真实激光模型。图中的蓝色箭头只是 laser 帧中长度为 2 m 的向量。
+
+ROS 使用四元数表示旋转。平面 yaw 对应
+$(q_x,q_y,q_z,q_w)=(0,0,\sin(\psi/2),\cos(\psi/2))$。
+发布时刻直接取仿真时钟，不能换成回调到达的真实时间：
+\lstinputlisting[language=C++,linerange={frame_begin-frame_end},
+  includerangemarker=false]{../ros2_ws/src/motion2d/src/nodes/frame_demo_node.cpp}
+
+\section{暂停、单步与重置实验}
+停止第 1 章程序，重新构建并加载环境后启动：
+\begin{lstlisting}[language=bash,numbers=none]
+ros2 launch motion2d_bringup ch02.launch.py
+\end{lstlisting}
+另一个终端同样加载环境后调用：
+\begin{lstlisting}[language=bash,numbers=none]
+ros2 service call /sim/pause std_srvs/srv/SetBool "{data: true}"
+ros2 service call /sim/step std_srvs/srv/Trigger "{}"
+ros2 service call /sim/reset std_srvs/srv/Trigger "{}"
+ros2 service call /sim/pause std_srvs/srv/SetBool "{data: false}"
+\end{lstlisting}
+暂停时圆盘朝向和箭头冻结；每次单步前进 5 ms；reset 回到时间零、初始朝向，并保持暂停。运行中请求单步会明确失败，防止把手动步数混入自动积分。
+
+在工作空间运行 \code{/usr/bin/python3 ../scripts/check_ch02.py} 可检查唯一 TF 父帧、解析朝向、冻结时钟、5 ms 单步、reset 和恢复运行。它会改变演示状态，仅用于本章实验。
+
+\begin{notebox}
+重置会使仿真时间向后跳，TF 监听器会清空缓存，这是新试验的正常边界。本节点每隔 1 s 墙钟时间重发静态外参，暂停时同时重发当前动态边，使监听器能在 reset 后恢复。状态并未因此前进。后续 reset 还须清理估计和传感器历史。
+\end{notebox}
+
+\subsection*{时间练习}
+先暂停，再连续调用 step 十次，预测仿真时间增量和朝向增量，之后查看 \code{/clock} 和 TF 核对。标准答案是 0.05 s 与 0.01 rad。改变 YAML 中的 dt 后要重新推导；不应继续照搬默认值的检查脚本。
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=.86\linewidth]{figures/ch02_rviz.png}
+\caption{重置并恢复运行后的主机 RViz2。圆盘与机体系向量正确显示，TF 状态正常。}
+\end{figure}

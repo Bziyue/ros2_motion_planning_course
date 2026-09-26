@@ -1,0 +1,10 @@
+frame_demo:
+  ros__parameters:
+    use_sim_time: true
+    dt: 0.005       # seconds per tick
+    start_paused: false
+    x: 1.0         # metres, odom frame
+    y: 2.0
+    yaw: 1.5707963267948966  # radians, +90 degrees
+    yaw_rate: 0.2   # rad/s; coordinate illustration, not robot dynamics
+    radius: 0.2

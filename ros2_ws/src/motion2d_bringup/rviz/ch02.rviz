@@ -1,0 +1,49 @@
+Panels:
+  - Class: rviz_common/Displays
+    Name: Displays
+Visualization Manager:
+  Class: ""
+  Global Options:
+    Background Color: 239; 246; 247
+    Fixed Frame: map
+    Frame Rate: 30
+  Displays:
+    - Class: rviz_default_plugins/Grid
+      Name: Grid
+      Enabled: true
+      Cell Size: 0.5
+      Plane Cell Count: 30
+      Color: 165; 188; 195
+      Alpha: 0.6
+    - Class: rviz_default_plugins/MarkerArray
+      Name: Body and example ray
+      Enabled: true
+      Topic:
+        Value: /visualization/frames
+        Reliability Policy: Reliable
+        Durability Policy: Transient Local
+        History Policy: Keep Last
+        Depth: 1
+    - Class: rviz_default_plugins/Axes
+      Name: Map axes
+      Enabled: true
+      Reference Frame: map
+      Length: 0.6
+      Radius: 0.025
+    - Class: rviz_default_plugins/Axes
+      Name: Body axes
+      Enabled: true
+      Reference Frame: base_link
+      Length: 0.6
+      Radius: 0.025
+  Views:
+    Current:
+      Class: rviz_default_plugins/TopDownOrtho
+      Target Frame: <Fixed Frame>
+      Scale: 90
+      Angle: 0
+      X: 1
+      Y: 2
+Window Geometry:
+  Width: 1100
+  Height: 780

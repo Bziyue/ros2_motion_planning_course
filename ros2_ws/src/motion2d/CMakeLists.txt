@@ -5,8 +5,12 @@ find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(visualization_msgs REQUIRED)
 find_package(Eigen3 REQUIRED)
+find_package(geometry_msgs REQUIRED)
+find_package(rosgraph_msgs REQUIRED)
+find_package(std_srvs REQUIRED)
+find_package(tf2_ros REQUIRED)
 
-add_library(motion2d_core src/geometry/se2.cpp)
+add_library(motion2d_core src/geometry/se2.cpp src/sim/sim_clock.cpp)
 target_compile_features(motion2d_core PUBLIC cxx_std_17)
 target_compile_options(motion2d_core PRIVATE -Wall -Wextra -Wpedantic)
 target_include_directories(motion2d_core PUBLIC
@@ -31,10 +35,22 @@ target_link_libraries(hello_scene_node PRIVATE
   rclcpp::rclcpp visualization_msgs::visualization_msgs__rosidl_typesupport_cpp)
 install(TARGETS hello_scene_node DESTINATION lib/motion2d)
 
+add_executable(frame_demo_node src/nodes/frame_demo_node.cpp)
+target_compile_features(frame_demo_node PRIVATE cxx_std_20)
+target_compile_options(frame_demo_node PRIVATE -Wall -Wextra -Wpedantic)
+target_link_libraries(frame_demo_node PRIVATE motion2d_core rclcpp::rclcpp tf2_ros::tf2_ros
+  visualization_msgs::visualization_msgs__rosidl_typesupport_cpp
+  geometry_msgs::geometry_msgs__rosidl_typesupport_cpp
+  rosgraph_msgs::rosgraph_msgs__rosidl_typesupport_cpp
+  std_srvs::std_srvs__rosidl_typesupport_cpp)
+install(TARGETS frame_demo_node DESTINATION lib/motion2d)
+
 if(BUILD_TESTING)
   find_package(ament_cmake_gtest REQUIRED)
   ament_add_gtest(test_se2 test/test_se2.cpp)
   target_link_libraries(test_se2 motion2d_core)
+  ament_add_gtest(test_sim_clock test/test_sim_clock.cpp)
+  target_link_libraries(test_sim_clock motion2d_core)
 endif()
 
 ament_package()

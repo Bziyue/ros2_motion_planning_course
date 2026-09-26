@@ -6,6 +6,8 @@
 
 第 01 章已实现：[运行说明](chapters/ch01/README.md)、[习题](exercises/ch01/README.md)、[实际教材 PDF](output/pdf/course.pdf)。
 
+第 02 章已实现：[SE(2)、时钟与 TF](chapters/ch02/README.md)、[习题](exercises/ch02/README.md)。启动入口为 `ch02.launch.py`。
+
 ~~~bash
 source /opt/ros/lyrical/setup.bash
 cd /home/zdp/ForCodex/ros2_motion_planning_course/ros2_ws
