@@ -15,7 +15,7 @@ find_package(nav_msgs REQUIRED)
 find_package(motion2d_interfaces REQUIRED)
 
 add_library(motion2d_core
-  src/dynamics/omni_flatness.cpp
+  src/dynamics/omni_flatness.cpp src/dynamics/ackermann_flatness.cpp src/sim/ackermann_model.cpp
   src/geometry/se2.cpp src/geometry/obstacles.cpp
   src/sim/sim_clock.cpp src/sim/world.cpp src/sim/world_generator.cpp
   src/sim/ideal_model.cpp src/sim/differential_drive.cpp src/sim/swept_collision.cpp src/sim/velocity_model.cpp
@@ -53,6 +53,10 @@ if(MOTION2D_ENABLE_CUDA)
   target_link_libraries(lidar_cuda_benchmark PRIVATE motion2d_cuda CUDA::cudart_static)
   install(TARGETS lidar_cuda_benchmark DESTINATION lib/motion2d)
 endif()
+
+add_executable(ackermann_demo src/examples/ackermann_demo.cpp)
+target_link_libraries(ackermann_demo PRIVATE motion2d_core)
+install(TARGETS ackermann_demo DESTINATION lib/motion2d)
 
 add_executable(force_planning_demo src/examples/force_planning_demo.cpp)
 target_link_libraries(force_planning_demo PRIVATE motion2d_core)
@@ -262,6 +266,8 @@ install(TARGETS bias_walk_demo DESTINATION lib/motion2d)
 
 if(BUILD_TESTING)
   find_package(ament_cmake_gtest REQUIRED)
+  ament_add_gtest(test_ackermann test/test_ackermann.cpp)
+  target_link_libraries(test_ackermann motion2d_core)
   ament_add_gtest(test_force_planning test/test_force_planning.cpp)
   target_link_libraries(test_force_planning motion2d_core)
   ament_add_gtest(test_omni_flatness test/test_omni_flatness.cpp)

@@ -19,3 +19,5 @@ ch04-3：
 ch04-4：theta=omega*t，所以对 sin(theta)/cos(theta) 求时间导数还要乘 omega。加速度模长为 r*omega²；改变 omega 的正负不改变这个模长。
 
 ch04-5：先求 dJ/dF，再乘 dF/da；不要把质量消掉。yaw 是独立平坦输出，二维位置不能恢复它。
+
+ch04-6：分子导数为 cross(v,j)，因为 cross(a,a)=0；分母导数使用 d|v|/dt=dot(v,a)/|v|。必须同时检查非圆轨迹。

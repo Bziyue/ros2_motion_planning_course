@@ -59,3 +59,15 @@ g++ -std=c++17 -I/usr/include/eigen3 -Iexercises/ch04/starter exercises/ch04/che
 
 参考解将 `starter` 改为 `solutions`。评分：两轴中央差分误差均小于 1e-8；解释质量与阻尼的作用。
 实验：运行 `ros2 run motion2d flatness_demo`，比较相同轨迹在两种质量下的力。提示与答案仍分开。
+
+## ch04-6 阿克曼曲率导数
+
+完成 `starter/curvature_rate.hpp`，对非零 v 推导 kappa=cross(v,a)/|v|³ 的时间导数。
+
+```bash
+g++ -std=c++17 -I/usr/include/eigen3 -Iexercises/ch04/starter exercises/ch04/check_ackermann.cpp -o /tmp/ch04_ackermann
+/tmp/ch04_ackermann
+```
+
+参考目录 solutions；误差需 <1e-8。实验运行 `ros2 run motion2d ackermann_demo`，推导其转角与力。
+解释：为何零速处不应用 epsilon 偷换分母？为何减速不能修正过小的转弯半径？

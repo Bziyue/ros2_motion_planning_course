@@ -55,3 +55,5 @@ Felzenszwalb 与 Huttenlocher，*Distance Transforms of Sampled Functions*，The
 
 - [GCOPTER flatness.hpp](https://github.com/ZJU-FAST-Lab/GCOPTER/blob/e0444f6d47b84f972ced91746b05feb36ce1fd4f/gcopter/include/gcopter/flatness.hpp) 与同版本 gcopter.hpp：正向物理映射、向量--雅可比乘积、固定归一化采样点的系数/时长链式法则。参考锁定 `e0444f6d47b84f972ced91746b05feb36ce1fd4f`，临时克隆保留 MIT LICENSE。课程按二维方程独立实现，未复制三维姿态代码。
 - [Faessler, Franchi, Scaramuzza: Differential Flatness of Quadrotor Dynamics Subject to Rotor Drag (2018)](https://arxiv.org/abs/1712.02402)：三维无人机位置/yaw 平坦输出与旋翼阻力；课程地面圆盘没有竖直推力和姿态倾斜自由度，不套用三维可行性结论。
+
+阿克曼平坦输出核对 [Python Control 官方 kinematic car 示例（0.9.4）](https://python-control.readthedocs.io/en/0.9.4/kincar-flatsys.html)，采用后轴中点与前进局部支路。课程独立加入纵向力/阻尼、转向状态/速率以及对应解析反向；不复制上游代码，不把理想无侧滑模型称为轮胎动力学。示例源于 Åström/Murray《Feedback Systems》第8章。

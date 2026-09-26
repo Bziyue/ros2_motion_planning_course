@@ -491,3 +491,107 @@ g++ -std=c++17 -I/usr/include/eigen3 -Iexercises/ch04/starter \
 \textbf{实验：}保持同一 $p(t)$，将质量翻倍。无阻尼时力翻倍；有阻尼时总力通常
 不会恰好翻倍。用中央差分检查反向梯度，并解释为什么质量必须出现在规划约束里。
 第 15--16 章将这些偏导继续传到多项式系数、路点和时长。
+
+\clearpage
+\section{补充：阿克曼车的状态与控制量}\label{sec:ackermann}
+将前后轮各等效成一个轮子，得到无侧滑自行车模型。选后轴中点为参考点 $p$，
+并将课程的\textbf{保守圆盘中心、激光与 IMU 都放在这里}；不再把后轴点误叫作车身几何中心。
+圆盘半径仍可配置，若要包住实际车身，应把前悬和宽度也算进去。
+本模型不是轮胎侧偏或完整车身动力学。
+\begin{equation}
+x=(p_x,p_y,\psi,s,\delta),\qquad u=(F,r_\delta).
+\end{equation}
+$s$ 是有符号纵向速度，$\delta$ 是等效前轮转角；$F$ 为纵向力（N），
+$r_\delta$ 为转向角速度（rad/s）。轴距 $L$、质量 $m$、阻尼 $c$ 为固定参数：
+\begin{align}
+\dot p&=s(\cos\psi,\sin\psi)^T,&
+\dot\psi&=\frac{s\tan\delta}{L},\\
+\dot s&=\frac{F-cs}{m},&\dot\delta&=r_\delta.
+\end{align}
+这种输入让质量真正参与加减速，也可以约束转向速率。车不能像全向圆盘一样横移，
+停车时转动前轮也不会让车身原地旋转。
+
+\begin{center}
+\begin{tikzpicture}[x=1.35cm,y=1.35cm]
+\draw[tealblue,dashed] (0,0) circle (1.6);
+\draw[navy,thick,rounded corners] (-.45,-.38) rectangle (1.4,.38);
+\draw[navy,very thick] (-.25,0)--(.25,0);
+\draw[navy,dashed] (1.1,-.38)--(1.1,.38);
+\begin{scope}[shift={(1.1,0)},rotate=25]
+\draw[tealblue,line width=2pt] (-.23,0)--(.23,0);
+\end{scope}
+\fill[tealblue] (0,0) circle (2pt);
+\draw[-{Stealth},navy] (0,0)--(.72,0);
+\draw[<->,navy] (0,.67)--(1.1,.67) node[midway,above] {$L$};
+\node[below] at (0,-1.72) {后轴点 $p$：传感器与圆盘中心};
+\node[above] at (0,1.65) {虚线圆为碰撞包络，不是车轮轨迹};
+\end{tikzpicture}
+\end{center}
+
+\textbf{积分与传感器。}纵向速度使用带阻尼解析解，转角在保持输入期间线性变化，
+位姿用 RK4 积分。默认短 tick，并做步长减半对照；未宣称有限步长积分精确。
+\code{ackermannKinematics} 直接给出
+$a=\dot s\,e+s\dot\psi\,e_\perp$，供 IMU 使用，不能只保留纵向加速度而漏掉转弯向心项。
+输入先限幅；转向速率还需保证整个 tick 内角度不越界。
+
+\clearpage
+\section{阿克曼的平坦输出与正向恢复}
+选择 $y=(p_x,p_y)$，先讨论\textbf{前进且速度非零}的局部支路。记
+$v=\dot p,a=\ddot p,j=p^{(3)}$，二维叉积 $[v,a]=v_xa_y-v_ya_x$，并令
+$n=\|v\|,b=v^Ta,h=[v,a]$。则
+\begin{align}
+s&=n,&\psi&=\operatorname{atan2}(v_y,v_x),\\
+\dot\psi&=h/n^2,&\kappa&=h/n^3,\\
+\delta&=\arctan(L\kappa),&F&=m b/n+cn,\\
+\dot\kappa&=[v,j]/n^3-3hb/n^5,&
+r_\delta&=\frac{L\dot\kappa}{1+(L\kappa)^2}.
+\end{align}
+全部状态和两个输入都由位置及其有限阶导数恢复，因此带纵向惯性和转向状态的模型
+在这个支路上仍然微分平坦。曲率单位 $1/\mathrm m$；侧向加速度为 $a_\perp=h/n$。
+\lstinputlisting[language=C++,linerange={ackermann_forward_begin-ackermann_forward_end},
+ includerangemarker=false]{../ros2_ws/src/motion2d/src/dynamics/ackermann_flatness.cpp}
+
+\textbf{手算圆轨迹。}半径 $R$、速度 $s$ 的匀速圆有 $\kappa=1/R$，
+$\delta=\arctan(L/R)$，$r_\delta=0$，$F=cs$。下面的可运行例子把恢复的输入送入实际积分器，
+与圆的解析位置比较：
+\begin{lstlisting}[language=bash,numbers=none]
+ros2 run motion2d ackermann_demo
+\end{lstlisting}
+默认 $L=0.3$ m、$R=1.2$ m、$s=0.6$ m/s、$c=0.15$ kg/s，故转角约 0.245 rad，
+力 0.09 N。改变质量不会改变\emph{匀速}圆上的纵向阻尼补偿力；加速段才体现质量差异。
+
+\clearpage
+\section{零速奇异性与反向梯度}
+上页公式在 $n=0$ 时不能使用。给分母加一个小数会掩盖奇异性，还可能在停车处恢复错误的
+朝向和转角。本课程的直接平坦映射明确拒绝近零切向量；植物模型本身则可以正常停车、起步。
+倒车时必须另选有符号速度支路，不能直接把前进的 atan2 公式照搬过去。
+
+第16章的起停规划保留一条正则几何曲线 $q(u)$，满足 $q'(u)\ne0$，再用
+$u=h(t/T)$ 安排进度；停车时 $\dot u=0$，但几何切向和曲率仍然保存着端点的朝向与转角。
+这是对\textbf{特定已知路径}使用连续极限，不是声称所有零速状态都消除了平坦奇异性。
+
+\textbf{反向如何写？}沿正向依赖倒序求偏导。例如令 $D=1+(L\kappa)^2$，
+转角和转向速率的偏导贡献为
+\begin{align}
+\overline{\dot\kappa}&\mathrel{+}=\frac{L}{D}\bar r_\delta,\\
+\bar\kappa&\mathrel{+}=\frac{L}{D}\bar\delta
+ -\frac{2L^3\kappa\dot\kappa}{D^2}\bar r_\delta.
+\end{align}
+接着把偏导传回 $h,b,n,[v,j]$，最后传回 $v,a,j$。
+\code{ackermannBackward} 实现全部物理量的解析向量--雅可比乘积；单元测试对每个
+输入分量做中央差分，还把恢复的状态与输入送回运动方程核对 $v,a,\ddot\psi$。
+近零速度和 yaw 跨 $\pi$ 的分支跳变不属于这个局部差分测试域。
+
+\textbf{练习 ch04-6。}推导 $\dot\kappa$ 时，为什么 $[a,a]=0$，但分母求导项不能省？
+完成代码并运行：
+\begin{lstlisting}[language=bash,numbers=none]
+g++ -std=c++17 -I/usr/include/eigen3 -Iexercises/ch04/starter \
+  exercises/ch04/check_ackermann.cpp -o /tmp/ch04_ackermann
+/tmp/ch04_ackermann
+\end{lstlisting}
+将 starter 改成 solutions 可核对答案。不要仅测试匀速圆：它的曲率导数恰为零，
+即使写成常数零也可能蒙混过关。练习使用同时改变速率和曲率的非退化导数。
+
+\textbf{实验：}比较 0.02 s 与两个 0.01 s 的保持输入积分；再固定路径、只增加时长。
+解释为什么力、侧向加速度和转向速率可以下降，而最大转角不会因此变小。
+后续专用规划器将检查曲率可行性；不能把全向轨迹直接交给小车追踪。
