@@ -23,3 +23,14 @@ g++ -std=c++17 -Iexercises/ch05/starter exercises/ch05/check_angles.cpp -o /tmp/
 ~~~
 
 参考解仍在 solutions。合格标准是全部角度检查通过，并能解释 scan_time=0.1 与 time_increment=0 分别代表什么。
+
+7. 代码 ch05-3：补全 noisy_range.hpp。保留 NaN/+inf；只给有效回波加误差，越出量程后标为 NaN，不夹断。
+8. 推导：sigma 翻倍时方差怎样变化？为何用平均残差验收时，容差应除以样本数的平方根？
+9. 实验：运行 lidar_noise_demo 与 ch05_noise_lab.yaml 的 ROS 验收。记录标准差、种子、样本数、均值与实测标准差。思考近量程边界的截尾会怎样改变结果。
+
+~~~bash
+g++ -std=c++17 -Iexercises/ch05/starter exercises/ch05/check_noise.cpp -o /tmp/ch05_noise
+/tmp/ch05_noise
+~~~
+
+判定要求：普通回波、上下边界、两类特殊值均通过。不要用不同种子的两次扫描差异直接衡量 CPU/CUDA 的几何误差。

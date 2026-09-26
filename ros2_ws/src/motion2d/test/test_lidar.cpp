@@ -95,3 +95,80 @@ TEST(Lidar, ScanPeriodIsAlignedToSimulatedTicks)
   EXPECT_THROW(lidarPeriodTicks(201, .005), std::invalid_argument);
   EXPECT_THROW(lidarPeriodTicks(0, .005), std::invalid_argument);
 }
+
+TEST(LidarNoise, SigmaZeroPreservesValuesAndRandomState)
+{
+  LidarConfig config;
+  std::mt19937 random(42), untouched(42);
+  std::vector<float> ranges{1, 5, 10};
+  const auto original = ranges;
+  addRangeNoise(ranges, config, random);
+  EXPECT_EQ(ranges, original);
+  EXPECT_EQ(random, untouched);
+  config.range_stddev = -1;
+  EXPECT_THROW(validateLidarConfig(config), std::invalid_argument);
+}
+
+TEST(LidarNoise, InvalidAndAbsentReturnsDoNotConsumeNoise)
+{
+  LidarConfig config;
+  config.range_stddev = .01;
+  std::vector<float> ranges{std::numeric_limits<float>::infinity(),
+    std::numeric_limits<float>::quiet_NaN()};
+  std::mt19937 random(42), untouched(42);
+  addRangeNoise(ranges, config, random);
+  EXPECT_GT(ranges[0], 0);
+  EXPECT_TRUE(std::isinf(ranges[0]));
+  EXPECT_TRUE(std::isnan(ranges[1]));
+  EXPECT_EQ(random, untouched);
+}
+
+TEST(LidarNoise, NoisyOutOfRangeReturnsAreInvalidNotFreeSpace)
+{
+  LidarConfig config;
+  config.range_min = 1;
+  config.range_max = 10;
+  EXPECT_TRUE(std::isnan(perturbRange(1.01F, -.02, config)));
+  EXPECT_TRUE(std::isnan(perturbRange(9.99F, .02, config)));
+  EXPECT_FLOAT_EQ(perturbRange(2, -1, config), 1);
+  EXPECT_FLOAT_EQ(perturbRange(9, 1, config), 10);
+  EXPECT_FLOAT_EQ(perturbRange(5, .01, config), 5.01F);
+}
+
+TEST(LidarNoise, SeedAndResetReproduceTheSequence)
+{
+  LidarConfig config;
+  config.range_stddev = .01;
+  std::mt19937 first(4242), second(4242);
+  std::vector<float> a(9, 5), b(9, 5), later(9, 5), replay(9, 5);
+  addRangeNoise(a, config, first);
+  addRangeNoise(b, config, second);
+  EXPECT_EQ(a, b);
+  addRangeNoise(later, config, first);
+  EXPECT_NE(a, later);
+  first.seed(4242);
+  addRangeNoise(replay, config, first);
+  EXPECT_EQ(a, replay);
+}
+
+TEST(LidarNoise, GaussianMeanAndVarianceAwayFromRangeLimits)
+{
+  LidarConfig config;
+  config.range_stddev = .03;
+  std::mt19937 random(4242);
+  constexpr int n = 50000;
+  std::vector<float> ranges(n, 5);
+  addRangeNoise(ranges, config, random);
+  double sum = 0, squared_sum = 0;
+  for (float range : ranges) {
+    const double error = range - 5.0;
+    ASSERT_TRUE(std::isfinite(range));
+    sum += error;
+    squared_sum += error * error;
+  }
+  const double mean = sum / n;
+  const double variance = squared_sum / n - mean * mean;
+  EXPECT_LT(std::abs(mean), 5 * config.range_stddev / std::sqrt(n));
+  EXPECT_NEAR(variance, config.range_stddev * config.range_stddev,
+    .03 * config.range_stddev * config.range_stddev);
+}

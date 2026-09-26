@@ -16,10 +16,12 @@ void validateLidarConfig(const LidarConfig & c)
   if (c.beams < 2 || c.beams > 100000 || !std::isfinite(c.angle_min) ||
     !std::isfinite(c.fov) || c.fov <= 0 || c.fov > kTwoPi + 1e-12 ||
     !std::isfinite(c.range_min) || !std::isfinite(c.range_max) ||
+    !std::isfinite(c.range_stddev) || c.range_stddev < 0 ||
     c.range_min < 0 || c.range_max <= c.range_min ||
     c.range_max > std::numeric_limits<float>::max())
   {
-    throw std::invalid_argument("Lidar: beams in [2,100000], FOV in (0,2*pi], 0<=min<max");
+    throw std::invalid_argument(
+            "Lidar: beams in [2,100000], FOV in (0,2*pi], 0<=min<max, finite sigma>=0");
   }
 }
 
@@ -64,4 +66,25 @@ std::int64_t lidarPeriodTicks(double rate, double dt)
   }
   return ticks;
 }
+
+// range_noise_begin
+float perturbRange(float range, double error, const LidarConfig & config)
+{
+  if (!std::isfinite(range)) {return range;}
+  const double measured = static_cast<double>(range) + error;
+  if (measured < config.range_min || measured > config.range_max) {
+    return std::numeric_limits<float>::quiet_NaN();
+  }
+  return static_cast<float>(measured);
+}
+
+void addRangeNoise(std::vector<float> & ranges, const LidarConfig & config, std::mt19937 & random)
+{
+  if (config.range_stddev == 0.0) {return;}
+  std::normal_distribution<double> gaussian(0.0, config.range_stddev);
+  for (auto & range : ranges) {
+    if (std::isfinite(range)) {range = perturbRange(range, gaussian(random), config);}
+  }
+}
+// range_noise_end
 }  // namespace motion2d

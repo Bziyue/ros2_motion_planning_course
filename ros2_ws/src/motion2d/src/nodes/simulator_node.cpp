@@ -3,6 +3,7 @@
 #include <cmath>
 #include <deque>
 #include <memory>
+#include <limits>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -113,7 +114,14 @@ private:
     lidar_config_.fov = declare_parameter("lidar.fov", lidar_config_.fov);
     lidar_config_.range_min = declare_parameter("lidar.range_min", lidar_config_.range_min);
     lidar_config_.range_max = declare_parameter("lidar.range_max", lidar_config_.range_max);
+    lidar_config_.range_stddev = declare_parameter("lidar.range_stddev", 0.0);
     validateLidarConfig(lidar_config_);
+    const auto seed = declare_parameter<std::int64_t>("lidar.noise_seed", 4242);
+    if (seed < 0 || seed > std::numeric_limits<std::uint32_t>::max()) {
+      throw std::invalid_argument("Lidar noise_seed must fit an unsigned 32-bit integer");
+    }
+    lidar_seed_ = static_cast<std::uint32_t>(seed);
+    lidar_random_.seed(lidar_seed_);
     const double rate = declare_parameter("lidar.rate", 10.0);
     lidar_period_ns_ = lidarPeriodTicks(rate, dt()) * clock_.stepDuration().count();
     if (declare_parameter<std::string>("lidar.backend", "cpu") != "cpu" ||
@@ -126,15 +134,18 @@ private:
       beam_pub_ = create_publisher<visualization_msgs::msg::MarkerArray>(
         "/visualization/lidar", rclcpp::QoS(1).reliable().transient_local());
     }
-    RCLCPP_INFO(get_logger(), "CPU snapshot lidar: %d beams, %.3f Hz, range [%.3f, %.3f] m",
-      lidar_config_.beams, rate, lidar_config_.range_min, lidar_config_.range_max);
+    RCLCPP_INFO(get_logger(),
+      "CPU snapshot lidar: %d beams, %.3f Hz, range [%.3f, %.3f] m, sigma=%.4f m, seed=%u",
+      lidar_config_.beams, rate, lidar_config_.range_min, lidar_config_.range_max,
+      lidar_config_.range_stddev, lidar_seed_);
   }
 
   void publishLidarIfDue()
   {
     const auto now = clock_.nanoseconds();
     if (!scan_pub_ || now == last_scan_ns_ || now % lidar_period_ns_ != 0) {return;}
-    const auto ranges = scanCpu(world_, state_.pose, lidar_config_);
+    auto ranges = scanCpu(world_, state_.pose, lidar_config_);
+    addRangeNoise(ranges, lidar_config_, lidar_random_);
     const auto scan = toLaserScan(lidar_config_, ranges,
       rclcpp::Time(now, RCL_ROS_TIME), lidar_period_ns_ * 1e-9);
     scan_pub_->publish(scan);
@@ -326,6 +337,7 @@ private:
         publishStaticFrames();
         publishState();
         last_scan_ns_ = -1;
+        lidar_random_.seed(lidar_seed_);
         publishLidarIfDue();
         publishMarkers();
         response->success = true;
@@ -442,6 +454,8 @@ private:
   Wrench2D wrench_command_;
   InertialParameters inertia_;
   LidarConfig lidar_config_;
+  std::uint32_t lidar_seed_ = 4242;
+  std::mt19937 lidar_random_;
   std::int64_t lidar_period_ns_ = 1, last_scan_ns_ = -1;
   double radius_, command_timeout_, speed_max_, yaw_rate_max_;
   double reference_radius_ = 1.0, reference_omega_ = .4;

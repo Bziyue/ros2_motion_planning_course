@@ -1,5 +1,6 @@
 #pragma once
 #include <cstdint>
+#include <random>
 #include <vector>
 #include "motion2d/geometry/se2.hpp"
 #include "motion2d/sim/world.hpp"
@@ -13,6 +14,7 @@ struct LidarConfig
   double angle_min = -kPi;
   double fov = 2.0 * kPi;
   double range_min = 0.05, range_max = 10.0;
+  double range_stddev = 0.0;  ///< Per valid beam/sample, in m; zero disables noise.
 };
 
 /** @brief Validate once at the configuration boundary; throws invalid_argument. */
@@ -41,4 +43,20 @@ std::vector<float> scanCpu(const World2D & world, const Pose2D & pose,
  * a 7 Hz request to another frequency. Nonaligned scheduling needs interpolation.
  */
 std::int64_t lidarPeriodTicks(double rate, double dt);
+
+/** @brief Add one supplied distance error; preserve +inf/NaN, reject out-of-range results.
+ * @param range Encoded noiseless return (m).
+ * @param error Finite additive error (m), usable for CPU/CUDA paired comparisons.
+ * @pre Valid config; range is produced by scanCpu or the same encoding contract.
+ * @return Finite measured distance, unchanged special value, or NaN after crossing a limit.
+ */
+float perturbRange(float range, double error, const LidarConfig & config);
+
+/** @brief Apply independent Gaussian errors to finite returns only, in place.
+ * @param random Dedicated lidar random stream; reset its seed to replay a trial.
+ * @pre Valid config. range_stddev is a per-sample standard deviation, not a density.
+ * @details Zero sigma leaves values and random state unchanged. Reproducibility
+ * assumes the same config, sample order and standard-library implementation.
+ */
+void addRangeNoise(std::vector<float> & ranges, const LidarConfig & config, std::mt19937 & random);
 }  // namespace motion2d

@@ -178,7 +178,7 @@ ros2 launch motion2d_bringup ch05.launch.py
 \begin{figure}[ht]
 \centering
 \includegraphics[width=.92\linewidth]{figures/ch05_scan_rviz.png}
-\caption{主机实际扫描。橙色线是有效测距射线，红点是 LaserScan 命中点；
+\caption{关闭测距噪声的主机基准画面。橙色线是有效测距射线，红点是 LaserScan 命中点；
 淡蓝线只表示量程内无回波，障碍后的空间仍不可见。}
 \end{figure}
 
@@ -189,3 +189,80 @@ ros2 launch motion2d_bringup ch05.launch.py
 \textbf{验收实验：}检查脚本会暂停、重置、逐步推进并核对 TF、角度、QoS 与光束数量。
 默认 19 步内没有第二帧，第 20 步的采样时间为 0.1 s；尝试改为 20 Hz 再手动核对间隔。
 暂停时晚加入的 LaserScan 订阅者不会收到历史帧，恢复运行后等待下一帧即可。
+
+\clearpage
+\section{高斯测距噪声：先有回波，再加误差}
+对真实量程内的有效回波 $r_i$，加入独立的零均值高斯误差：
+\begin{equation}
+\widetilde r_i=r_i+\epsilon_i,\qquad
+\epsilon_i\sim\mathcal N(0,\sigma_r^2).
+\end{equation}
+$\sigma_r$ 是每束、每次采样的标准差，单位 m，不是方差，也不是噪声密度。
+默认 \code{lidar.range_stddev=0.01} m；设为零即可回到精确几何基准。
+课程暂不模拟反射率、入射角、距离相关噪声或多径。
+
+无回波的 $+\infty$ 和盲区 NaN 保持原值，不凭空生成障碍。有效距离加噪后若越出量程，
+记为 NaN；既不夹到最大量程形成假墙，也不改为 $+\infty$ 暗示自由空间。
+
+\par\noindent\begin{minipage}{\linewidth}
+\lstinputlisting[language=C++,linerange={range_noise_begin-range_noise_end},
+  includerangemarker=false]{../ros2_ws/src/motion2d/src/sim/lidar_cpu.cpp}
+\end{minipage}\par
+
+几何函数与加噪函数分开，CPU 和未来 CUDA 可先比较无噪声距离，
+再用同一组误差比较输出。\code{perturbRange} 接受给定误差，便于这种成对实验。
+雷达使用独立随机流，\code{lidar.noise_seed=4242} 不会影响世界种子。
+reset 重置这个随机流；同一配置、轨迹、采样顺序和标准库下可重放。
+改变束数会改变雷达的随机数消费顺序，但不会重新生成障碍物。
+
+\textbf{代码练习 ch05-3：}补完 \path{exercises/ch05/starter/noisy_range.hpp}，
+正确处理给定误差与特殊值。检查入口为 \path{check_noise.cpp}，编译命令见本章习题 README。
+
+\clearpage
+\section{噪声验收：看统计量，也看真实消息}
+一两个噪声样本不能说明分布正确。先让所有真实距离固定在 5 m，
+远离 0.05 m 和 10 m 的量程边界，取 50000 个样本：
+\begin{lstlisting}[language=bash,numbers=none]
+ros2 run motion2d lidar_noise_demo
+\end{lstlisting}
+误差 $e_j=\widetilde r_j-r_j$ 的样本均值与总体式样本标准差为
+\begin{equation}
+\bar e=\frac1M\sum_{j=1}^M e_j,\qquad
+\widehat\sigma=\sqrt{\frac1M\sum_{j=1}^M(e_j-\bar e)^2}.
+\end{equation}
+下面直接读取同一 C++ 演示生成的 CSV（seed=4242）：
+\begin{center}
+\pgfplotstabletypeset[
+  col sep=comma,columns={samples,sigma_m,mean_m,stddev_m},
+  columns/samples/.style={column name={样本数},fixed,precision=0},
+  columns/sigma_m/.style={column name={设定 $\sigma$/m},fixed,fixed zerofill,precision=3},
+  columns/mean_m/.style={column name={实测均值/m},fixed,fixed zerofill,precision=8},
+  columns/stddev_m/.style={column name={实测标准差/m},fixed,fixed zerofill,precision=8},
+  every head row/.style={before row=\toprule,after row=\midrule},
+  every last row/.style={after row=\bottomrule}
+]{data/ch05_noise.csv}
+\end{center}
+均值应接近零，误差容差应随样本数变化。测试要求
+$|\bar e|<5\sigma/\sqrt M$，方差与 $\sigma^2$ 的相对偏差不超过 3\%。
+这是可复现的统计检查，不是要求有限样本均值恰好为零。
+靠近量程边界时，越界样本会被丢弃，保留下来的误差分布可能偏斜，不能照搬这组检验。
+
+还要确认 ROS 发布链确实使用了噪声。使用无障碍的 20 m 方形房间，
+把机器人静止放在中心；每束真实墙距为
+\begin{equation}
+r(\alpha)=\frac{10}{\max(|\cos\alpha|,|\sin\alpha|)}.
+\end{equation}
+停止上一场景，从 ros2\_ws 运行下列实验：
+\begin{lstlisting}[language=bash,numbers=none]
+ros2 launch motion2d_bringup ch05.launch.py model:=ideal rviz:=false \
+  config:=src/motion2d_bringup/config/ch05_noise_lab.yaml
+# second terminal, same ROS environment
+/usr/bin/python3 ../scripts/check_ch05_noise.py
+\end{lstlisting}
+实验使用 360 束、50 Hz、最大量程 20 m。脚本重置后检查 t=0 到 3.98 s
+的 200 帧、72000 个实际残差；缺帧会明确失败。
+这里远处墙面也在量程内，不会因无回波而混入另一种分布。
+
+\textbf{理解与实验：}把标准差翻倍，预测方差变成几倍；把采样频率翻倍，
+解释为什么单个样本的设定标准差不变。修改后应同步调整验收脚本中的预期参数，
+不要把默认配置的断言直接用于所有实验。

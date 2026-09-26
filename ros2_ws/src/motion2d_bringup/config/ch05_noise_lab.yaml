@@ -1,0 +1,29 @@
+# Static empty room: every noiseless range is known analytically.
+# Run ch05.launch.py model:=ideal config:=<this path> rviz:=false.
+/**:
+  ros__parameters:
+    use_sim_time: true
+    x: 0.0
+    y: 0.0
+    radius: 0.2
+    width: 20.0
+    height: 20.0
+    circle_count: 0
+    polygon_count: 0
+    require_connected: false
+simulator:
+  ros__parameters:
+    dt: 0.005
+    yaw: 0.0
+    lidar.enabled: true
+    lidar.backend: cpu
+    lidar.scan_model: snapshot
+    lidar.beams: 360
+    lidar.angle_min: -3.141592653589793
+    lidar.fov: 6.283185307179586
+    lidar.rate: 50.0
+    lidar.range_min: 0.05
+    lidar.range_max: 20.0
+    lidar.range_stddev: 0.01
+    lidar.noise_seed: 4242
+    lidar.visualize_beams: false

@@ -33,8 +33,7 @@ def main():
     p.node.create_subscription(LaserScan, "/scan", scans.append, qos_profile_sensor_data)
     retained = QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL)
     p.node.create_subscription(MarkerArray, "/visualization/lidar", beams.append, retained)
-    buffer = Buffer(node=p.node)  # Clear TF history when /clock moves backwards on reset.
-    listener = TransformListener(buffer, p.node)
+    listener = None
     try:
         p.wait(lambda: p.node.count_publishers("/scan") == 1 and len(beams) > 0)
         p.call(p.pause, SetBool.Request(data=True))
@@ -53,6 +52,10 @@ def main():
                    or math.isnan(r) or math.isinf(r) and r > 0 for r in first.ranges)
         p.spin(.2)
         assert len(scans) == 1, "Pause must not generate duplicate scans"
+        # A reset starts a separate trial. Create its TF listener after the reset
+        # barrier so queued transforms from the previous trial cannot repopulate it.
+        buffer = Buffer(node=p.node)
+        listener = TransformListener(buffer, p.node)
         for _ in range(19):
             assert p.call(p.step, Trigger.Request()).success
         assert len(scans) == 1, "No scan before the 20th simulation tick"

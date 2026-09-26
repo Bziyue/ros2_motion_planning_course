@@ -71,6 +71,8 @@ omega_dot = (tau_z - c_omega omega) / I_z
 
 近距 NaN 是本课程的已批准无效读数约定。REP-117 对“过近”另有 -inf 定义；不能把课程的 NaN 约定说成完整实现该 REP。实际设备适配时需区分处理。
 
+测距噪声已实现：lidar.range_stddev 为每束每采样标准差，默认配置 0.01 m，0 关闭；lidar.noise_seed 默认 4242，与世界 seed 独立。只对有限真回波加噪，越出量程变 NaN。reset 同步重新设定雷达随机流；重复性限定在相同参数、采样顺序和标准库实现。scanCpu 保持纯几何输出，addRangeNoise 单独调用，perturbRange 支持用给定误差做后端成对比较。
+
 ## 5. IMU 契约
 
 `sensor_msgs/Imu`，frame 为 `imu_link`，水平面 yaw-only 姿态，roll/pitch 固定为零。真实姿态只在模拟器内部用于生成传感器读数。
