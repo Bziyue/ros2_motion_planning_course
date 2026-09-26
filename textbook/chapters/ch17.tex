@@ -1,45 +1,192 @@
 \chapter{让有质量的机器人跟上轨迹}
 \begin{notebox}
-\textbf{目标}\quad 从参考 p/v/a 计算真实力与力矩，区分反馈、前馈、模型失配和饱和。\\
-\textbf{先修}\quad 第 04、14 章；本章参考已给定，先隔离跟踪问题。
+\textbf{目标}\quad 从参考位置、速度和加速度计算力；通过误差方程理解前馈、反馈、模型失配和输入饱和。\\
+\textbf{先修}\quad 第 04 章动力学、第 14 章轨迹求值；阿克曼部分使用第 16 章的起停参考。
 \end{notebox}
-\section{位置不是受力模型的控制量}
-\begin{lstlisting}[language=bash]
+\section{从一维加速度开始设计控制器}
+先运行圆形和八字参考实验，观察机器人偏离参考后怎样回到曲线上：
+\begin{lstlisting}[language=bash,numbers=none]
 ros2 run motion2d pd_tracking_demo tmp/ch17_pd
 /usr/bin/python3 scripts/plot_ch17_pd.py
 \end{lstlisting}
-理想执行直接取参考位置。有质量的机器人满足 $m\dot v=F-c_vv$，
-即使立刻改变力，速度和位置也不会瞬间跳到目标。
-控制器从同一 odom 坐标系读取当前位置/速度及参考 p/v/a，先求期望加速度，再换算成力：
-\begin{equation}
- e_p=p_r-p,\qquad e_v=v_r-v,\qquad
- F=\hat m(a_r+K_pe_p+K_de_v)+\hat c_vv.
-\end{equation}
-帽子表示控制器使用的参数估计；它不应悄悄读取模拟器真值参数。
-$a_r$ 是前馈：提前提供沿曲线运动所需的加速度。
-位置项把偏离拉回，速度项减小来回振荡；$K_p$ 单位为 s$^{-2}$，$K_d$ 为 s$^{-1}$。
+有质量的机器人满足 $m\dot v=F-c_vv$。力先改变加速度，再经积分改变速度和位置。
+因此控制器需要回答的是：\textbf{现在应该产生多大的加速度，才能逐渐消除跟踪误差？}
+以下先推导一个坐标轴；二维全向模型对两个轴分别使用同样的运算。
 
-\section{独立 yaw 与执行器限幅}
-yaw 误差使用最短包角差，角速度误差按 rad/s 计算；再用转动惯量和角阻力换算力矩。
-本章圆盘可全向受力，yaw 不决定平移方向；差速轮式车是另一种动力学模型。
-\lstinputlisting[language=C++,linerange={pd_force_begin-pd_force_end},
- includerangemarker=false]{../ros2_ws/src/motion2d/src/control/pd_tracker.cpp}
-trackPd 同时返回 requested 和 applied，方便看出要求了多少、实际执行了多少。
-每个力轴分别限制在 $[-F_{\max},F_{\max}]$，力矩同理；没有把状态速度硬裁掉。
-若力饱和，机器人可能跟不上轨迹，轨迹应减速或重新分配时间。
+设参考为 $p_r(t),v_r(t),a_r(t)$，实际位置、速度为 $p,v$。定义
+\[
+ e=p_r-p,\qquad \dot e=v_r-v,\qquad \ddot e=a_r-a.
+\]
+参考在正方向且机器人落后时 $e>0$；机器人速度偏低时 $\dot e>0$。
+给实际加速度加上这两项修正：
+\begin{equation}
+ a_{\rm des}=a_r+k_pe+k_d\dot e,\qquad
+ F_{\rm req}=\hat m a_{\rm des}+\hat c_vv.\label{eq:pdforce}
+\end{equation}
+$a_r$ 是\textbf{前馈}，由参考提前给出运动需要；$k_pe$ 和 $k_d\dot e$ 是\textbf{反馈}，由当前偏差修正输入。
+帽子表示控制器配置的模型参数，被控模型的质量和阻力另行配置。
+由于三项都应为加速度，$k_p$ 的单位是 s$^{-2}$，$k_d$ 为 s$^{-1}$。
+
+例如 $m=1$ kg、$c_v=0.15$ kg/s，$e=0.1$ m、$\dot e=-0.2$ m/s、$a_r=0.3$ m/s$^2$、$v=0.5$ m/s，
+取 $k_p=4,k_d=3$，得到 $a_{\rm des}=0.3+0.4-0.6=0.1$ m/s$^2$，$F_{\rm req}=0.175$ N。
+位置虽落后，速度却已经偏快，所以速度反馈减小了加速要求。
+
+\subsection{把控制律代回动力学}
+模型参数匹配且输入尚未限幅时，
+\[
+ a=\frac{F_{\rm req}-c_vv}{m}
+   =a_r+k_pe+k_d\dot e.
+\]
+再代入 $\ddot e=a_r-a$，参考加速度消去，得到
+\begin{equation}
+ \ddot e+k_d\dot e+k_pe=0.\label{eq:pderror}
+\end{equation}
+这条式子把控制设计变成了熟悉的微分方程：给定初始位置和速度误差，就能预测误差如何变化。
+前馈的作用也随之清楚：参考在转弯或加速时，控制器已提供所需加速度，反馈只处理偏差。
+
+\section{增益怎样影响回正和振荡}
+对式\eqref{eq:pderror}尝试指数形式 $e(t)=e^{\lambda t}$。
+求两次导数并约去非零指数项，得到二次方程
+\[
+ \lambda^2+k_d\lambda+k_p=0,\qquad
+ \lambda_{1,2}=\frac{-k_d\pm\sqrt{k_d^2-4k_p}}{2}.
+\]
+若有两个不同实根，$e=C_1e^{\lambda_1t}+C_2e^{\lambda_2t}$；$C_1,C_2$ 由初始误差和其导数决定。
+当 $k_p,k_d>0$ 且根为实时，两根都负，指数逐渐衰减。
+为直接看出振荡，令 $e=e^{-k_dt/2}z$，求导后代回原式，一阶导数项恰好消去：
+\[
+ \ddot z+(k_p-k_d^2/4)z=0.
+\]
+当括号为正，记 $\Omega=\sqrt{k_p-k_d^2/4}$，则 $z=A\cos\Omega t+B\sin\Omega t$；
+直接求两次导数即可核对。误差因而是一个包在衰减指数内的振荡。
+当括号为零，$\ddot z=0$ 给出 $z=A+Bt$，这对应临界阻尼。
+
+固定 $k_p=4$，取 $e(0)=1$ m、$\dot e(0)=0$，三个可手算的结果是
+\begin{align*}
+ k_d=3:&\quad e=e^{-3t/2}\left(\cos\frac{\sqrt7t}{2}+\frac3{\sqrt7}\sin\frac{\sqrt7t}{2}\right),\\
+ k_d=4:&\quad e=(1+2t)e^{-2t},\\
+ k_d=5:&\quad e=\tfrac43e^{-t}-\tfrac13e^{-4t}.
+\end{align*}
+第一组会轻微越过零点；第二组平滑趋近；第三组较慢的 $e^{-t}$ 项拖长了末段回正时间。
+因此加大速度反馈会改变响应形状，而非一律加快响应。
+
+\begin{center}\begin{minipage}{\linewidth}\makeatletter\def\@captype{figure}\makeatother
+\centering
+\begin{tikzpicture}
+\begin{axis}[width=.87\linewidth,height=5cm,xlabel={$t$/s},ylabel={$e$/m},xmin=0,xmax=5,ymin=-.05,ymax=1.05,
+ grid=major,legend style={at={(.98,.98)},anchor=north east,font=\small},samples=120]
+\addplot[tealblue,thick,domain=0:5]{exp(-1.5*x)*(cos(deg(sqrt(7)*x/2))+3/sqrt(7)*sin(deg(sqrt(7)*x/2)))};
+\addlegendentry{$k_d=3$}
+\addplot[navy,dashed,thick,domain=0:5]{(1+2*x)*exp(-2*x)};\addlegendentry{$k_d=4$}
+\addplot[muted,dashdotted,thick,domain=0:5]{4/3*exp(-x)-1/3*exp(-4*x)};\addlegendentry{$k_d=5$}
+\end{axis}\end{tikzpicture}
+\caption{相同位置增益下的误差响应。图由上面的解析式生成；初始误差是 1 m，参考本身可以随时间运动。}
+\end{minipage}\end{center}
+实际控制每隔 $\Delta t$ 更新一次，中间保持上一条力命令。此时反馈使用的是采样时刻的误差。
+当 $\Delta t$ 相对响应变化时间较小时，曲线接近连续模型；增益很大而更新较慢时，应观察过冲和输入变化，
+并用第 18 章的离散模型分析每一步运动。
+
+\section{模型失配、前馈关闭和限幅分别改变什么}
+\subsection{用同一误差方程分辨原因}
+令 $\rho=\hat m/m$，输入暂不限幅。由真实动力学和式\eqref{eq:pdforce}，
+\[
+ a=\rho(a_r+k_pe+k_d\dot e)+\frac{\hat c_v-c_v}{m}v.
+\]
+移项得到
+\begin{equation}
+ \ddot e+\rho k_d\dot e+\rho k_pe
+ =(1-\rho)a_r+\frac{c_v-\hat c_v}{m}v.\label{eq:pdmismatch}
+\end{equation}
+质量估计变化会同时改变反馈强度和前馈补偿；阻力估计误差随速度产生额外项。
+例如真实质量 1 kg、估计 0.6 kg、阻力匹配时，方程右侧为 $0.4a_r$。
+在持续转弯的参考上，$a_r$ 持续变化，误差也会持续受到驱动。
+
+若模型匹配但关闭加速度前馈，则实际 $a=k_pe+k_d\dot e$，于是
+\[
+ \ddot e+k_d\dot e+k_pe=a_r.
+\]
+取单轴恒定 $a_r$，误差稳定下来后导数为零，得到 $e=a_r/k_p$。
+例如 $a_r=0.2$ m/s$^2$、$k_p=4$ s$^{-2}$，需要约 0.05 m 的位置误差才能用反馈产生同样的加速度。
+
+\subsection{限幅发生在力上}
+本模型对 odom 系两个力轴分别设上限：
+\[
+ F_{{\rm app},i}=\min(F_{\max},\max(-F_{\max},F_{{\rm req},i})),\qquad i=x,y.
+\]
+例如请求 $(3,1)$ N、每轴上限 2 N，实际为 $(2,1)$ N。
+可用输入集合是一个正方形；若采用向量范数上限，它会是圆盘，两者代表不同的执行器约束。
+记 $\Delta F=F_{\rm app}-F_{\rm req}$，式\eqref{eq:pdmismatch}右侧再增加 $-\Delta F/m$。
+增大增益可能只让请求力进一步超限，而实际输入仍保持在边界。解决这类误差需要调整轨迹时长或可用力。
+
+\section{朝向控制与代码对应}
+全向圆盘的平移力独立于 yaw。转动满足 $I_z\dot\omega=\tau-c_\omega\omega$，因此采用同样的设计：
+\[
+ e_\psi=\operatorname{atan2}(\sin(\psi_r-\psi),\cos(\psi_r-\psi)),\qquad
+ \tau_{\rm req}=\hat I_z(\alpha_r+k_{p\psi}e_\psi+k_{d\psi}(\omega_r-\omega))+
+ \hat c_\omega\omega.
+\]
+正弦和余弦确定同一个方向，atan2 返回它在 $[-\pi,\pi]$ 内的角度，从而选取最短角差。
+例如当前 $179^\circ$、参考 $-179^\circ$，误差为 $+2^\circ$，机器人应小幅逆时针转动。
+角误差在选定的连续分支内仍满足与式\eqref{eq:pderror}同形的方程。
+
+\par\noindent\begin{minipage}{\linewidth}
+\lstinputlisting[language=C++,linerange={pd_force_begin-pd_force_end},includerangemarker=false]{../ros2_ws/src/motion2d/src/control/pd_tracker.cpp}
+\end{minipage}\par
+\code{cwiseProduct} 对两个坐标轴分别乘增益；\code{feedforward} 是参考加速度或关闭前馈时的零向量。
+\code{requested} 保存模型换算出的力，\code{applied} 保存限幅后的力。
+比较两者即可定位输入饱和；随后动力学继续按实际力积分位置和速度。
+
+\section{让参考平滑起步}
+圆形参考若直接采用 $\theta=\omega_0t$，起点就带有非零速度。
+为从静止开始，先设计相位时钟 $\tau(t)$，再令 $\theta=\omega_0\tau$。
+在渐入时间 $R$ 内设 $s=t/R$，要求时钟速率 $q(s)=\dot\tau$ 满足
+\[
+ q(0)=0,\quad q(1)=1,\quad q'(0)=q'(1)=0.
+\]
+四个条件适合用三次式 $q=a+bs+cs^2+ds^3$。
+前两个零时刻条件给 $a=b=0$，另两个条件是 $c+d=1,2c+3d=0$，所以 $c=3,d=-2$。
+由 $dt=R\,ds$ 积分，并令 $\tau(0)=0$，得到
+\begin{equation}
+ \tau=R(s^3-\tfrac12s^4),\quad \dot\tau=3s^2-2s^3,\quad
+ \ddot\tau=6s(1-s)/R.\label{eq:pdphase}
+\end{equation}
+到 $t=R$ 时，$\tau=R/2$、速率为 1、加速度为零。
+后续接上 $\tau=t-R/2$，三者在连接处连续。
+
+局部坐标中的两条路线及几何导数为
+\begin{align*}
+ p_c(\theta)&=r(\sin\theta,1-\cos\theta)^T,&
+ p'_c&=r(\cos\theta,\sin\theta)^T,&p''_c&=r(-\sin\theta,\cos\theta)^T,\\
+ p_e(\theta)&=r(\sin\theta,\tfrac12\sin2\theta)^T,&
+ p'_e&=r(\cos\theta,\cos2\theta)^T,&p''_e&=r(-\sin\theta,-2\sin2\theta)^T.
+\end{align*}
+此处撇号对 $\theta$ 求导。时间导数则按链式法则：先有 $\dot p=p'\dot\theta$，再对乘积求导得到
+\[
+ v=p'\dot\theta,\qquad a=p''\dot\theta^2+p'\ddot\theta,\qquad
+ \dot\theta=\omega_0\dot\tau,\quad\ddot\theta=\omega_0\ddot\tau.
+\]
+最后按起点朝向 $R(\psi_0)$ 旋转位置、速度和加速度，并只给位置加起点平移。
+独立朝向采用 $\psi=\psi_0+0.4\sin(\theta/2)$，同样求导：
+\[
+ \omega_r=0.2\cos(\theta/2)\dot\theta,\qquad
+ \alpha_r=-0.1\sin(\theta/2)\dot\theta^2+0.2\cos(\theta/2)\ddot\theta.
+\]
+这些式子对应 \code{sampleTrackingReference} 中的 \code{dp}、\code{ddp}、\code{w} 和 \code{alpha}。
+起点 $\dot\tau=\ddot\tau=0$，故平移和角运动的速度、加速度均从零开始。
+默认 $R=2$ s、$r=1$ m、$\omega_0=0.5$ rad/s；$r$ 是路线尺度，机器人碰撞半径另设为 0.2 m。
 
 \clearpage
-\section{固定参考后，比较原因而非只看最终位置}
-实验使用空 8 m 方形边界、半径 0.2 m 圆盘；净空由边界到圆盘外缘的距离计算，
-仅用于评估，不输入控制器。实际质量 1 kg、线阻力 0.15 kg/s、转动惯量 0.02 kg\,m$^2$、角阻力 0.01；
-两轴 $K_p=4,K_d=3$，yaw 同值。每次运行 24 s，动力学 200 Hz、控制 50 Hz，命令在四个动力学步内保持。
-这是无通信延迟的核心实验，ROS 链路的表现单独验收。
-
-\begin{figure}[!ht]
+\section{固定参考后比较跟踪误差}
+实验采用空的 8 m 方形世界。真实质量 1 kg、线阻力 0.15 kg/s、转动惯量 0.02 kg\,m$^2$、
+角阻力 0.01 kg\,m$^2$/s；两平移轴和 yaw 均取位置增益 4、速度增益 3。
+每次运行 24 s，动力学 200 Hz、控制 50 Hz，一条命令保持四个动力学步。
+位置均方根误差为 $\sqrt{N^{-1}\sum_{k=1}^N\|p_k-p_{r,k}\|^2}$：先把每个时刻的平方误差求平均，
+再开方，便恢复米的单位。它反映整个过程；最大误差则突出偏离最严重的时刻。
+\begin{center}\begin{minipage}{\linewidth}\makeatletter\def\@captype{figure}\makeatother
 \centering\includegraphics[width=\linewidth]{figures/ch17_pd.pdf}
 \caption{八字参考上的几何路线与位置误差。误差纵轴为对数，范围下方的早期值不显示；
 理想参考误差为零，不画在对数轴上。每轴 0.2 N 限力导致明显跟踪失败，即使场景仍有足够净空。}
-\end{figure}
+\end{minipage}\end{center}
 
 \begin{center}\small
 \begin{tabular}{lrr}\toprule
@@ -54,133 +201,176 @@ trackPd 同时返回 requested 和 applied，方便看出要求了多少、实�
 其他动态组的每轴力限为 2 N、力矩限为 0.2 N\,m。
 完整 CSV 还记录最大位置误差、yaw RMS、输入峰值、最小净空和饱和控制次数。
 模型匹配的八字实际每轴力峰值约 0.508 N；限力组最大位置误差约 1.802 m。
-理想模式直接采样参考，位置误差为零；其力峰值记 NaN，避免误解成“零牛顿也能完成运动”。
+理想模式直接采样参考，位置误差为零；其力栏以 NaN 表示该模式未计算物理输入。
 
-\clearpage
-\section{参考要平滑起步，不能凭空跳出速度}
-直接令相位 $\theta=\omega t$，圆轨迹起点已带速度；本章将相位时钟平滑启动。
-给定渐入时长 $R=2$ s，在 $s=t/R\in[0,1]$ 时使用
-\begin{equation}
- \tau=R(s^3-\tfrac12s^4),\quad \dot\tau=3s^2-2s^3,\quad
- \ddot\tau=6s(1-s)/R;\qquad \theta=\omega\tau.
-\end{equation}
-$t\geq R$ 后 $\tau=t-R/2$、$\dot\tau=1$、$\ddot\tau=0$，因此起点静止，连接处 p/v/a 连续。
-局部坐标下两种路线分别为
-\begin{equation}
- p_{\rm circle}(\theta)=r\begin{bmatrix}\sin\theta\\1-\cos\theta\end{bmatrix},\qquad
- p_{\rm eight}(\theta)=r\begin{bmatrix}\sin\theta\\\tfrac12\sin2\theta\end{bmatrix}.
-\end{equation}
-用链式法则计算 $v=p_\theta\dot\theta$、$a=p_{\theta\theta}\dot\theta^2+p_\theta\ddot\theta$，
-再按参考初始 yaw 旋转到 odom。独立朝向为 $\psi=\psi_0+0.4\sin(\theta/2)$，角速度/角加速度也解析求导。
-默认 $r=1$ m、$\omega=0.5$ rad/s；参考尺度与机器人碰撞半径是两件事。
 
-\section{验证、制动与练习}
-模型精确、无饱和、理想连续反馈时，可将控制律代入得到
-\begin{equation}
- \ddot e_p+K_d\dot e_p+K_pe_p=0.
-\end{equation}
-此式解释增益作用，却不能直接证明有采样延迟和输入饱和时仍按同样规律收敛。
+\section{制动也需要时间和距离}
+当跟踪暂停或参考不可用时，\code{dampingBrake} 给出
+\[
+ F=-\hat m k_bv,\qquad \tau=-\hat I_zk_b\omega,
+\]
+然后施加同样的输入限幅。力与速度反向，未限幅时 $F^Tv=-\hat m k_b\|v\|^2\leq0$，
+因而控制输入从运动中移走能量。逐轴对称限幅后，每个分量仍与对应速度反号。
 
-测试零误差时前馈对应的实际加速度，检查质量和阻力的单位；验证跨 $\pm\pi$ 的 yaw 误差，
-检查限幅及阻尼制动力始终反向做功。圆形/八字的 p/v/a 与角导数用中心差分检查，包含渐入连接点。
-这些检查验证控制实现的意义，而不只是图看起来贴合。
+在一个方向、参数固定且未饱和时，代入真实动力学可得
+\[
+ \dot v=-\gamma v,\qquad \gamma=\frac{\hat m k_b+c_v}{m}>0.
+\]
+分离变量并积分得到 $v(t)=v_0e^{-\gamma t}$，再积分速度，得到总滑行距离
+\[
+ D=\int_0^\infty v_0e^{-\gamma t}\,dt=\frac{v_0}{\gamma}.
+\]
+例如 $m=\hat m=1$ kg、$k_b=2$ s$^{-1}$、$c_v=0.15$ kg/s、$v_0=0.5$ m/s，$D\approx0.233$ m。
+速度低于给定阈值 $\varepsilon$ 的时间为 $t=\ln(v_0/\varepsilon)/\gamma$。
+若初始制动力超过上限，前段运动应改用饱和力积分；制动距离会随之增加。
+规划时应把这段运动空间留在可通行区域内。第 18 章会把力的上限和变化率提前写入预测问题。
 
-dampingBrake 按当前速度给出 $F=-\hat m k_bv$、$\tau=-\hat I_zk_b\omega$ 并限幅。
-它产生一个新的制动命令，后续 MPC 失败时不会继续发送旧优化结果。
-制动需要时间和距离，不代表能在任何障碍前停下，也不自动满足输入变化率限制。
-
-\begin{enumerate}
-\item \textbf{推导：}去掉加速度前馈时，误差方程右侧多出什么？模型质量估计偏小时又如何变化？
-\item \textbf{代码 ch17-1：}补全逐轴力限幅，解释它和向量范数缩放为什么不同。
-\item \textbf{实验：}同样参考依次改变质量估计、阻力和力上限；报告 RMS、最大误差、力峰值与净空，
-不能只说“增益更大所以更稳定”。
-\end{enumerate}
-
-\clearpage
-\section{接入 ROS：时间与坐标也属于控制律}
-\begin{lstlisting}[language=bash]
-ros2 launch motion2d_bringup ch17.launch.py rviz:=false
-# 另一个已 source 的终端；初始暂停，检查脚本负责推进
+\section{接入 ROS：在同一时刻、同一坐标系比较}
+\begin{lstlisting}[language=bash,numbers=none]
+ros2 launch motion2d_bringup ch17.launch.py rviz:=true
+# Another sourced terminal; the checker advances the paused simulation.
 /usr/bin/python3 scripts/check_ch17.py
-# 手动运行时解除暂停
+# For manual exploration:
 ros2 service call /sim/pause std_srvs/srv/SetBool '{data: false}'
 \end{lstlisting}
-默认受力模型从静止开始，控制器每 0.02 s 使用一个新的里程计时刻，
-输出 odom 系 WrenchStamped。Odometry 的 pose 在 odom，twist 却在 child\_frame\_id=base\_link：
-\begin{equation}
- v_{\rm odom}=R(\psi)v_{\rm body}.
-\end{equation}
-不能把机体系速度直接带入世界系反馈；参考速度的发布也必须按参考 yaw 反向旋转。
-控制器只订阅选择后的 /odometry；真值仅由明确的 truth 适配器提供，控制器不读取仿真内部状态。
+控制器按新的里程计时刻取参考，每 0.02 s 输出一次 odom 系力。
+Odometry 的 pose 在 odom，而 twist 在 \code{child_frame_id=base_link}。
+计算 $v_r-v$ 前，应先按第 02 章的旋转得到 $v_{\rm odom}=R(\psi)v_{\rm body}$。
+例如 yaw 为 $\pi/2$，机体系速度 $(0.2,0.3)$ m/s 对应 odom 系 $(-0.3,0.2)$ m/s。
+参考里程计也按其参考 yaw 把速度变回消息要求的机体系。
 
 \begin{center}\small
-\begin{tabular}{lp{8.5cm}}\toprule
-接口 & 含义\\\midrule
-/control/reference & 同观测时刻的参考位姿与机体系速度\\
-/control/reference\_acceleration & odom 系平移加速度和 yaw 角加速度\\
-/control/wrench\_requested & 限幅前的力与力矩，实际值在 /command/wrench\\
-/control/status & tracking、saturated 或明确的制动/拒绝原因\\
-/tracker/enable & SetBool；关闭后立即产生新的限幅阻尼制动\\\bottomrule
+\begin{tabular}{lp{8.0cm}}\toprule
+接口 & 读图和调试时的用途\\\midrule
+/control/reference & 同观测时刻的参考位姿、机体系速度\\
+/control/reference\_acceleration & odom 系平移加速度、yaw 角加速度\\
+/control/wrench\_requested & 限幅前输入；与 /command/wrench 比较识别饱和\\
+/control/status & 当前跟踪、饱和或制动原因\\
+/tracker/enable & SetBool；关闭跟踪时切换为限幅阻尼制动\\\bottomrule
 \end{tabular}
 \end{center}
-同一时间戳只处理一次；暂停不会重复控制，仿真时间回退时清空参考并重建起点。
-观测超过 0.12 s 未更新，或收到积压的旧观测，则以最后可用速度产生新的限幅制动；
-这是失去观测时的退化措施，不能保证停车距离或当前速度准确。暂停时 /clock 不动，不按墙钟误触发超时。
+控制器订阅选择后的 /odometry，truth 模式由真值适配器提供，SLAM 模式由估计器提供。
+重复时间戳跳过；仿真时间回退时重新建立参考起点。
+观测超过 0.12 s 未更新或积压时，程序用最后可用速度计算制动命令。
+观测越旧，该速度与实际速度可能相差越大，应在实验中一并观察消息年龄和运动响应。
+超时按 /clock 计算，因此暂停仿真时计时也暂停。
 
-\paragraph{外部轨迹与验证}
-reference.source=trajectory 时等待第 14 章的系数消息，必须有当前静止状态、匹配的静止首尾边界和未来起点。
-本章执行中拒绝替换；错误新消息保留原有效参考。第 19 章再处理运动中的 p/v/a 接续。
-主机 12 s ROS 实验匹配 600 个观测时刻，位置 RMS 为 0.000940 m、最大 0.001758 m，
-yaw RMS 为 $6.52\times10^{-5}$ rad，最小净空 2.79979 m。
-check\_tracker\_boundary.py 用独立 /clock 与合成里程计检查旋转、重复时间、旧数据、断流制动及回退清理。
-RViz 预期为八字参考、圆盘轨迹与观测地图；本机本轮仅验收无界面 ROS 链路。
-
-\paragraph{练习 ch17-2}
-补全机体速度到 odom 的旋转；用 yaw=$\pi/2$、机体系速度 $(0.2,0.3)$ m/s 验算。
-实验暂停后等待墙钟 1 s，确认参考没有新增；再仅推进 /clock，观察超时制动。
+设置 \code{reference.source=trajectory} 可跟踪第 14 章的系数消息。
+本章从静止状态接受首尾静止、起点匹配且开始时刻在未来的参考；执行结束后再接受下一条。
+第 19 章将扩展为运动中的位置、速度、加速度接续。
+在 RViz 中比较八字参考、圆盘轨迹和地图；如果路线旋转了而反馈力方向不对，先核对速度坐标系；
+如果误差只在激烈转弯时增大，再比较请求力和实际力。
 
 \clearpage
-\section{补充：阿克曼前馈与局部反馈}\label{sec:acktrack}
-小车需要纵向力和转向角速度，不能使用全向的两个平移力。
-从第16章曲线取参考 $s_r,\dot s_r,\delta_r,\dot\delta_r$，测量后轴位姿、纵向速度和转角。
-转角来自显式转向编码器接口，而不是从零速里程计倒算。
-令 $e$ 为当前前向单位向量，$e_\perp$ 为左向，$\tilde p=p_r-p$：
+\section{阿克曼小车：把误差分成前向和横向}\label{sec:acktrack}
+小车输入是纵向力 $F$ 和前轮转向速率 $r_\delta$。
+第 16 章给出参考后轴位姿、速度以及 $s_r,\dot s_r,\delta_r,\dot\delta_r$；
+测量提供后轴位姿、带符号纵向速度 $s$ 和转向编码器读数 $\delta$。
+令当前前向单位向量为 $e=(\cos\psi,\sin\psi)^T$，左向为 $e_\perp=(-\sin\psi,\cos\psi)^T$，
+将位置误差投影为
+\[
+ e_\parallel=e^T(p_r-p),\qquad e_y=e_\perp^T(p_r-p),\qquad e_\psi=\operatorname{wrap}(\psi_r-\psi).
+\]
+参考在当前前方时 $e_\parallel>0$，在左侧时 $e_y>0$。
+
+\begin{center}\begin{minipage}{\linewidth}\makeatletter\def\@captype{figure}\makeatother
+\centering
+\begin{tikzpicture}[x=1.25cm,y=1.25cm,>=Stealth]
+\fill[tealblue] (0,0) circle(.05) node[below left] {$p$};
+\draw[->,thick] (0,0)--(3.6,0) node[right] {$e$};
+\draw[->,thick] (0,0)--(0,2.0) node[above] {$e_\perp$};
+\draw[dashed,muted] (0,1.3)--(2.6,1.3)--(2.6,0);
+\draw[->,tealblue,thick] (0,0)--(2.6,1.3);
+\fill[navy] (2.6,1.3) circle(.05) node[above right] {$p_r$};
+\node[below] at(1.3,0) {$e_\parallel$};\node[left] at(0,.65) {$e_y$};
+\node[align=left,anchor=west] at(4,1) {前向误差调节纵向力\\左侧误差增加左转要求};
+\end{tikzpicture}
+\caption{在当前车身方向上分解误差。两坐标轴比例相同；正转角使前进中的小车向左转。}
+\end{minipage}\end{center}
+
+\subsection{纵向反馈延续 PD 的思路}
+实际速度为 $se$。将参考速度投影到 $e$ 上，与 $s$ 相减，得到纵向速度修正：
+\begin{equation}
+ F=m\{\dot s_r+k_pe_\parallel+k_v(e^Tv_r-s)\}+cs.\label{eq:ackforce}
+\end{equation}
+这里 $m,c$ 取控制器的参数估计。若参数匹配、暂沿直线且朝向已对齐，则 $\dot e_\parallel=s_r-s$，
+代入 $m\dot s=F-cs$ 后得到 $\ddot e_\parallel+k_v\dot e_\parallel+k_pe_\parallel=0$。
+转弯时坐标轴本身也旋转：$\dot e=\dot\psi e_\perp$，所以更完整地有
+\[
+ \dot e_\parallel=\dot\psi e_y+e^Tv_r-s.
+\]
+这说明大横向误差会影响纵向响应，也解释了为什么应在参考附近观察并调节此控制律。
+
+\subsection{横向误差通过转向逐渐修正}
+先计算期望转角，再让转向执行器跟随：
 \begin{align}
-F&=m\{\dot s_r+k_p e^T\tilde p+k_v(e^Tv_r-s)\}+cs,\\
-\delta_d&=\delta_r+k_\psi\operatorname{wrap}(\psi_r-\psi)
- +\operatorname{atan2}(k_y e_\perp^T\tilde p,|s|+s_0),\\
-r_\delta&=\dot\delta_r+k_\delta(\delta_d-\delta).
+ \delta_d&=\delta_r+k_\psi e_\psi+
+ \operatorname{atan2}(k_y e_y,|s|+s_0),\label{eq:acksteer}\\
+ r_\delta&=\dot\delta_r+k_\delta(\delta_d-\delta).
 \end{align}
-$s_0>0$ 平滑低速反馈；它不用于篡改平坦映射的分母。控制器不在测量速度上重新求逆，
-因此可以从静止起步。实际命令仍经过纵向力、转向速率和下一 tick 转角限制。
-\lstinputlisting[language=C++,linerange={ackermann_tracking_begin-ackermann_tracking_end},
- includerangemarker=false]{../ros2_ws/src/motion2d/src/control/ackermann_tracker.cpp}
+$s_0>0$ 的单位是 m/s，$k_y$ 是 s$^{-1}$，所以 atan2 的两个参数单位相同。
+分母始终为正，这一项等于 $\arctan(k_y e_y/(|s|+s_0))$；低速时反馈仍连续，参考在左侧就增加正转角。
+$k_\psi$ 无量纲，$k_\delta$ 为 s$^{-1}$。
+当期望转角恰好等于参考转角时，设 $\tilde\delta=\delta_r-\delta$，
+由 $\dot\delta=r_\delta$ 得 $\dot{\tilde\delta}=-k_\delta\tilde\delta$，转角偏差指数衰减。
+有横向和朝向偏差时，$\delta_d$ 在前馈基础上额外引导车辆回到路线。
 
-这是参考附近的局部跟踪律，不是任意朝向下的全局停车控制器。
-尤其在终点，单纯纵向修正不能消除任意横向误差。
-规划需要保留足够的碰撞及执行器余量；发生明显偏离时应停止试验并重新规划。
-第18章原有线性全向 MPC 也不能换一个模型名就控制小车；阿克曼的 NMPC 属于后续扩展。
+反馈的符号可用一条向前的直线核对。设参考朝向为零，实际朝向偏差较小、速度约为常数 $s>0$，
+转向执行器能较快跟上 $\delta_d$。利用 $\sin\psi\approx\psi$、$\tan\delta\approx\delta$、
+$\arctan z\approx z$，并略去误差相乘项，可得
+\[
+ \dot e_y\approx s e_\psi,\qquad
+ \dot e_\psi\approx-\frac{s}{L}\left(k_\psi e_\psi+\frac{k_y}{s+s_0}e_y\right).
+\]
+第一式来自车辆横向速度 $s\sin\psi$；第二式来自 $\dot\psi=s\tan\delta/L$ 和参考角速度为零。
+再对第一式求导并代入第二式：
+\[
+ \ddot e_y+\frac{s k_\psi}{L}\dot e_y+
+ \frac{s^2k_y}{L(s+s_0)}e_y\approx0.
+\]
+两个反馈系数都为正，与前面的回正方程同形。若把横向反馈符号写反，最后一项就会变负。
+当 $s$ 趋于零时，这两项也趋于零：车轮可以转动，但车身横向位置需要继续行驶才能改变。
+因此终点横向偏差应通过重新规划一小段可行运动来修正。
+
+\par\noindent\begin{minipage}{\linewidth}
+\lstinputlisting[language=C++,linerange={ackermann_tracking_begin-ackermann_tracking_end},includerangemarker=false]{../ros2_ws/src/motion2d/src/control/ackermann_tracker.cpp}
+\end{minipage}\par
+\code{left.dot(error)} 和 \code{e.dot(error)} 正是两种投影。
+参考的平坦映射在规划阶段求出，反馈直接使用测量位姿、速度和转角，停车时也可以求值。
+最后的 \code{limitAckermannInput} 同时限制力、转向速率和下一步转角。
 
 \clearpage
-\section{阿克曼换道实验与模型匹配}
-\begin{figure}[!ht]
+\section{阿克曼换道：先建立模型匹配的基线}
+\begin{center}\begin{minipage}{\linewidth}\makeatletter\def\@captype{figure}\makeatother
 \centering\includegraphics[width=\linewidth]{figures/ackermann_tracking.pdf}
-\caption{真实算法输出的起停换道：虚线参考与受力积分轨迹几乎重合。
+\caption{起停换道中的参考与跟踪结果：虚线参考与受力积分轨迹几乎重合。
 横向几何采用相同单位长度，下面分别显示纵向力和前轮转角。}
-\end{figure}
+\end{minipage}\end{center}
 
-默认 $m=1$ kg、$c=0.15$ kg/s、$L=0.3$ m，规划上限依次为速度0.7 m/s、力1 N、
-转角0.5 rad、转向速率0.7 rad/s、侧向加速度0.8 m/s$^2$；反馈执行器保留更大的上限。
-本次优化收敛后做了2次保守减速，最终时长约7.327 s。
-力连续上界约0.535 N、转角界0.190 rad、转向速率界0.443 rad/s。
 
-离线反馈与积分都用0.005 s，模型参数一致，无观测噪声或延迟；峰值位置误差约0.000171 m。
-这是核对前馈、导数和闭环接口的基线，不代表实际传感器下也有同样精度。
-从仓库根目录生成数据和图：
+示例从静止到静止换道，采用 $m=1$ kg、$c=0.15$ kg/s、$L=0.3$ m。
+规划限制分别为速度 0.7 m/s、力 1 N、转角 0.5 rad、转向速率 0.7 rad/s 和侧向加速度 0.8 m/s$^2$；
+反馈执行器使用更大的上限，为误差修正留出余量。
+参考优化后经过两次时长延长，最终约 7.327 s；连续力上界约 0.535 N、转角界 0.190 rad、转向速率界 0.443 rad/s。
+
+图中反馈和动力学都以 0.005 s 更新，参数匹配、观测无噪声和延迟，峰值位置误差约 0.000171 m。
+先复现这条基线，再单独改变质量估计或加入测量误差，就能辨认误差的来源。
 \begin{lstlisting}[language=bash,numbers=none]
 ros2 run motion2d ackermann_planning_demo tmp/ackermann_planning
 /usr/bin/python3 scripts/plot_ackermann.py
 \end{lstlisting}
-\textbf{练习：}仅把控制器中的质量估计调成真实值的1.3倍，保留被控模型和同一参考，
-比较误差、峰值力及饱和次数。再关闭前馈做对照；每次只改一个因素。
-对转向轴也做类似实验，观察为什么只有位置终点看起来正确并不能验证全程姿态。
+第 18 章将针对全向惯性模型，把未来多个时刻的力一起求解。
+若继续扩展小车的预测控制，则需使用本章的小车状态和非线性转向方程构造预测。
+
+\section{练习：从一条输入解释整个响应}
+\begin{enumerate}
+\item 复算本章 $0.175$ N 的例子；分别关闭前馈和把估计质量改为 0.6 kg，计算真实加速度与误差二阶导数。
+\item 从式\eqref{eq:pderror}推导 $k_p=4,k_d=5$ 的解析解，并核对初始误差与导数。比较图中三条曲线的过冲和衰减。
+\item \textbf{代码 ch17-1：}补全逐轴限幅；用 $(3,1)$ N 和 2 N 上限，与范数缩放的结果作比较。
+\item 由四个边界条件推导式\eqref{eq:pdphase}，核对 $t=0,R$ 两端的速度、加速度和 $\tau$；对圆形或八字参考手算一次链式求导。
+\item 推导阻尼制动距离；取上文参数，求速度降到 0.01 m/s 所需时间，再讨论输入限幅会改变哪一段运动。
+\item \textbf{代码 ch17-2：}补全机体速度到 odom 的旋转，用 $\psi=\pi/2$ 和 $(0.2,0.3)$ m/s 验算。
+\item 阿克曼参数 $s=0.5$ m/s、$L=0.3$ m、$s_0=0.3$ m/s，取 $k_\psi=2,k_y=1.5$，求横向小误差方程两个系数。
+\item 固定同一参考，分别改变质量估计、加速度前馈和力上限。记录 RMS、最大误差、输入峰值及最小净空，并用误差方程解释变化。
+\end{enumerate}
+编译命令和分步提示见 \code{exercises/ch17/README.md}。
