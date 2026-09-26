@@ -14,7 +14,7 @@
 | Python | 系统 Python 3.14.4 | ROS launch 使用系统 Python；避免混用虚拟环境 |
 | 排版 | TeX Live 2026，XeLaTeX、LuaLaTeX、latexmk | 使用 XeLaTeX 与 ctex |
 | 字体 | Noto Sans/Serif CJK SC 存在 | 可排版中文正文和标题 |
-| PDF 检查 | pdftoppm、pdfinfo、pdftotext 存在 | 编译后渲染审阅 |
+| PDF 检查 | pdftoppm、pdfinfo、pdftotext 存在；系统 Python 的 Pillow 12.1.1 | 编译后逐页渲染并生成联系表，人工或代理目视复核 |
 | GPU | NVIDIA GeForce RTX 5060，8151 MiB，驱动 595.91.07 | CUDA 课程具有硬件基础 |
 | CUDA 工具链 | PATH 中未找到 `nvcc`；常见 `/usr/local/cuda*`、`/opt/cuda*` 路径未找到 | 不能据此断言任意位置都未安装；第 20 章再检查/配置 |
 | Doxygen | PATH 中未找到命令 | 编码仍遵守 Doxygen 注释语法；实施时再补齐文档生成工具 |

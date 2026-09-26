@@ -75,6 +75,12 @@ cd /home/zdp/ForCodex/ros2_motion_planning_course
 make -C textbook
 ```
 
-需要 XeLaTeX、latexmk、ctex、Noto CJK 和 DejaVu 字体；本机已检测到。原始大纲可用 `make -C textbook outline` 重新编译。
+需要 XeLaTeX、latexmk、ctex、Noto CJK 和 DejaVu 字体，以及 Poppler（poppler-utils）与系统 Python 的 Pillow（python3-pil）；本机均已有。
+原始大纲可用 `make -C textbook outline` 重新编译。
+
+每次构建都会生成 144 dpi 的逐页 PNG、四页联系表、浏览入口与待办清单，位于
+`tmp/pdfs/review/course/`（大纲为 `outline/`）。打开其中的 `index.html` 可逐页查看并点击放大。
+**生成预览不代表通过检查**：交付前必须检查并修复重叠、失真、截断等问题，重编后复核最新版；
+具体步骤见 [PDF 视觉复核流程](docs/PDF_REVIEW.md)，结果写入验收记录。
 
 批准记录：2026-09-26，用户同意大纲并要求开始实现，逐功能提交。

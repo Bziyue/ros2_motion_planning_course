@@ -257,3 +257,15 @@ Missing character 或未定义引用提示。仅更改教材排版和表达，�
 ~~~text
 3ccbac8240f8442f55df382dbf76474b9e2fb00690f1afa2545f7f5101210f82
 ~~~
+
+## 每次构建后的视觉检查流程
+
+在 AGENTS.md 中将“每次生成后查看渲染页面、修复并复查”设为必做项，
+补充 docs/PDF_REVIEW.md 与 README 的操作入口。course/outline 两个构建目标都接入
+scripts/render_pdf_review.py；生成逐页 PNG、四页联系表、HTML 索引和带 PDF 哈希的待办清单。
+脚本对日志中的溢出与缺字返回失败，Underfull 保留供检查者核对；不会自动勾选视觉通过。
+
+实际运行 make -C textbook 成功，当前教材生成 64 张 1191×1684 的页面图、16 张联系表；
+HTML 的 128 个图像/链接目标全部存在，清单中的 SHA-256 与上述已目视复核的 PDF 一致。
+大纲目标通过 make -n -C textbook outline 检查命令与路径，本次没有改动历史大纲 PDF。
+未新增 ROS 依赖；Poppler、Pillow 与字体均使用主机已有工具。
