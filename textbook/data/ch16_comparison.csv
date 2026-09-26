@@ -1,0 +1,4 @@
+segments,energy,coefficient_relative,gradient_relative,minco_us,spline_us,upstream_us,upstream_coefficient_relative,upstream_gradient_relative
+4,487.57,4.12603e-14,2.13934e-14,2.247,1.4755,0.1515,4.1952e-14,2.78468e-14
+16,337.059,1.05404e-14,3.79689e-14,9.4525,5.79255,0.484,1.04688e-14,3.59381e-14
+64,99.3497,3.76051e-15,6.4504e-13,37.9997,22.7345,2.049,3.74825e-15,6.45203e-13

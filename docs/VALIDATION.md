@@ -558,3 +558,9 @@ PDF117页，SHA-256 `3d94a15e20377e77351efdb602555fac2a98250fe5e273761e0f6b0c6aa
 
 主机3包构建通过；ROS_DOMAIN_ID=59运行ch15.launch.py rviz:=false，check_ch15.py通过。100tick后近目标得到44预览点，converged;sampled_feasible;preview_only，走廊残差-0.1m。端点正确、未发布轨迹命令、机器人步进不移动、非法frame清空、reset与输入隔离通过。测试修复Python消息浮点类型及异步状态/路径到达顺序后重跑通过。未声明GUI已验收。
 PDF118页，SHA-256 `c5157dc89c932c2b8580aca95a0a2febcc468794cd54c41c5bb459cfb311191c`；新增物理118页和目录新增项第6页已阅读大小检查，无溢出/重叠。共享planner源码改变了旧章摘录行号，仅追加检查受影响物理91/103页；其余旧页未重复检查。
+
+## ch16 Spline2D内核与上游对照
+
+主机3包构建，176项（149 GTest+27包装）0失败；非零边界p/v/a，seed1616、1–12段，与MINCO系数/能量梯度相对1e-9检查通过，带软代价一般伴随中心差分通过。练习ch16-1参考PASS、starter失败；ros2 run spline_demo运行成功。
+固定上游126525e49a43b0548bc6960e4979dd6b6258f289，GCC15.2/Eigen3.4/-O3/-fno-fast-math/C++17，无LTO，同进程；Ryzen7 9700X。10次预热、21组20次，构造+能量+完整梯度的组平均中位数：4/16/64段教学MINCO 2.247/9.4525/37.9997us，教学Spline 1.4755/5.79255/22.7345us，上游0.1515/0.484/2.049us。非CPU绑核，非外层规划基准；普通ROS RelWithDebInfo运行计时不混入这组比较。最大三方系数相对4.2e-14、梯度6.5e-13。
+PDF121页，SHA-256 `abcea8f7427f624235fe296f1cca7749f14ef9a87cb9306878bf0eb49952a782`；新增第16章物理119–121页与新目录项第6页逐页视觉检查，代码/公式/图例/表格无裁切重叠，未重复检查旧章。

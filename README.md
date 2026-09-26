@@ -28,6 +28,7 @@
 | 13 | [凸安全走廊](chapters/ch13/README.md) | [ch13](exercises/ch13/README.md) | `ch13.launch.py` |
 | 14 | [五次轨迹](chapters/ch14/README.md) | [ch14](exercises/ch14/README.md) | `ch14.launch.py` |
 | 15 | [二维 MINCO](chapters/ch15/README.md) | [ch15](exercises/ch15/README.md) | `ch15.launch.py`、`minco_demo` |
+| 16 | [二维 Spline2D](chapters/ch16/README.md) | [ch16](exercises/ch16/README.md) | `spline_demo`、固定上游对照 |
 
 ~~~bash
 source /opt/ros/lyrical/setup.bash

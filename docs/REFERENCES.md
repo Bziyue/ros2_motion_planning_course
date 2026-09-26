@@ -30,3 +30,7 @@ Felzenszwalb 与 Huttenlocher，*Distance Transforms of Sampled Functions*，The
 
 第15章再次查阅[MINCO论文v4第IV节](https://arxiv.org/html/2103.00190v4)，核对位置路点对应的C⁴最优性、带状线性表示与伴随。
 课程由最小jerk变分条件独立组装二维系统，未复制上游代码；无主元教学求解器限制与密集KKT对照已说明。
+
+### 第16章实际对照
+
+固定上游126525e49a43b0548bc6960e4979dd6b6258f289，QuinticSplineND<2>，MIT LICENSE随临时克隆保留。课程Spline2D根据端点能量二次型独立实现；未复制上游源码。`scripts/benchmark_ch16.sh`将三种实现以相同-O3/-fno-fast-math编译进一个程序，测构造+能量+完整能量梯度，结果见textbook/data/ch16_comparison.csv。
