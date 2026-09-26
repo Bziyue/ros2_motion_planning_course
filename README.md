@@ -2,7 +2,7 @@
 
 从二维世界、圆盘机器人和模拟传感器开始，逐步学习定位建图、路径与轨迹规划、跟踪控制。教材、代码和练习按章节对应。
 
-**当前状态：第 01-05 章已完成。** 已有随机世界、四种机器人模型、CPU 激光雷达与噪声/性能实验。大纲提交为 `5c0c642`；每完成一个可运行、已验证的功能就单独提交，教材和练习同步更新。IMU、SLAM 和规划尚未实现。
+**当前状态：第 01-05 章已完成，第 06 章实施中。** 已有随机世界、四种机器人模型、CPU 激光雷达与噪声/性能实验，以及理想 IMU 比力模型。大纲提交为 `5c0c642`；每完成一个可运行、已验证的功能就单独提交，教材和练习同步更新。IMU 白噪声与时间调度、SLAM 和规划尚未完成。
 
 [教材 PDF](output/pdf/course.pdf) · [实施进度](docs/PROGRESS.md) · [主机验收记录](docs/VALIDATION.md)
 
@@ -13,6 +13,7 @@
 | 03 | [随机圆与凸多边形世界](chapters/ch03/README.md) | [ch03](exercises/ch03/README.md) | `ch03.launch.py` |
 | 04 | [机器人模型](chapters/ch04/README.md) | [ch04](exercises/ch04/README.md) | `ch04.launch.py` |
 | 05 | [CPU 激光雷达](chapters/ch05/README.md) | [ch05](exercises/ch05/README.md) | `ch05.launch.py` |
+| 06 | [IMU 与传感器时间](chapters/ch06/README.md) | [ch06](exercises/ch06/README.md) | 暂用 `imu_demo` |
 
 ~~~bash
 source /opt/ros/lyrical/setup.bash

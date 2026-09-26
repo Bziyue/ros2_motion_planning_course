@@ -1,0 +1,105 @@
+\chapter{机器人感觉到什么：IMU 与传感器时间}\label{ch:imu}
+\begin{notebox}
+\textbf{目标}\quad 从运动真值产生原始 IMU，区分比力、白噪声和采样时间。\\
+\textbf{先修}\quad 第二章的坐标变换、第四章的连续运动，以及第五章的传感器消息。
+\end{notebox}
+
+\section{静止的加速度计为什么不为零}
+把一个加速度计平放在桌上，它的 z 轴向上时会测到约 $+9.81\ \mathrm{m/s^2}$。
+这不是机器人正在加速上升，而是桌面的支持力产生了比力。自由落体才接近零比力；
+本课程机器人受平面约束，不模拟自由落体。
+
+设 $R$ 将机体系向量转到世界系，$a$ 是圆心的世界运动加速度，$g$ 是世界重力：
+\begin{equation}
+f=R^\top(a-g),\qquad g=(0,0,-g_0)^\top,\qquad g_0=9.81\ \mathrm{m/s^2}.
+\end{equation}
+后续估计器若要恢复运动加速度，需要 $a=Rf+g$，并且必须使用自己的姿态估计。
+仿真器内部可用真值 yaw 生成测量，估计器不能把它当作 IMU 给出的姿态。
+
+\begin{center}
+\begin{tikzpicture}[>=Stealth]
+\draw[thick,navy] (-2,0)--(2,0) node[right] {水平支撑面};
+\draw[fill=tealblue!15,draw=tealblue,thick] (-.6,0) rectangle (.6,.45);
+\draw[->,thick,tealblue] (0,.45)--(0,1.65) node[above] {$f_z=+g_0$};
+\draw[->,thick,navy] (1.1,.3)--(1.1,-1) node[below] {$g_z=-g_0$};
+\node[left] at (-.6,.25) {圆盘中心};
+\end{tikzpicture}
+\end{center}
+
+本章 IMU 在圆心，与 \code{base_link} 同向。机器人只做水平平移和 yaw 转动，
+因此 $a_z=0$、roll=pitch=0。陀螺仪理想输出 $(0,0,\dot\psi)$，单位 rad/s，
+加速度计理想输出的单位是 $\mathrm{m/s^2}$，不是 g 的倍数。
+这一约定参考 \href{https://github.com/ros-infrastructure/rep/blob/master/rep-0145.rst}{REP-145 的 IMU 报告约定（草案）}。
+
+\clearpage
+\section{用三行公式读懂理想 IMU}
+二维部分只需要一个旋转转置：
+\begin{equation}
+\begin{bmatrix}f_x\\f_y\end{bmatrix}
+=\begin{bmatrix}\cos\psi&\sin\psi\\-\sin\psi&\cos\psi\end{bmatrix}
+\begin{bmatrix}a_x\\a_y\end{bmatrix},
+\qquad f_z=g_0,\quad \omega_z=\dot\psi .
+\end{equation}
+例如 yaw 为 $90^\circ$、世界加速度为 $(2,0)$ 时，
+世界的 +x 方向正好是机体的 -y，故 $f=(0,-2,9.81)$。
+
+\lstinputlisting[language=C++,linerange={imu_ideal_begin-imu_ideal_end},
+  includerangemarker=false]{../ros2_ws/src/motion2d/src/sim/imu.cpp}
+
+\code{ImuSample} 只保存角速度与比力两个三维向量，算法不依赖 ROS。
+输入的 \code{acceleration} 成员由动力学或解析轨迹提供；
+不要用含噪位置二阶差分代替它。
+
+\textbf{运动模型的选择。}第四章的 \code{reference} 提供一致的解析位置、速度和加速度；
+\code{inertial} 从力、质量和阻力计算加速度。二者适合本章。
+\code{ideal} 瞬移没有物理导数，\code{velocity} 的速度突变需要脉冲加速度，
+都不能据此伪造可融合的 IMU。
+
+\textbf{安装位置的意义。}圆心原地自转时，圆心不产生向心加速度。
+圆心本身沿圆轨迹移动时则有。若以后把 IMU 安装到偏离圆心的位置，
+需要加入角速度和角加速度引起的杆臂项；本章不暗中模拟这些项。
+
+\begin{notebox}
+加速度计不能区分静止和匀速直线运动；两者的运动加速度都是零。
+原始 IMU 也不直接测量位置、速度或绝对 yaw。
+\end{notebox}
+
+\clearpage
+\section{先手算，再运行五个场景}
+重新构建工作空间、加载 install 后运行：
+\begin{lstlisting}[language=bash,numbers=none]
+ros2 run motion2d imu_demo
+colcon test --packages-select motion2d
+colcon test-result --verbose
+\end{lstlisting}
+演示的 CSV 输出可与下表核对。角速度单位 rad/s，比力单位 $\mathrm{m/s^2}$。
+\begin{center}
+\begin{tabular}{lrrrr}
+\toprule
+场景 & $\omega_z$ & $f_x$ & $f_y$ & $f_z$\\
+\midrule
+静止 & 0 & 0 & 0 & 9.81\\
+匀速 $(2,-1)$ m/s & 0 & 0 & 0 & 9.81\\
+$a=(2,0)$，yaw=$\pi/2$ & 0 & 0 & -2 & 9.81\\
+圆心原地自转 & -0.3 & 0 & 0 & 9.81\\
+$r=1$，$\omega=0.4$ 的圆参考 & 0.4 & 0 & 0.16 & 9.81\\
+\bottomrule
+\end{tabular}
+\end{center}
+圆参考的机体 x 轴沿切向，y 轴朝路径圆心，故 $f_y=r\omega^2$。
+这与圆盘碰撞半径无关；不要把路径圆半径 r 与机器人半径混淆。
+
+\textbf{代码练习 ch06-1。}在 \path{exercises/ch06/starter/specific_force.hpp}
+补全世界加速度到机体比力的变换，从仓库根目录编译：
+\begin{lstlisting}[language=bash,numbers=none]
+g++ -std=c++17 -I/usr/include/eigen3 \
+  -Iexercises/ch06/starter \
+  exercises/ch06/check_specific_force.cpp -o /tmp/ch06_force
+/tmp/ch06_force
+\end{lstlisting}
+理解题：静止、匀速和原地自转有何区别？实验题：将路径 r 翻倍，再单独将
+$\omega$ 翻倍，预测和记录陀螺仪、加速度计的变化。验收包括重力符号、
+正负 $90^\circ$ 旋转、$180^\circ$ 旋转；提示与参考解单独保存在练习目录。
+
+\textbf{常见错误。}直接把世界加速度写入机体系消息；把 $g_z$ 符号写反；
+将陀螺仪单位写成度每秒；认为“运动很快”就意味着加速度很大。

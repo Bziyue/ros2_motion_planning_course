@@ -14,4 +14,6 @@
 
 SplineTrajectory 的性能数字依赖具体问题、优化设置和硬件。教材将自行测量，不直接承诺上游测试的加速比。若引入上游代码，保留其许可及第三方声明；课程自身的对外发布许可证尚未确定。
 
+第 06 章补充：[REP-145 原始文件](https://github.com/ros-infrastructure/rep/blob/master/rep-0145.rst)（状态为 Draft）用于核对传感器轴、比力、静止向上 +g 与原始 IMU 不含融合姿态的约定。再次核对本机 Imu.msg：协方差为行主序，未知为全零，不提供某项估计时其协方差首元素为 -1。课程使用 /imu/data_raw，不把真值姿态写入 orientation。
+
 第 05 章补充：再次核对主机 LaserScan.msg 与 [官方原始定义](https://raw.githubusercontent.com/ros2/common_interfaces/rolling/sensor_msgs/msg/LaserScan.msg)，并阅读 [REP-117](https://raw.githubusercontent.com/ros-infrastructure/rep/master/rep-0117.rst)。REP-117 区分 -inf（过近）、NaN（无效）与 +inf（无回波）。已批准的课程契约将近距盲区统一编码为 NaN、让建图跳过，因此不宣称完整实现 REP-117 的三种编码；转换到真实硬件时必须保留这一区别。官方 HTML 文档本次受访问保护，采用原始源文件和本机定义核对。

@@ -16,7 +16,8 @@ add_library(motion2d_core
   src/geometry/se2.cpp src/geometry/obstacles.cpp
   src/sim/sim_clock.cpp src/sim/world.cpp src/sim/world_generator.cpp
   src/sim/ideal_model.cpp src/sim/swept_collision.cpp src/sim/velocity_model.cpp
-  src/sim/inertial_model.cpp src/sim/reference_model.cpp src/sim/raycast.cpp src/sim/lidar_cpu.cpp)
+  src/sim/inertial_model.cpp src/sim/reference_model.cpp src/sim/raycast.cpp src/sim/lidar_cpu.cpp
+  src/sim/imu.cpp)
 target_compile_features(motion2d_core PUBLIC cxx_std_17)
 target_compile_options(motion2d_core PRIVATE -Wall -Wextra -Wpedantic)
 target_include_directories(motion2d_core PUBLIC
@@ -42,6 +43,9 @@ install(TARGETS lidar_noise_demo DESTINATION lib/motion2d)
 add_executable(lidar_benchmark src/examples/lidar_benchmark.cpp)
 target_link_libraries(lidar_benchmark PRIVATE motion2d_core)
 install(TARGETS lidar_benchmark DESTINATION lib/motion2d)
+add_executable(imu_demo src/examples/imu_demo.cpp)
+target_link_libraries(imu_demo PRIVATE motion2d_core)
+install(TARGETS imu_demo DESTINATION lib/motion2d)
 ament_export_targets(motion2d_core_targets HAS_LIBRARY_TARGET)
 ament_export_dependencies(Eigen3)
 
@@ -97,6 +101,8 @@ if(BUILD_TESTING)
   target_link_libraries(test_raycast motion2d_core)
   ament_add_gtest(test_lidar test/test_lidar.cpp)
   target_link_libraries(test_lidar motion2d_core)
+  ament_add_gtest(test_imu test/test_imu.cpp)
+  target_link_libraries(test_imu motion2d_core)
 endif()
 
 ament_package()
