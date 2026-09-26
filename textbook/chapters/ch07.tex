@@ -5,16 +5,17 @@
 \end{notebox}
 
 \section{先给建图一个已知的位姿}
-在同时学习定位和建图之前，先假设位姿完全已知。这能把“点为什么落错地方”拆成两个问题：
-是位姿不准，还是扫描投影和地图更新出了错？本章使用仿真真值做定位基线，仍只靠激光观测建图。
-障碍物列表属于模拟器和独立评估，不交给建图节点。
+机器人知道自己在哪里，怎样把一束距离读数变成地图上的一个格子？
+本章先用仿真真值提供位姿，把注意力集中在三个步骤：将回波投到统一坐标系，
+找出射线穿过的格子，再积累自由或占据证据。建图函数的输入始终只有扫描和位姿。
+后续章节估计出位姿后，可以继续使用这套建图接口。
 
 \begin{center}
 \begin{tikzpicture}[>=Stealth,node distance=8mm,
  box/.style={draw=tealblue,fill=pale,rounded corners,align=center,minimum height=9mm}]
 \node[box] (sim) {模拟器};
-\node[box,right=of sim] (raw) {原子真值\\world / ground\_truth\_base};
-\node[box,below=of raw] (adapter) {显式 truth 适配器};
+\node[box,right=of sim] (raw) {同一时刻的真值状态\\world / ground\_truth\_base};
+\node[box,below=of raw] (adapter) {truth 里程计适配器};
 \node[box,right=28mm of adapter] (map) {观测建图};
 \draw[->] (sim)--(raw);
 \draw[->] (raw)--(adapter);
@@ -27,8 +28,9 @@
 \code{/ground_truth/odometry} 保留独立的真值帧标识，不直接建立对应 TF 边。
 适配器输出统一入口 \code{/odometry}，使用 odom / base\_link。
 本章 world、map、odom 的原点与轴向相同，因此转换只需明确改写帧标识；
-初始位置 (-8,-8) 不会偷偷变为 (0,0)。这是一项\textbf{已知的坐标对齐约定}，
-不是任意两个坐标系都能通过改字符串实现变换。
+例如 world 中的初始位置 $(-8,-8)$ m，在 odom 中仍为 $(-8,-8)$ m。
+若希望把初始位置设为 odom 原点，则应对所有位姿应用第二章的坐标变换，
+并同步修改 map 与 odom 的关系。帧名称告诉读者数值属于哪个坐标系，实际坐标转换由 $R,p$ 完成。
 
 \begin{center}
 \begin{tabular}{ll}
@@ -40,10 +42,9 @@ base\_link $\to$ laser / imu\_link & simulator，固定圆心外参\\
 \bottomrule
 \end{tabular}
 \end{center}
-后续换成激光里程计或 SLAM 时，会替换这个真值入口。不能继续保留一条隐藏的真值 TF，
-让估计器从中读取答案；每条 TF 边也不能同时由两个节点发布。
+后续切换到激光里程计或 SLAM 时，对应节点接管这些 TF 边。
+一条 TF 边由一个节点发布，才能让查询得到的位姿具有一致的来源。
 
-\clearpage
 \section{同一条里程计消息里的两种坐标系}
 依据主机与\href{https://github.com/ros2/common_interfaces/blob/rolling/nav_msgs/msg/Odometry.msg}{官方 Odometry 定义}，
 pose 在 \code{header.frame_id}，twist 在 \code{child_frame_id}。
@@ -52,21 +53,30 @@ pose 在 \code{header.frame_id}，twist 在 \code{child_frame_id}。
 v_B=R(\psi)^\top v_W,\qquad \omega_B=(0,0,\dot\psi).
 \end{equation}
 例如 $\psi=\pi/2$、$v_W=(2,1)$，则 $v_B=(1,-2)$ m/s。
-速度只转轴，不加位移；把位置 p 加到速度上不仅物理意义错误，单位也不一致。
+这个变换只是在机体的两根轴上分解同一个速度向量。
+设机体前向单位向量 $e_x=(\cos\psi,\sin\psi)$，左向单位向量
+$e_y=(-\sin\psi,\cos\psi)$，则
+\[
+v_{B,x}=e_x^\top v_W=v_{W,x}\cos\psi+v_{W,y}\sin\psi,\qquad
+v_{B,y}=e_y^\top v_W=-v_{W,x}\sin\psi+v_{W,y}\cos\psi.
+\]
+这里表达的是机器人相对世界的速度，只是数值沿机体轴报告。
+与点坐标变换相比，速度向量无需平移：向量的起点移到哪里，都保持同样的长度和方向。
 
+\par\noindent\begin{minipage}{\linewidth}
 \lstinputlisting[language=C++,linerange={truth_odometry_begin-truth_odometry_end},
  includerangemarker=false]{../ros2_ws/src/motion2d/src/ros/odometry_messages.cpp}
+\end{minipage}\par
 
 位姿、速度、时间都来自同一个 \code{State2D}。
 若分别订阅位置与速度，再按“最新一条”拼接，可能混合不同采样时刻，尤其在转弯时不一致。
-本章原子消息避免了这种额外误差。零协方差表示仿真给出的精确状态，
-不代表真实定位系统能达到零误差。
+因此消息转换函数接收完整的 \code{State2D}，一次写入该时刻的所有字段。
+本章真值里程计把协方差设为零；估计里程计将在第九章传播并报告自己的误差协方差。
 
 \textbf{练习 ch07-1：}补全 \path{exercises/ch07/starter/body_velocity.hpp}。
 先手算正 $90^\circ$ 和 $180^\circ$ 旋转，再运行检查。思考圆参考中世界速度为何变化，
 机体前向速度却始终为 $r\omega$。
 
-\clearpage
 \section{运行真值适配器并核对 TF}
 从 ros2\_ws 构建、加载 install 后运行：
 \begin{lstlisting}[language=bash,numbers=none]
@@ -78,13 +88,14 @@ ros2 launch motion2d_bringup ch07.launch.py rviz:=false
 暂停期间里程计和 TF 可重复当前时间，方便晚加入的显示节点；重复时间戳不能算作新观测。
 检查脚本核对原始/选源消息、机体速度、TF 位姿、唯一时钟与唯一运动 TF 发布者。
 
+\par\noindent\begin{minipage}{\linewidth}
 \lstinputlisting[language=C++,linerange={truth_adapter_begin-truth_adapter_end},
  includerangemarker=false]{../ros2_ws/src/motion2d/src/nodes/truth_odometry_node.cpp}
+\end{minipage}\par
 
-第七章 launch 强制关闭模拟器的 \code{publish_truth_tf}，把运动 TF 交给适配器。
-第 04-06 章仍默认开启旧显示方式；不要同时启动两个章节。
+第七章 launch 关闭模拟器的 \code{publish_truth_tf}，把运动 TF 交给适配器。
+运行前停止其他章节的场景，使上述发布关系保持唯一。
 去掉 \code{rviz:=false} 可观察里程计箭头、机器人与扫描。
-本机 RViz 的重置缓存/关闭异常仍按第六章记录，自动 reset 检查建议先不开 GUI。
 
 \begin{lstlisting}[language=bash,numbers=none]
 # Repository root: standalone exercise
@@ -93,9 +104,8 @@ g++ -std=c++17 -I/usr/include/eigen3 -Iexercises/ch07/starter \
 /tmp/ch07_velocity
 \end{lstlisting}
 \textbf{常见错误：}世界速度直接写入 body twist；把起点重定位为零却没同步地图；
-同时打开模拟器与适配器的运动 TF；把本章真值基线称为 SLAM。
+同时打开模拟器与适配器的运动 TF。
 
-\clearpage
 \section{从距离到二维点云}
 单束距离 $r_i$ 与方向 $\alpha_i$ 给出雷达系点：
 \begin{equation}
@@ -103,12 +113,17 @@ g++ -std=c++17 -I/usr/include/eigen3 -Iexercises/ch07/starter \
  \qquad p_i^O=R(\psi(t_s))p_i^L+p(t_s),\quad
  \alpha_i=\alpha_{\min}+i\Delta\alpha.
 \end{equation}
-$t_s$ 是整帧 snapshot 扫描的采集时间。圆心外参为单位变换，因此 base\_link 与 laser
-共用位姿；偏置安装时应改用 $T_{OL}=T_{OB}T_{BL}$，不能只改 frame 字符串。
+第一个式子来自直角三角形：斜边长为 $r_i$，沿雷达 x、y 轴的投影分别是
+$r_i\cos\alpha_i$ 与 $r_i\sin\alpha_i$。第二个式子使用第二章的刚体变换，
+先旋转再平移。$t_s$ 是整帧 snapshot 扫描的采集时间。
+圆心外参为单位变换，因此 base\_link 与 laser 共用位姿；
+偏置安装时按 $T_{OL}=T_{OB}T_{BL}$ 复合外参与机器人位姿。
 例如 $r=2$ m、$\alpha=0$、$p=(3,4)$ m、$\psi=\pi/2$，变换结果为 $(3,6)$ m。
 
+\par\noindent\begin{minipage}{\linewidth}
 \lstinputlisting[language=C++,linerange={scan_projection_begin-scan_projection_end},
  includerangemarker=false]{../ros2_ws/src/motion2d/src/mapping/scan_projection.cpp}
+\end{minipage}\par
 
 只有有限且量程内的回波才进入点云。$+\infty$ 表示“在量程内没有回波”，NaN 表示无效；
 二者都没有表面端点。将无穷替换为最大量程并画成点，会凭空造出一圈障碍物。
@@ -125,28 +140,43 @@ $t_s$ 是整帧 snapshot 扫描的采集时间。圆心外参为单位变换，�
 两种消息都使用 \code{PointCloud2} 并保留扫描时间。每点的 x、y、z 各用一个 float32，
 其中 z=0。消息只有一行（height=1），每点占用 12 字节（point\_step=12）。
 is\_dense=true 表示输出不含无效点。
-这里的 registered 仅表示已按位姿转入统一坐标系，\textbf{尚未进行扫描匹配}。
-本章不累积 \code{/map/cloud}；后续全局位姿修正需要保留关键帧才能重建点云。
+registered 表示这些点已经用位姿转换到 odom，因而可以在同一张图中比较多帧观测。
+当前消息只包含一帧；第十章会保留关键帧，将多帧点云拼接成全局地图。
 
 \textbf{练习 ch07-2：}完成 \path{starter/scan_point.hpp}，用
 \path{check_projection.cpp} 核对手算坐标。进一步说明：
 “没有点的地方”为什么不能直接标为空闲？点云只记录命中表面，射线才携带沿途自由信息。
 
-\clearpage
-\section{时间对齐比点云画出来更重要}
+\section{把扫描与同一时刻的位姿配对}
 同一条话题内部按采样顺序发布，不代表不同话题的回调先后相同。
 mapping 使用两个小缓存，按\textbf{整数纳秒完全相等}匹配扫描与位姿。
-模拟器已在每个扫描时刻输出真值状态，所以本章无需插值。
-真实传感器若没有这一条件，必须设计插值或同步策略，不能直接沿用此假设。
+模拟器在每个扫描时刻输出一条真值状态，这使精确配对成为可能。
+例如扫描采于 0.100 s，而当前收到的位姿采于 0.080 s，机器人以 1 m/s 前进时，
+两者已相差 0.020 m；把旧位姿用于新扫描，会把整帧点云移错这段距离。
+因此 \code{poses_} 以时间戳为键保存位姿，\code{pending_} 保存待处理扫描，
+\code{processReady} 用 \code{poses_.find(scan->first)} 查找相同时刻。
+找到后，下面的代码才进行投影和坐标变换。
 
+\par\noindent\begin{minipage}{\linewidth}
 \lstinputlisting[language=C++,linerange={scan_pose_join_begin-scan_pose_join_end},
  includerangemarker=false]{../ros2_ws/src/motion2d/src/nodes/mapping_node.cpp}
+\end{minipage}\par
 
-队列最多保留 1000 个不同时间的位姿、20 帧待处理扫描，缺少匹配时等待；
-扫描队列满后告警并丢弃最旧帧。不能用最近一次位姿伪装匹配成功。
-正时间的重复扫描不重复处理；t=0 扫描是本模拟器的启动/重置标记，
-即使已暂停在零时刻，也重新建立首帧。暂停心跳只刷新位姿，不产生新点云。
-未来接入更低频的估计里程计时，应输出同一帧扫描的估计位姿，或明确加入插值。
+可以按到达顺序手动跟踪两个缓存：
+\begin{center}
+\begin{tabular}{lll}
+\toprule
+新收到的消息 & 缓存中的对应关系 & 动作\\\midrule
+位姿 0.080 s & 尚无扫描 & 保存位姿\\
+扫描 0.100 s & 缺少 0.100 s 位姿 & 保存扫描，等待\\
+位姿 0.100 s & 找到同时间扫描 & 投影、建图、移除待处理扫描\\
+\bottomrule
+\end{tabular}
+\end{center}
+两个缓存分别最多保存 1000 个位姿、20 帧扫描。后续已有匹配帧时，
+代码跳过并丢弃更早的未匹配扫描，让有效数据继续处理。
+同一正时间的扫描只处理一次；t=0 扫描开始新一轮地图。
+若接入的位姿源不包含扫描时刻，则需要先插值得到 $T(t_s)$，再复用这套投影步骤。
 
 \begin{lstlisting}[language=bash,numbers=none]
 # ch07.launch.py rviz:=false is running
@@ -155,21 +185,17 @@ mapping 使用两个小缓存，按\textbf{整数纳秒完全相等}匹配扫描
 ROS_DOMAIN_ID=47 ros2 run motion2d mapping_node
 ROS_DOMAIN_ID=47 /usr/bin/python3 ../scripts/check_ch07_join.py
 \end{lstlisting}
-后一个脚本先发旧位姿，再发新扫描，确认无输出；补发同时间位姿后才产生点云。
-它也覆盖位姿先到、扫描先到、重复帧和两种重置到达顺序。
-默认场景脚本逐点核对真实 LaserScan、PointCloud2 与里程计，误差容差为
-$3\times10^{-6}$ m，容纳消息 float32 舍入。
+后一个脚本按上表发送消息，还会交换扫描与位姿的到达顺序。
+观察两种顺序都生成相同点云，有助于理解：决定配对的是测量时间，而非回调顺序。
+默认场景脚本则用实际 LaserScan 与里程计逐点重算投影。
 
-\textbf{重置边界：}本章 reset 会回到固定的 t=0 初态并暂停。
-扫描时间回退时清除扫描队列与旧的正时间位姿，里程计回退时清除位姿历史。
-先等待新试验首帧和里程计到齐，再恢复；外部 DDS 旧消息不能被服务远程清空。
-不支持任意乱序回放或跨试验无屏障混流，必要时重启消费者。
+reset 将时间退回零并清空地图和旧缓存。等新试验的首帧扫描与位姿到齐后再恢复，
+消费者就可以从同一初始状态重新积累地图。
 
 RViz 的 \texttt{Registered scan} 显示 \code{/cloud/registered}，橙色点应落在
 可见障碍表面附近。世界几何只是显示对照，可在 Displays 中关闭；
-mapping 的订阅中没有世界列表、真值调试话题或 TF。
+mapping 通过 \code{/scan} 和 \code{/odometry} 获得全部建图输入。
 
-\clearpage
 \section{格子有面积，未知也是一种状态}
 地图将连续空间切成边长 $\rho$ 的正方形，$\rho$ 的单位是 m/格。
 origin 是左下角格子的\textbf{左下角}，不是格心。
@@ -179,8 +205,11 @@ origin 是左下角格子的\textbf{左下角}，不是格心。
  i_y=\left\lfloor\frac{y-o_y}{\rho}\right\rfloor,\quad
  j=i_yW+i_x.
 \end{equation}
-$W,H$ 是格数，x 索引变化最快。索引 $j$ 的格心是
-$o+\rho(i_x+\tfrac12,i_y+\tfrac12)$。
+先减原点得到相对距离，再除格长得到走过的格数，向下取整就落到当前格。
+$W,H$ 是横、纵格数。每完整走过一行跨过 $W$ 个元素，因此一维索引为 $i_yW+i_x$。
+格心位于每个方向的半格处，坐标为 $o+\rho(i_x+\tfrac12,i_y+\tfrac12)$。
+例如 $o=(-1,-1)$ m、$\rho=.5$ m、$W=6$，位置 $(.2,-.1)$ m 对应
+$(i_x,i_y)=(2,1)$、$j=8$，格心为 $(.25,-.25)$ m。
 边界采用半开区间 $[o_x,o_x+W\rho)\times[o_y,o_y+H\rho)$；
 先检查边界，再取 floor，避免负数直接转整数时错误地朝零截断。
 
@@ -212,59 +241,156 @@ unknown：还没有射线信息；free：多次观测支持空闲；occupied：�
 一片没有点云的区域，可能空旷，也可能被墙遮挡，不能把它全部刷白。
 \end{notebox}
 本章使用独立的 observed 掩码：尚未观察时输出 -1；已观察但概率恰为 0.5 时输出 50。
-二者不相等。地图固定大小；雷达中心在地图外时拒绝本帧地图更新并告警，不静默扩图。
+前者表示没有观测，后者表示已有观测但正反证据相当。
+地图大小固定；若雷达中心走出存储范围，应扩大配置范围后重新建图。
 
-\clearpage
 \section{DDA：沿射线依次走过哪些格子}
-将线段写成 $p(t)=s+t(e-s)$，$0\le t\le1$。
-记 $\Delta=e-s$。下一条竖格线和横格线的参数分别为 $t_x,t_y$；
-穿过一格后，增量为
+DDA（数字微分分析）通过比较“下一次穿过哪条格线”遍历射线。
+将起点 $s$ 到终点 $e$ 的线段写成 $p(t)=s+t\Delta$，其中 $\Delta=e-s$、$0\le t\le1$。
+这里 $t$ 是无量纲的线段比例，与上一节的采样时间无关。
+设当前格为 $(i_x,i_y)$，若 $\Delta_x>0$，下一条竖格线在
+$x_b=o_x+(i_x+1)\rho$；若 $\Delta_x<0$，则在 $x_b=o_x+i_x\rho$。
+令 $s_x+t_x\Delta_x=x_b$，解得
 \begin{equation}
- \delta t_x=\frac{\rho}{|\Delta_x|},\qquad
- \delta t_y=\frac{\rho}{|\Delta_y|}.
+t_x=\frac{x_b-s_x}{\Delta_x}.
 \end{equation}
-比较两个下一次穿线时刻，较小的一侧先前进一步；轴向差为零时对应值取 $+\infty$。
-两者恰相等表示经过角点，本章同时推进两轴，不计只触到角点的旁边格子。
-这是观测射线遍历，不能拿来证明圆盘机器人无碰撞。
+越过一条竖格线后，下条格线沿行进方向再远 $\rho$，所以参数增加
+$\delta t_x=\rho/|\Delta_x|$。同理有
+\begin{equation}
+t_y=\frac{y_b-s_y}{\Delta_y},\qquad
+\delta t_x=\frac{\rho}{|\Delta_x|},\quad
+\delta t_y=\frac{\rho}{|\Delta_y|}.
+\end{equation}
+比较 $t_x,t_y$：较小者先到，只推进相应轴；然后给该轴参数加上 $\delta t$。
+若某轴 $\Delta$ 为零，射线永远不会穿过该轴的下一条格线，将对应参数置为 $+\infty$。
+若两者相等，射线经过角点，同时推进两轴，只擦到角点的旁格不计入观测。
 
+\subsection{跟着一条射线手算六个格子}
+取单位格长、原点为零，$s=(.5,.5)$、$e=(3.5,2.5)$，则 $\Delta=(3,2)$。
+第一次穿竖线为 $t_x=.5/3=1/6$，第一次穿横线为 $t_y=.5/2=1/4$。
+后续竖线每隔 $1/3$，横线每隔 $1/2$：
+\begin{center}
+\begin{tabular}{llll}
+\toprule
+当前格 & 下一竖线参数 & 下一横线参数 & 下一格\\\midrule
+$(0,0)$ & $1/6$ & $1/4$ & $(1,0)$\\
+$(1,0)$ & $1/2$ & $1/4$ & $(1,1)$\\
+$(1,1)$ & $1/2$ & $3/4$ & $(2,1)$\\
+$(2,1)$ & $5/6$ & $3/4$ & $(2,2)$\\
+$(2,2)$ & $5/6$ & $5/4$ & $(3,2)$\\
+\bottomrule
+\end{tabular}
+\end{center}
+\begin{center}
+\begin{tikzpicture}[x=1.1cm,y=1.1cm,>=Stealth]
+\foreach \x/\y in {0/0,1/0,1/1,2/1,2/2,3/2}
+  \fill[tealblue!16] (\x,\y) rectangle ++(1,1);
+\draw[step=1,thin,linecolor] (0,0) grid (4,3);
+\draw[->,navy] (0,0)--(4.5,0) node[right] {$x$};
+\draw[->,navy] (0,0)--(0,3.4) node[above] {$y$};
+\draw[->,thick,orange] (.5,.5)--(3.5,2.5);
+\fill[navy] (.5,.5) circle (.04) node[below] {$s$};
+\fill[navy] (3.5,2.5) circle (.04) node[above] {$e$};
+\foreach \x in {0,1,2,3,4}\node[below] at (\x,0) {\small\x};
+\foreach \y in {1,2,3}\node[left] at (0,\y) {\small\y};
+\node[anchor=west,align=left] at (4.8,1.5) {浅色格依次被访问\\端点格也包含在结果中};
+\end{tikzpicture}
+\end{center}
+
+\par\noindent\begin{minipage}{\linewidth}
 \lstinputlisting[language=C++,linerange={grid_dda_begin-grid_dda_end},
  includerangemarker=false]{../ros2_ws/src/motion2d/src/mapping/occupancy_grid.cpp}
+\end{minipage}\par
 
-起点必须在地图内，终点可以在外部。先将线段裁到地图范围，
-再遍历起点格到裁剪后的终点格。外部回波只提供图内的自由信息；
-裁剪边界\textbf{不是测到的表面}，不能在那里标占据。
-负方向终点恰好在格线上时，其所属格子由半开规则决定；已经到达的轴不再前进。
+代码中的 \code{step_x}、\code{step_y} 分别为 $-1,0,1$，表示格索引的变化方向。
+\code{next_x/y} 对应 $t_x,t_y$，\code{dt_x/y} 对应上述增量。
+循环先判断某轴是否已经到达终点格，抵达后把该轴下一次穿线参数设为无穷。
+例如负方向终点恰在格线上，半开区间规则可能让当前格已经包含终点；这时应停在该格。
+
+\subsection{回波落在地图外时怎样处理}
+起点在地图内时，射线会先穿过某个地图边界。求离开参数仍使用
+$s_x+t\Delta_x=x_{\rm boundary}$：向右检查右边界，向左检查左边界，y 方向同理。
+取所有离开参数与 1 中的最小值 $t_{\rm end}$，将终点裁为 $s+t_{\rm end}\Delta$。
+例如地图范围 $[0,4)\times[0,3)$，$s=(.5,.5)$、$e=(6.5,2.5)$，
+向右离开参数为 $(4-.5)/6=7/12$，向上离开为 $(3-.5)/2=5/4$，
+故裁剪点为 $(4,5/3)$。遍历在右侧最后一列结束。
+
+上边界和右边界不包含在半开地图内，代码用 \code{nextafter} 将裁剪坐标移到紧邻边界的内部浮点数，
+再求终点格。原回波在图外，图内格子获得自由证据；只有原回波确实落入图内，终点格才获得占据证据。
 
 \textbf{练习 ch07-3：}补完 \path{starter/grid_traversal.hpp} 的循环。
 练习已准备好下一格线的参数，只考虑单位格长、原点为零、两个端点在图内；
 工程核心另外包含边界裁剪。使用 \path{check_traversal.cpp} 验证水平、竖直、
 正反对角线、同格和格线终点。先画格子手算访问次序，再运行参考解。
 
-\clearpage
 \section{把射线变成概率证据}
-设某格占据概率为 $p$，对数几率为
-\begin{equation}
- L=\log\frac{p}{1-p},\qquad p=\frac1{1+\exp(-L)}.
-\end{equation}
-先验 $p_0=0.5$，所以 $L_0=0$。使用简化的逆传感器模型：
-命中格给 $p_{\rm hit}=0.7$，穿过格给 $p_{\rm miss}=0.4$。
-在独立观测近似下，将贝叶斯乘法改写为加法：
-\begin{equation}
- L_k=\operatorname{clip}\left(L_{k-1}+
- \log\frac{p_{\rm evidence}}{1-p_{\rm evidence}}-L_0,\ -4,\ 4\right).
-\end{equation}
-命中增加约 0.847，穿过减少约 0.405。截断避免旧证据无限累积，
-也让后续矛盾观测有机会改变地图；默认输出概率约在 2\% 到 98\% 之间。
+一条光束经过一个格子，支持“这个格子空闲”；回波落进格子，支持“这里有障碍”。
+噪声会让相邻帧互相矛盾，因此我们用概率积累证据，而非一次读数就永久决定颜色。
 
+\subsection{从条件概率到几率相乘}
+用 $O$ 表示“该格占据”，$F$ 表示“该格空闲”，两者概率和为 1。
+$P(O\mid z)$ 读作“已知观测 $z$ 后，占据的概率”。条件概率定义为
+$P(O\mid z)=P(O,z)/P(z)$，而同一个联合概率也可写成
+$P(O,z)=P(z\mid O)P(O)$。两式合并得到贝叶斯公式；对 $F$ 做同样的变换，再相除：
+\begin{equation}
+\frac{P(O\mid z)}{P(F\mid z)}
+=\frac{P(z\mid O)P(O)/P(z)}{P(z\mid F)P(F)/P(z)}
+=\frac{P(z\mid O)}{P(z\mid F)}\frac{P(O)}{P(F)}.
+\end{equation}
+占据概率与空闲概率的比值称为\textbf{几率}。例如占据概率 .75，对应几率 $.75/.25=3$。
+上式表示：新几率等于旧几率乘以本次观测的似然比。
+在给定格子状态后把各次观测视为独立，就可以逐次使用这一更新。
+
+传感器模型更容易直接设置“看到一条证据后，格子有多大概率占据”。
+本章以先验 $p_0=.5$ 为基准，设置命中时 $p_{\rm hit}=.7$、穿过时 $p_{\rm miss}=.4$。
+这叫\textbf{逆传感器模型}：从观测推格子状态。
+将上面的几率公式应用到这一次证据，可解出似然比
+\begin{equation}
+\frac{P(z\mid O)}{P(z\mid F)}
+=\frac{p_{\rm evidence}}{1-p_{\rm evidence}}
+ \bigg/\frac{p_0}{1-p_0}.
+\end{equation}
+除以先验几率，是为了每次更新只加入新证据的影响。
+
+\subsection{取对数，乘法就变成加法}
+定义对数几率 $L=\log[p/(1-p)]$。由于 $\log(ab)=\log a+\log b$，
+一次更新可写成
+\begin{equation}
+L_k=L_{k-1}+\log\frac{p_{\rm evidence}}{1-p_{\rm evidence}}-L_0,
+\qquad L_0=\log\frac{p_0}{1-p_0}=0.
+\end{equation}
+恢复概率也只需代数变形：$e^L=p/(1-p)$，于是 $p(1+e^L)=e^L$，即
+\begin{equation}
+p=\frac{1}{1+e^{-L}}.
+\end{equation}
+命中增量为 $\log(.7/.3)\approx.847$，穿过增量为
+$\log(.4/.6)\approx-.405$。两次穿过后 $L\approx-.811$，概率为
+$1/(1+e^{.811})\approx.308$；两次命中后概率约为 .845。
+一次命中与一次穿过的增量大小不同，因此它们相加后仍偏向占据。
+
+\subsection{让一帧扫描只贡献一次格子证据}
+相邻光束常常经过同一格，多束回波也可能来自同一表面。
+本章将一帧中的重复证据合并，并将每格 $L$ 限制在 $[-4,4]$：
+\begin{equation}
+L_k=\min\!\left(4,\max\!\left(-4,L_{k-1}+\Delta L\right)\right).
+\end{equation}
+这是代码中的 \code{clamp}。上限避免长时间观测把置信度推得过高，也让后来的相反证据
+能较快改变地图。$L=\pm4$ 对应概率约为 .018 与 .982。
+例如先把 $L$ 积到 4，之后连续十帧穿过，该值就降到约 $-.055$，概率重新接近 .5。
+
+\par\noindent\begin{minipage}{\linewidth}
 \lstinputlisting[language=C++,linerange={grid_logodds_begin-grid_logodds_end},
  includerangemarker=false]{../ros2_ws/src/motion2d/src/mapping/occupancy_grid.cpp}
+\end{minipage}\par
 
-evidence 的两个标志分别表示本帧有射线穿过、有回波落入。
-\textbf{同一帧同一格最多更新一次，命中优先}。
-否则几百束激光共享的起点格会在一帧内被推到极限，
-细障碍的回波格也可能被相邻射线反复“清掉”。
-相邻束与相邻帧实际相关，因此这些数值是教学用置信度模型，
-不应声称得到了严格校准的独立贝叶斯后验。
+\code{evidence} 用两个二进制位保存本帧信息：最低位 1 表示穿过，下一位 2 表示命中。
+按位或 \code{|=} 合并后，共有四种值：0 为无信息，1 为仅穿过，2 为仅命中，3 为两者都有。
+\code{evidence[i] & 2} 检查命中位，因此 2 和 3 都使用命中增量。
+先收集整帧证据再更新，使每帧每格最多加一次增量，且命中优先。
+这样多束激光共享的起点格不会仅凭一帧就迅速达到置信度下限。
+
+这些概率参数控制证据积累的速度。实际相邻帧仍有相关性，调整参数时应观察地图
+对噪声和变化障碍的响应；后续更精细的传感器模型可以沿用同一套对数几率存储。
 
 \begin{center}
 \begin{tabular}{lll}
@@ -276,11 +402,10 @@ evidence 的两个标志分别表示本帧有射线穿过、有回波落入。
 \bottomrule
 \end{tabular}
 \end{center}
-这些数值与阈值是课程约定，不是 ROS 强制的占据概率模型。
-未来规划默认把 unknown 与 uncertain 当作阻塞；占据概率也不是 ESDF 的米制距离。
-第一次穿过仅得到 40，第二次约为 31；不要要求单帧就将空闲格写成零。
+这些分类阈值由课程配置决定。第一次穿过得到 40，仍属于证据不足；
+第二次约为 31，才进入 free。后续规划默认将 unknown 与 uncertain 当作阻塞区域，
+第十二章再将地图转换成以米为单位的障碍距离。
 
-\clearpage
 \section{有限回波、无回波和无效读数}
 \begin{center}
 \begin{tikzpicture}[x=9mm,y=9mm,>=Stealth]
@@ -294,8 +419,10 @@ evidence 的两个标志分别表示本帧有射线穿过、有回波落入。
 \end{tikzpicture}
 \end{center}
 
+\par\noindent\begin{minipage}{\linewidth}
 \lstinputlisting[language=C++,linerange={grid_rays_begin-grid_rays_end},
  includerangemarker=false]{../ros2_ws/src/motion2d/src/mapping/occupancy_grid.cpp}
+\end{minipage}\par
 
 有效有限距离：终点格为占据，之前的格子为空闲证据，不越过回波继续更新。
 $+\infty$：沿方向清到 range\_max 所在格，\textbf{不产生占据端点}。
@@ -305,44 +432,35 @@ NaN、负无穷或量程外有限值：整条射线跳过，不清自由区。
 真实设备的盲区与异常编码需由适配层重新确认。
 
 一条射线只约束它穿过的格子；噪声也可能让端点前后摆动，所以障碍边界会变厚。
-unknown 不能被完整世界几何“补全”。教学演示中的完整世界只供可选对照显示与独立评估。
+遮挡后的格子保持 unknown，等待机器人换个位置再观测。
 
 \code{/map} 在每帧成功更新后发布，使用 map 帧、扫描采样时间、可靠且
 transient-local 的深度 1 队列。晚打开 RViz 也能读到暂停时的最后地图。
 reset 的首帧先清空概率与 observed 掩码，再插入 t=0 观测；
 map\_load\_time 记录本轮首次插入的扫描时间。
 
-\clearpage
 \section{在 RViz 中检查“看见了什么”}
 \begin{lstlisting}[language=bash,numbers=none]
 ros2 launch motion2d_bringup ch07.launch.py
-# For automated resets, launch with rviz:=false instead.
+# Another terminal, same ROS environment
 /usr/bin/python3 ../scripts/check_ch07_map.py
 \end{lstlisting}
 
 \begin{figure}[h]
 \centering
 \includegraphics[width=.98\linewidth]{figures/ch07_observed_map.png}
-\caption{本机 RViz2 实测。完整世界显示关闭；浅色是已观测自由域，
-深色轮廓是占据证据，灰色是未知。橙色点为当前回波，箭头为显式真值里程计。}
+\caption{RViz2 中的观测地图。浅色是已观测自由域，深色轮廓是占据证据，
+灰色是未知。橙色点为当前回波，箭头表示真值里程计位姿。}
 \end{figure}
 
-一米半径的圆参考只覆盖起点附近视野，不是全图探索。
-右上方目标周围仍未知；这正是观测地图与完整真值世界的区别。
+一米半径的圆参考覆盖起点附近视野。右上方目标周围仍未知，因为激光尚未照到那里。
 打开 Simulation world 可对照形状，但该显示开关不影响 mapping 的输入。
 
-\textbf{本增量验收：}82 个 GoogleTest 用例通过；DDA 另用 1000 条固定种子线段，
-与逐格线段--方格求交独立比对。ROS 默认场景 t=0 到 1 s，
-已观测格数从 9579 增至 10154；晚加入接收、暂停、首帧重播和连续零时刻 reset 均通过。
-扫描配对与真值适配器检查也已回归。
-本机 RViz 的既有 reset/退出问题仍未修复；截图在自动检查后重新运行 GUI 获取。
-
-\clearpage
-\section{独立真值栅格：只能用来评估}
-“用真值位姿建图”与“直接把真值地图交给建图器”是两件事。
-本章 \code{mapping_demo} 先生成扫描，再只用扫描和位姿更新观测图；
-更新结束后才调用 \code{rasterizeTruth} 生成对照。
-运行中的 \code{mapping_node} 不调用这个评估函数。
+\section{用几何参考评价观测地图}
+为了量化建图结果，\code{mapping_demo} 在观测图更新结束后，
+调用 \code{rasterizeTruth} 将完整环境几何栅格化，生成一张参考图。
+参考图可以回答“这个格子是否接触真实障碍”；观测图则回答“当前扫描对这个格子提供了什么证据”。
+对照两张图，既能检查已观测区域，也能看到仍未覆盖的地方。
 
 \begin{figure}[h]
 \centering
@@ -351,10 +469,53 @@ ros2 launch motion2d_bringup ch07.launch.py
 灰色未知没有被补全；橙线是采样轨迹。参考图不作为建图输入。}
 \end{figure}
 
-参考格子只要与实体或房间边界接触就记占据。圆用“圆心到方格最近点的距离”
-与半径比较；凸多边形用分离轴检验。它遍历完整几何，
-\textbf{不调用射线模拟器或地图更新函数}，从而避免用同一个建图结果检验自己。
-这仍是数值仿真的交叉验证，不是外部实测真值。
+\par\noindent\begin{minipage}{\linewidth}
+参考格子只要与实体或房间边界接触就记占据。
+对于圆，设格子范围为 $[l_x,u_x]\times[l_y,u_y]$，圆心为 $c$。
+最小化到格子的平方距离
+$(x-c_x)^2+(y-c_y)^2$ 时，两轴可以分别求最小值：
+若 $c_x$ 在区间内就取 $x=c_x$，否则取最近端点，y 同理。因此
+\begin{equation}
+x_* =\min(u_x,\max(l_x,c_x)),\quad
+y_* =\min(u_y,\max(l_y,c_y)),\quad
+\|c-(x_*,y_*)\|^2\le r^2
+\end{equation}
+是圆与格子接触的判据。它对应代码的逐轴 \code{cwiseMax(low).cwiseMin(high)}。
+\end{minipage}\par
+
+对于凸多边形，使用\textbf{分离轴检验}。沿方向 $n$ 的投影是标量 $n^\top p$；
+对全部顶点取最小和最大投影，就得到图形在该轴上的区间。
+若两个区间不相交，这两个图形显然也不相交。例如多边形投影为 $[1,2]$、格子为 $[3,4]$，
+位于中间的投影值 2.5 就能画出一条将二者分开的直线。
+
+把多边形顶点记为 $a_i$，格子顶点记为 $b_j$，上述判断写成
+\[
+\max_i n^\top a_i < \min_j n^\top b_j
+\quad\text{或}\quad
+\max_j n^\top b_j < \min_i n^\top a_i.
+\]
+下图沿 x 轴投影即可分离。若 x、y 两轴投影都重叠，则继续检查斜边的法向。
+\begin{center}
+\begin{tikzpicture}[x=1cm,y=1cm,>=Stealth]
+\draw[fill=tealblue!15,tealblue,thick] (1,1)--(2,1.5)--(1.3,2.3)--cycle;
+\draw[fill=navy!12,navy,thick] (3,1) rectangle (4,2);
+\draw[dashed,gray] (1,1)--(1,0) (2,1.5)--(2,0) (3,1)--(3,0) (4,1)--(4,0);
+\draw[->] (.5,0)--(4.6,0) node[right] {$n=(1,0)$};
+\draw[very thick,tealblue] (1,0)--(2,0);
+\draw[very thick,navy] (3,0)--(4,0);
+\foreach \x in {1,2,3,4}\node[below] at (\x,0) {$\x$};
+\draw[dashed,orange] (2.5,.5)--(2.5,2.6) node[above] {分隔线};
+\node[left] at (1,1.7) {多边形};\node[right] at (4,1.5) {格子};
+\end{tikzpicture}
+\end{center}
+
+为什么检查各边的法向就够了？先想象两个凸多边形分离，把分隔线平移到刚好碰到一个图形，
+再绕接触顶点转动；在仍能分隔的角度范围端点，线会贴到某一条边，
+或同时碰到两个顶点。后一种情形可换到另一侧的支撑线继续转动，最终由某条边确定分隔方向。
+因此只需检查两个图形全部边的法向。\footnote{可参阅 David Eberly 的\href{https://www.geometrictools.com/Documentation/MethodOfSeparatingAxes.pdf}{分离轴方法}第 2--3 节中的投影与接触图示。}
+实现收集方格的 $(1,0),(0,1)$ 与多边形每条边 $e$ 的垂直向量 $(-e_y,e_x)$，
+逐轴比较投影区间。任一轴分离就返回无接触；全部区间重叠或刚好相触就记占据。
+因为 $e^\top(-e_y,e_x)=0$，该方向确实垂直于边。将方向乘正数只会同比例缩放两个投影区间，故比较区间时无需归一化。
 
 评估先记录 observed 比例，再排除 unknown 与 uncertain，
 仅对有明确判断的格子统计 TP、FP、FN、TN。TP 是正确的占据预测，FP 是把参考自由格判为占据，
@@ -363,14 +524,19 @@ FN 是把参考占据格判为自由，TN 是正确的自由预测。
  {\rm precision}=\frac{\rm TP}{\rm TP+FP},\qquad
  {\rm recall}_{\rm evaluated}=\frac{\rm TP}{\rm TP+FN}.
 \end{equation}
-分母为零时记 NaN，而不是填 100\%。这里的 recall 只针对已评估格子，
-\textbf{不是整张世界地图的召回率}；unknown 也不能当作预测正确的自由格。
+precision 的分母是“所有被判为占据的格子”，所以它回答这些判断中有多少正确。
+recall 的分母是“评估区域中真正占据的格子”，所以它回答其中有多少被找到。
+例如 TP=8、FP=2、FN=4、TN=6，则 precision=$8/10=.8$，recall=$8/12\approx.667$。
+若分母为零，该比例没有定义，记录为 NaN。
 
-整格接触真障碍的参考规则比单射线“穿过了一部分格子”更保守。
-因此无噪声也可能有 FN；它揭示栅格边界与观测模型的差异，
-不能直接解读为米制定位误差或连续碰撞安全证明。
+这里先排除 unknown 与 uncertain，所以指标描述的是\emph{已有明确判断的区域}。
+还应同时报告观测比例 $N_{\rm observed}/(WH)$，它包含已观测但尚不确定的格子。
+例如 100 格中只观测 20 格，即使这 20 格全部判断正确，整张地图仍有 80 格等待探索。
 
-\clearpage
+一个格子可能一角接触障碍，另一部分仍可被光束穿过。
+参考图按“整格是否接触”记占据，观测图却可能积累自由证据；因此边缘格会出现 FN，
+即使位姿和量程都精确。这个差异在分辨率较粗时更明显。
+
 \section{实验一：分辨率、噪声与评价指标}
 固定世界 seed=42、8 圆/8 多边形，沿一米圆参考运动，
 在 $t=0,0.1,\ldots,15.9$ s 采集 160 帧、每帧 720 束、最大量程 10 m。
@@ -378,6 +544,7 @@ FN 是把参考占据格判为自由，TN 是正确的自由预测。
 每组噪声的扫描只生成一次，在三种分辨率上复用；
 角度和量程采用与 LaserScan 一致的 float32 元数据。
 
+\clearpage
 \begin{figure}[h]
 \centering
 \includegraphics[width=\linewidth]{figures/ch07_resolution.png}
@@ -402,9 +569,11 @@ FN 是把参考占据格判为自由，TN 是正确的自由预测。
  every last row/.style={after row=\bottomrule}
 ]{data/ch07_mapping.csv}
 \end{center}
-完整 CSV 同时保存不确定格数与四项计数。不要只挑更高的 recall：
-噪声让部分障碍内部也被“看到”，把占据带画厚，可能提高此指标；
-观测比例增大也可能来自越过真实表面的噪声，不能称为探索能力变强。
+完整 CSV 同时保存不确定格数与四项计数。
+噪声可能把端点推到真实表面之后，增加那里积累的占据证据，
+使参考障碍中的更多格子被判占据，于是 recall 上升。
+与此同时，也可能把本来空闲的格子判为占据，使 precision 下降。
+因此要把观测比例、两项指标与地图图像放在一起看。
 
 \clearpage
 \section{实验二：墙到底变厚了多少米}
@@ -419,8 +588,10 @@ FN 是把参考占据格判为自由，TN 是正确的自由预测。
  w_y=(i_{x,\max}-i_{x,\min}+1)\rho,\qquad
  \bar w=\frac1{N_{\rm rows}}\sum_y w_y.
 \end{equation}
-跨度包括中间间隙，并非逐格相加的实体面积；
-没有占据的行不参与均值，必须同时报告行数，防止漏检被平均值掩盖。
+例如首末格索引为 3 和 5，共跨过第 3、4、5 三格，因此长度为 $3\rho$；
+公式中的 $+1$ 正是将格心间距补成完整格子的跨度。
+跨度包括中间间隙。没有占据格的行不参加平均，所以表中同时列出有效行数，
+便于分辨“占据带较窄”与“部分行没有检出墙”。
 
 \begin{figure}[h]
 \centering
@@ -442,10 +613,10 @@ FN 是把参考占据格判为自由，TN 是正确的自由预测。
 \end{center}
 无噪声时，本实验占据带是一格厚；0.1 m 分辨率下，
 噪声从 0 增至 0.05 m 时，平均跨度由 0.10 增至 0.32 m。
-这不是障碍真正变厚，而是有限格长、端点噪声和证据更新共同造成的结果。
-降低分辨率数值不能自动修复测距误差；更合理的逆传感器模型留作进阶。
+实际墙面仍在 $x=4.03$ m，占据带的宽度来自有限格长、端点噪声与证据积累。
+细格能表示更多空间细节，但仍保留测距误差；进阶时可用沿射线分布的命中概率
+代替“只有一个终点格命中”的模型，再比较占据带的变化。
 
-\clearpage
 \section{复现实验与本章练习}
 \begin{lstlisting}[language=bash,numbers=none]
 # Repository root, after sourcing the ROS install environment
@@ -457,12 +628,13 @@ g++ -std=c++17 -Iexercises/ch07/starter \
 /tmp/ch07_metrics
 \end{lstlisting}
 绘图使用主机 Matplotlib/NumPy。CSV 保存在实验目录；教材表格读取
-\path{textbook/data/ch07_mapping.csv} 与 \path{ch07_wall.csv} 的已验收副本。
+\path{textbook/data/ch07_mapping.csv} 与 \path{ch07_wall.csv}。
 PGM 文件是紧凑实验数据，255 表示未知，其余为概率百分比，绘图按物理 y 轴向上显示。
-同机同标准库的两次运行，全部 18 个输出文件逐字节一致。
 
+\par\noindent\begin{minipage}{\linewidth}
 \lstinputlisting[language=C++,linerange={observed_metrics_begin-observed_metrics_end},
  includerangemarker=false]{../ros2_ws/src/motion2d/src/evaluation/map_evaluation.cpp}
+\end{minipage}\par
 
 \begin{enumerate}
 \item \textbf{理解：}为什么已知定位仍会得到不完整地图？
@@ -474,6 +646,5 @@ PGM 文件是紧凑实验数据，255 表示未知，其余为概率百分比，
   再改变噪声；说明表面变厚如何影响精度与召回率。
 \end{enumerate}
 
-\textbf{完成边界：}本章具备已知位姿下的观测建图，四道代码练习与参考解同步，
-不是 SLAM。下一章先研究如何从扫描本身估计运动；在得到可验证的估计位姿之前，
-不把真值 TF 混入估计器。建图接口仍是扫描加位姿。
+本章已经把扫描与位姿连接到观测地图。下一章保留这个接口，
+研究怎样从相邻扫描的几何关系估计位姿，使机器人在未知自身运动时也能逐步建图。
