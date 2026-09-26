@@ -23,7 +23,7 @@ struct MpcResult {
   QpResult solver;
   Eigen::Vector2d force=Eigen::Vector2d::Zero();
   Eigen::VectorXd predicted_states;
-  double violation=0;
+  double violation=std::numeric_limits<double>::quiet_NaN();
 };
 /** @brief Small dense linear MPC; yaw stays in the independent PD controller.
  * @details Optimizes force with exact ZOH dynamics and linear node constraints.

@@ -12,3 +12,6 @@ g++ -std=c++17 -I/usr/include/eigen3 -Iexercises/ch18/starter exercises/ch18/che
 ```
 
 评分：离散模型/单位30%，增量矩阵30%，同条件数据与失败解释40%。完整演示不依赖习题答案。
+
+6. ROS实验：从/control/mpc_status按观测时间统计耗时分位数和失败次数；不要把ms图纵轴误标为s。
+   独立域的check_mpc_failure.py应观察time_limit/零迭代/空预测/NaN违反量及(0,-.4)N新制动力，不能只读一条状态字符串。

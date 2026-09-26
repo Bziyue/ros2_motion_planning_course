@@ -136,3 +136,52 @@ PD 最大速度分量 0.5992 m/s；MPC 约 0.500001 m/s，后者的微小超量�
 MPC 有 21 次 max\_iterations，不能据此断言不可行；制动切换导致实际最大力变化率达 35 N/s。
 其最小净空仍有 2.6933 m，但空房间的这次结果不证明任意障碍场景安全。
 完整 summary.csv 与 failures.csv 分开记录各次误差、耗时、状态及新的制动力。
+
+\clearpage
+\section{在 ROS 中观察每次预测与失败}
+\begin{lstlisting}[language=bash]
+ros2 launch motion2d_bringup ch18.launch.py rviz:=false
+# 另一个终端；默认暂停，检查脚本会推进 12 s
+/usr/bin/python3 scripts/check_ch18.py
+# 相同配置切回第 17 章控制器：重新启动时加 controller:=pd
+\end{lstlisting}
+tracker\_node 的 control.controller 选择 pd/mpc；两者复用相同的观测时间、坐标变换、
+参考系数和物理限幅接口。MPC 预测步长取 control.rate\_hz 的倒数；默认 50 Hz、20 步。
+这些是启动参数，改 YAML 后重启；不要把参数服务接受了新值误解为已重建控制器。
+正常链路假设最近发布的限幅力已被模拟器接收，并将它用于下一次增量约束。
+
+\begin{center}\small
+\begin{tabular}{lp{8.5cm}}\toprule
+接口 & 用法\\\midrule
+/control/mpc\_status & MpcStatus，header 是观测时刻，status/iterations 为求解状态和次数\\
+compute\_seconds & 组装 QP、求解和热启动更新的墙钟耗时，单位 s\\
+primal/dual\_residual & 终止条件所用残差；未迭代时为正无穷\\
+max\_violation & 仅 solved 有效；失败为 NaN，不假报零违反量\\
+/control/prediction & odom 系预测位置，逐点时间是未来执行采样时刻\\\bottomrule
+\end{tabular}
+\end{center}
+预测路径供 RViz 观察，实际控制仍使用力。失败发布空预测，清除热启动，输出新的限幅阻尼力；
+yaw 同时切到阻尼力矩。观测中断、过旧、暂停去重和时钟回退沿用第 17 章策略。
+默认求解墙钟预算 0.01 s；这是迭代间检查的预算，不保证整条 ROS 链路或单次分解在预算内完成。
+
+\paragraph{主机实测}
+12 s、600 个对齐观测时刻，600 次全部 solved；位置 RMS 为 $1.148\times10^{-5}$ m、
+最大误差 $3.519\times10^{-5}$ m，yaw RMS 为 $6.52\times10^{-5}$ rad；
+最小净空 2.8000 m，组装与求解耗时 P95 为 0.234 ms。
+这是空房间、真值定位、精确模型的受力跟踪实验，不是带 SLAM 误差的导航成绩。
+检查脚本同时验证预测点数、未来时间戳、残差与暂停/reset，GUI 本轮未验收。
+
+\paragraph{故意制造超时，检查真正发出的消息}
+在独立域使用下列启动参数：
+\begin{lstlisting}
+use_sim_time=true
+control.controller=mpc
+mpc.max_wall_seconds=1.0e-12
+\end{lstlisting}
+执行脚本 check\_mpc\_failure.py，由它提供唯一 /clock 和合成里程计。
+机体系前向速度 0.2 m/s、yaw=$\pi/2$ 时，世界系制动力应为 $(0,-0.4)$ N。
+验收 time\_limit、零迭代、空预测、NaN 违反量与这个新制动力，不只检查日志里有没有“超时”。
+
+\paragraph{练习}
+记录 50 Hz、N=10/20/40 的 MpcStatus 耗时分位数，与核心实验区分；
+改变预算触发失败，并检查制动力时间戳和方向。再暂停仿真，确认墙钟等待不会产生新的预测点。

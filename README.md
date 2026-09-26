@@ -2,7 +2,7 @@
 
 从二维世界、圆盘机器人和模拟传感器开始，逐步学习定位建图、路径与轨迹规划、跟踪控制。教材、代码和练习按章节对应。
 
-**当前状态：第 01–17 章已完成。** 已有随机世界、四种机器人模型、CPU 激光雷达、六轴白噪声 IMU、统一传感器时间、真值建图、激光/IMU 融合与回环 SLAM。大纲提交为 `5c0c642`；每完成一个可运行、已验证的功能就单独提交，教材和练习同步更新。已接入观测地图上的 A* 和 RViz 目标；已提供距离场与梯度可视化，第13章走廊已接入观测地图，第14章五次轨迹和理想连续执行已完成，第15章 MINCO 内核、软约束优化与观测地图ROS预览已完成，第16章样条、连续认证与执行已完成，第17章前馈PD与ROS跟踪已完成，第18章线性MPC核心已实现，ROS接入继续实施。
+**当前状态：第 01–18 章已完成。** 已有随机世界、四种机器人模型、CPU 激光雷达、六轴白噪声 IMU、统一传感器时间、真值建图、激光/IMU 融合与回环 SLAM。大纲提交为 `5c0c642`；每完成一个可运行、已验证的功能就单独提交，教材和练习同步更新。已接入观测地图上的 A* 和 RViz 目标；已提供距离场与梯度可视化，第13章走廊已接入观测地图，第14章五次轨迹和理想连续执行已完成，第15章 MINCO 内核、软约束优化与观测地图ROS预览已完成，第16章样条、连续认证与执行已完成，第17章前馈PD与ROS跟踪已完成，第18章线性MPC与ROS已完成，继续接通第19章综合导航。
 
 [教材 PDF](output/pdf/course.pdf) · [实施进度](docs/PROGRESS.md) · [主机验收记录](docs/VALIDATION.md)
 
@@ -30,7 +30,7 @@
 | 15 | [二维 MINCO](chapters/ch15/README.md) | [ch15](exercises/ch15/README.md) | `ch15.launch.py`、`minco_demo` |
 | 16 | [二维 Spline2D](chapters/ch16/README.md) | [ch16](exercises/ch16/README.md) | `ch16.launch.py`、`spline_demo`、上游对照 |
 | 17 | [前馈与PD跟踪](chapters/ch17/README.md) | [ch17](exercises/ch17/README.md) | `ch17.launch.py` / `pd_tracking_demo` |
-| 18 | [线性MPC](chapters/ch18/README.md) | [ch18](exercises/ch18/README.md) | 核心实验 `mpc_demo` |
+| 18 | [线性MPC](chapters/ch18/README.md) | [ch18](exercises/ch18/README.md) | `ch18.launch.py` / `mpc_demo` |
 
 ~~~bash
 source /opt/ros/lyrical/setup.bash

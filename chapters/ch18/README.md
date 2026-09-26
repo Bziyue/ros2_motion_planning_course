@@ -23,3 +23,24 @@ box_qp.cpp是独立小型稠密ADMM正定QP，不是OSQP库。公开BoxQp方便�
 测试包括无约束解析解、箱约束解、不可行证书、超时、A/B解析极限、展开代价梯度差分、约束行及实际反向制动。
 另有短时域失去可行性反例：即使用最快允许减力，预测终点x=.30618m仍超过.3m边界；未实现终端安全集合。
 走廊与速度约束仅在预测节点成立，不是连续无碰撞证明。ROS接入单独验收。
+
+## ROS接入
+
+```bash
+ros2 launch motion2d_bringup ch18.launch.py rviz:=false
+/usr/bin/python3 scripts/check_ch18.py
+```
+
+启动时`controller:=pd`切回前馈PD，`config:=...`覆盖启动参数。参数修改后重启，不承诺运行时重建MPC。
+/control/mpc_status为MpcStatus：观测stamp、status/iterations、组装+求解compute_seconds、两种残差、仅成功有效的max_violation。
+/control/prediction是带未来采样时间的odom Path，仅显示；失败清空且重新制动。
+默认N20、50Hz、.01s求解预算，实际12s/600次全部solved；位置RMS1.1476e-5m，最大3.5195e-5m，P95 .2337ms。
+GUI未验收。控制率为名义周期，时延/调度不构成硬实时或连续安全保证。
+
+失败检查在独立域运行：
+
+```bash
+ros2 run motion2d tracker_node --ros-args -p use_sim_time:=true -p control.controller:=mpc -p mpc.max_wall_seconds:=1.0e-12
+# 同域另一终端，不要启动模拟器
+/usr/bin/python3 scripts/check_mpc_failure.py
+```

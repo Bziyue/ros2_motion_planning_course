@@ -292,3 +292,10 @@ LinearModel为精确ZOH的4×4 A、4×2 B；状态[p_x,p_y,v_x,v_y]，输入[Fx,
 LinearMpc::problem暴露实际BoxQp(P,q,A,lower,upper)，强凸代价，N个未来参考/N个可选节点凸区，上一拍实际力。
 LinearMpc::step只有solved才执行并热启动；其他状态丢弃序列、返回新的限幅阻尼力，不复用旧输入。
 走廊/速度仅预测节点约束；力/变化率均按轴，变化率乘控制间隔后单位N。未实现终端不变集或连续避障保证。
+
+### 第18章ROS诊断
+
+control.controller=pd/mpc，两者使用同一tracker与时间/坐标边界；mpc.dt由名义control.rate_hz得出，参数仅启动读取。
+/control/mpc_status使用MpcStatus，可靠volatile100，header为此次观测stamp/odom。compute_seconds包括QP组装/求解/热启动，不含整个ROS链路。
+max_violation只在solved有效，失败NaN；未迭代残差inf。/control/prediction为保留1的odom Path，点stamp=t+(k+1)h；失败清空。
+正常闭环以上一次发布的限幅力作为已接收执行器输入；不是额外的力反馈传感器。失效状态产生新的限幅制动并清热启动，yaw同样制动。
