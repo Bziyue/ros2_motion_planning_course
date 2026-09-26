@@ -1,0 +1,5 @@
+hello_scene:
+  ros__parameters:
+    radius: 0.20  # m; RViz cylinder width is the diameter.
+    x: 0.0       # map frame, m
+    y: 0.0

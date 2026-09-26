@@ -2,6 +2,8 @@
 
 查阅日期：2026-09-26。下列为原始规范、作者论文或官方仓库；本轮仅查阅，未复制第三方实现、安装依赖或宣称已复现性能。
 
+实施补充：[Lyrical 官方支持平台与语言要求](https://github.com/ros2/ros2_documentation/blob/rolling/source/Get-Started/Releases/lyrical/supported-platforms.rst) 明确 ROS 接口要求 C++20；因此节点用 C++20，纯算法保留 C++17。[更新后的安装源文档](https://github.com/ros2/ros2_documentation/blob/rolling/source/Get-Started/Installation/Ubuntu-Install-Debs.rst) 用于第 01 章。原始大纲 PDF 保留为历史记录，不再以其中 C++17 概括 ROS 节点要求。
+
 1. **ROS 坐标与单位**：[REP-103 源文件](https://github.com/ros-infrastructure/rep/blob/master/rep-0103.rst)。SI 单位、右手系、机体轴与偏航方向。
 2. **ROS 坐标树**：[REP-105 源文件](https://github.com/ros-infrastructure/rep/blob/master/rep-0105.rst)。`map → odom → base_link` 和变换发布责任。
 3. **传感器消息**：[LaserScan](https://github.com/ros2/common_interfaces/blob/rolling/sensor_msgs/msg/LaserScan.msg)、[Imu](https://github.com/ros2/common_interfaces/blob/rolling/sensor_msgs/msg/Imu.msg)。网络文档是 rolling 分支；本次也检查了主机 `/opt/ros/lyrical/share/sensor_msgs/msg/` 下的定义，实施以本机定义为准。

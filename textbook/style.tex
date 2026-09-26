@@ -1,0 +1,38 @@
+\usepackage[left=23mm,right=23mm,top=24mm,bottom=23mm,headheight=23pt]{geometry}
+\usepackage{fontspec}
+\setmainfont{DejaVu Serif}
+\setsansfont{DejaVu Sans}
+\setmonofont[Scale=0.88]{DejaVu Sans Mono}
+\setCJKmainfont{Noto Serif CJK SC}
+\setCJKsansfont{Noto Sans CJK SC}
+\setCJKmonofont{Noto Sans CJK SC}
+\usepackage{amsmath,amssymb,booktabs,tabularx,tikz,tcolorbox,enumitem,fancyhdr,listings,xurl,graphicx}
+\usetikzlibrary{arrows.meta,positioning}
+\definecolor{navy}{HTML}{183447}
+\definecolor{tealblue}{HTML}{087F8C}
+\definecolor{pale}{HTML}{EFF6F7}
+\definecolor{muted}{HTML}{5D7280}
+\definecolor{linecolor}{HTML}{D4E4E8}
+\usepackage[unicode,colorlinks=true,linkcolor=tealblue,urlcolor=tealblue,
+  pdftitle={ROS 2 二维机器人运动规划实践}]{hyperref}
+\linespread{1.3}
+\setlength{\parskip}{4pt}
+\setlength{\emergencystretch}{2em}
+\setlist{itemsep=3pt,topsep=4pt}
+\ctexset{chapter={format=\huge\sffamily\bfseries\color{navy}},
+  section={format=\Large\sffamily\bfseries\color{navy}},
+  subsection={format=\large\sffamily\bfseries\color{tealblue}}}
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[L]{\small\sffamily\color{muted}ROS 2 二维机器人运动规划实践}
+\fancyhead[R]{\small\color{muted}\thepage}
+\fancyfoot[L]{\small\color{muted}运行 · 理解 · 修改 · 验证}
+\renewcommand{\headrulewidth}{0.4pt}
+\newtcolorbox{notebox}{colback=pale,colframe=linecolor,boxrule=.5pt,
+  arc=1.5mm,left=3mm,right=3mm,top=2mm,bottom=2mm}
+\newcommand{\code}[1]{\texttt{\detokenize{#1}}}
+\lstset{basicstyle=\ttfamily\footnotesize,breaklines=true,columns=fullflexible,
+  keepspaces=true,showstringspaces=false,frame=single,rulecolor=\color{linecolor},
+  backgroundcolor=\color{pale},numbers=left,numberstyle=\tiny\color{muted},
+  numbersep=8pt,xleftmargin=12pt,framexleftmargin=3pt,
+  commentstyle=\color{muted},keywordstyle=\color{tealblue},tabsize=2}

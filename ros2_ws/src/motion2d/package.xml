@@ -1,0 +1,12 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>motion2d</name>
+  <version>0.1.0</version>
+  <description>Readable 2D robotics algorithms and small ROS 2 teaching nodes.</description>
+  <maintainer email="954164207@qq.com">Bziyue</maintainer>
+  <license>Proprietary</license>
+  <buildtool_depend>ament_cmake</buildtool_depend>
+  <depend>rclcpp</depend>
+  <depend>visualization_msgs</depend>
+  <export><build_type>ament_cmake</build_type></export>
+</package>

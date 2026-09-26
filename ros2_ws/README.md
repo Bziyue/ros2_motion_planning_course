@@ -1,6 +1,6 @@
-# ROS 2 工作空间（计划）
+# ROS 2 工作空间
 
-当前没有 ROS 包。以下划分在大纲获批后逐步创建：
+已建立 motion2d 和 motion2d_bringup；按进度逐步增加功能。自定义消息包尚未创建。
 
 | 包 | 责任 | 引入时间 |
 | --- | --- | --- |
@@ -10,4 +10,4 @@
 
 `motion2d/include/motion2d/` 与 `motion2d/src/` 按 `geometry`、`sim`、`estimation`、`mapping`、`planning`、`trajectory`、`control` 分类；ROS 转换与节点放 `nodes/`。不要为每章复制一个包，也不要一次生成全部空目录或节点。
 
-未来教材命令均从此工作空间执行 `colcon build`，并明确先加载 `/opt/ros/lyrical/setup.bash` 或 `setup.zsh`，再加载本工作空间 `install/setup.*`。本轮尚无可执行的课程构建命令。
+构建步骤见 [第 01 章](../chapters/ch01/README.md)。先加载主机 ROS，再构建并加载 install；独立算法为 C++17，ROS 节点使用 C++20。源码许可尚未确定，package.xml 使用 Proprietary 占位，不添加开放许可证。

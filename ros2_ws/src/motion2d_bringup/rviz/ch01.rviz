@@ -1,0 +1,39 @@
+Panels:
+  - Class: rviz_common/Displays
+    Name: Displays
+Visualization Manager:
+  Class: ""
+  Global Options:
+    Background Color: 239; 246; 247
+    Fixed Frame: map
+    Frame Rate: 30
+  Displays:
+    - Class: rviz_default_plugins/Grid
+      Name: Grid
+      Enabled: true
+      Cell Size: 0.5
+      Plane Cell Count: 20
+      Color: 165; 188; 195
+      Alpha: 0.6
+      Reference Frame: <Fixed Frame>
+    - Class: rviz_default_plugins/Marker
+      Name: Robot disk
+      Enabled: true
+      Topic:
+        Value: /visualization/robot
+        Reliability Policy: Reliable
+        Durability Policy: Transient Local
+        History Policy: Keep Last
+        Depth: 1
+  Views:
+    Current:
+      Class: rviz_default_plugins/TopDownOrtho
+      Name: Top Down
+      Target Frame: <Fixed Frame>
+      Scale: 140
+      Angle: 0
+      X: 0
+      Y: 0
+Window Geometry:
+  Width: 1100
+  Height: 780

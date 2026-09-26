@@ -1,0 +1,14 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>motion2d_bringup</name>
+  <version>0.1.0</version>
+  <description>Chapter launch files, configuration and RViz views.</description>
+  <maintainer email="954164207@qq.com">Bziyue</maintainer>
+  <license>Proprietary</license>
+  <buildtool_depend>ament_cmake</buildtool_depend>
+  <exec_depend>motion2d</exec_depend>
+  <exec_depend>launch_ros</exec_depend>
+  <exec_depend>ament_index_python</exec_depend>
+  <exec_depend>rviz2</exec_depend>
+  <export><build_type>ament_cmake</build_type></export>
+</package>
