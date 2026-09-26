@@ -305,3 +305,9 @@ max_violation只在solved有效，失败NaN；未迭代残差inf。/control/pred
 NavigationReference绑定TimedTrajectory、可选每段ConvexRegion和map快照ns，整体在一个固定坐标系；transformReference对曲线与区域一起冻结变换，yaw也旋转。
 ReferenceSchedule只保留活动和一个待交接参考；sample/region仅查询当前或未来，不因预读改变活动状态，advance以实际观测时间激活。
 accept要求未来开始、首p/v/a/yaw与旧参考该时刻匹配、终点静止；拒绝保留已有有效参考。reset(anchor)显式清空，紧急reset不承诺C2。
+
+### 第19章观测局部规划
+
+observedLocalRoute读取同快照原始占据与PlanningGrid；全局目标可达时A*，否则从可达配置格挑邻近原始未知区且有至少.1m目标距离改善的候选，按弧长截局部前缀。
+原始goal占据>=50、地图外、起点阻塞等单列状态；未知始终阻塞。局部前沿无进展不证明整个未知世界无路。
+replanObserved固定未来首p/v/a、静止终点，同快照ESDF/走廊；优化收敛且certifyBezier通过才接受，否则验证1/1.5/2/3倍时长的停点备用段。结果分别标optimized/fallback、原优化状态、耗时，失败无曲线。

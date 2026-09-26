@@ -58,3 +58,64 @@ $p_m=Rp_o+t$；把地图中的曲线交给控制器前，使用
 \item 把新参考错误地连接到 $t_0$ 的状态，观察为何到 $t_s$ 时不能再匹配。
 \item 分别说明定位误差、规划不满足约束、执行跟踪误差；平滑接续只解决其中的参考衔接。
 \end{enumerate}
+
+\clearpage
+\section{只在观测自由空间里选择局部目标}
+\begin{lstlisting}[language=bash]
+ros2 run motion2d replanner_demo tmp/ch19_replanner
+/usr/bin/python3 scripts/plot_ch19_replanner.py
+\end{lstlisting}
+规划输入是一份不可变快照：原始占据栅格、由它膨胀的配置空间栅格、同源未膨胀 ESDF。
+目标在地图之外或明确占据时先报告错误；未知目标并不允许搜索穿越未知区域。
+从未来交接点所在自由格做八邻接可达搜索，斜向仍禁止切角。
+若全局目标已可达，就用 A* 找到它；否则，在可达自由格中选择靠近未知区、且更接近目标的一个格。
+
+这些候选与原始未知格之间的搜索窗口由膨胀半径和分辨率确定。
+它们是\textbf{局部探索候选}，不是承诺一定能发现通路的完整探索器。
+失败状态分别说明当前局部搜索的结果：
+\begin{itemize}
+\item no\_progress\_frontier：候选的目标距离改善不足 0.1 m。
+\item no\_reachable\_frontier：没有可达的未知边缘候选。
+\end{itemize}
+两者都不代表“整个未知世界一定无路”。
+选好可达目标后，再沿 A* 路线弧长截取一段，默认最多 2 m；截断点仍位于已验证自由线段上。
+
+\begin{figure}[!ht]
+\centering\includegraphics[width=\linewidth]{figures/ch19_replanner.pdf}
+\caption{两个手工占据网格测试夹具，不是在线 SLAM 成绩。灰色未知、深蓝占据、浅橙为配置空间阻塞；
+星号是全局目标，曲线只到达当前局部终点。左图不穿越未知区，右图采用最多 5 m 的路线前缀绕墙。}
+\end{figure}
+
+例子使用 60$\times$40 格、0.1 m 分辨率、半径 0.1 m 与 0.05 m 余量。
+左图只有 x<3 m 区域已观测，仍能向未知边缘逐段接近；右图全图已知，但本次只执行一段路线前缀。
+若新扫描揭示更多自由空间，下次快照会产生新的候选；若停在看不到更多区域的位置，必须明确报告停滞。
+
+\clearpage
+\section{优化与备用方案都要通过认证}
+对同一路线构建凸走廊，从第 19.1 节的未来 p/v/a 起步，终点设为静止。
+Spline 优化同时使用 ESDF、走廊和速度/加速度软项；只有求解收敛且独立 Bézier 证书通过才接受。
+本章核心默认开启控制点惩罚，走廊权重 50000、额外内缩 0.04 m；
+软速度/加速度目标 0.45/0.5，证书上限 0.7 m/s 与 0.8 m/s$^2$。
+
+若优化失败，不复用一个不合格的低代价值结果，而是尝试明确的备用方案：
+各路点停下的五次段，\textbf{首段仍保留原来的 p/v/a}。
+尝试基准时长与 1.5/2/3 倍时长，每次都重新检查同一组连续证书。
+增加时长不一定能修复问题：固定非零首速度时，较长时间也可能把曲线推到走廊外。
+\lstinputlisting[language=C++,linerange={replanner_fallback_begin-replanner_fallback_end},includerangemarker=false]{../ros2_ws/src/motion2d/src/planning/replanner.cpp}
+
+\begin{center}\small
+\begin{tabular}{lrr}\toprule
+夹具 & 备用段总时长/s & Spline 总时长/s\\\midrule
+未知目标，局部前缀 & 7.258 & 11.424\\
+绕墙，5 m 路线前缀 & 19.466 & 12.994\\\bottomrule
+\end{tabular}
+\end{center}
+四组均通过各自连续证书；示例为便于复现关闭优化墙钟预算，实际节点应限制计算时间。
+Spline 优化的是带能量与软项的总代价，不保证每次都比备用方案更短；单段控制点惩罚也可能偏保守。
+返回结果单列 optimized 或 fallback\_stop\_segments，并保留优化器原始状态。
+所有方案都不合格时返回 no\_certified\_local\_trajectory，上层进入明确的制动处理。
+
+\paragraph{验证与练习}
+单元检查未知目标、已知断开的地图、占据/越界目标、路线长度、配置区域整体验证和非零首导数。
+另把首速度设为 2 m/s，超过证书上限，必须拒绝全部备用方案。
+比较有无控制点惩罚时的时长与认证结果；画出原始占据和配置栅格，解释半径为何只能处理一次。

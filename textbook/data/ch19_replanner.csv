@@ -1,0 +1,5 @@
+scene,mode,status,optimization,seconds,duration,pieces,certified
+0,0,fallback_stop_segments:frontier_prefix,disabled,0.00017147,7.25779,1,1
+0,1,optimized:frontier_prefix,converged,0.000342071,11.4244,1,1
+1,0,fallback_stop_segments:route_prefix,disabled,0.000318601,19.4664,3,1
+1,1,optimized:route_prefix,converged,0.00189314,12.994,3,1
