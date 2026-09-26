@@ -20,6 +20,15 @@ class TrajectoryNode : public rclcpp::Node
 public:
   TrajectoryNode() : Node("trajectory"), buffer_(get_clock()), listener_(buffer_,*this,false)
   {
+    const auto source=declare_parameter("trajectory.source",std::string("stop"));
+    if(source!="stop" && source!="certified") throw std::invalid_argument("Expected stop or certified source");
+    certified_=source=="certified";
+    if(certified_) candidate_sub_=create_subscription<motion2d_interfaces::msg::Trajectory2D>(
+      "/plan/certified_candidate",rclcpp::QoS(1).transient_local(),[this](motion2d_interfaces::msg::Trajectory2D::SharedPtr m){
+        candidate_.reset();if(m->pieces.empty()) return;
+        try {const auto curve=fromTrajectoryMessage(*m);if(curve.start_ns!=0) throw std::invalid_argument("Candidate must use local origin zero");candidate_=m;}
+        catch(const std::exception & e) {RCLCPP_WARN(get_logger(),"Rejected candidate: %s",e.what());}
+      });
     speed_=declare_parameter("trajectory.nominal_speed",.4);
     lead_=declare_parameter("trajectory.start_lead",.25);
     if(!std::isfinite(speed_) || speed_<=0 || !std::isfinite(lead_) || lead_<=0)
@@ -31,7 +40,7 @@ public:
     odom_sub_=create_subscription<nav_msgs::msg::Odometry>("/odometry",100,
       [this](nav_msgs::msg::Odometry::SharedPtr m){
         if(odom_ && rclcpp::Time(m->header.stamp)<rclcpp::Time(odom_->header.stamp)) {
-          path_.reset(); nav_msgs::msg::Path empty; empty.header.frame_id="odom";
+          path_.reset(); candidate_.reset(); nav_msgs::msg::Path empty; empty.header.frame_id="odom";
           empty.header.stamp=m->header.stamp; preview_->publish(empty);
         }
         odom_=m;
@@ -46,6 +55,7 @@ public:
 private:
   void publish()
   {
+    if(certified_) {publishCertified();return;}
     if(!path_ || path_->poses.size()<2 || path_->header.frame_id!="map" || !odom_)
     {throw std::invalid_argument("Need a current map-frame corridor route and odometry");}
     const auto start=poseFromOdometry(*odom_);
@@ -71,10 +81,28 @@ private:
       stamp.nanoseconds()+std::llround(lead_*1e9),start.yaw};
     pub_->publish(toTrajectoryMessage(command,stamp));
     // trajectory_publish_end
+    publishPreview(command,stamp);
+  }
+  void publishCertified()
+  {
+    if(!candidate_ || !odom_) throw std::invalid_argument("Need a current certified candidate and odometry");
+    const auto start=poseFromOdometry(*odom_);auto command=fromTrajectoryMessage(*candidate_);
+    const auto first=command.curve.sample(0),last=command.curve.sample(command.curve.duration());
+    const auto & twist=odom_->twist.twist;const double speed=std::hypot(twist.linear.x,twist.linear.y);
+    const double age=(rclcpp::Time(odom_->header.stamp)-rclcpp::Time(candidate_->header.stamp)).seconds();
+    if(age<0 || age>.5 || !std::isfinite(speed) || speed>1e-6 || !std::isfinite(twist.angular.z) || std::abs(twist.angular.z)>1e-6 ||
+       (first.position-start.position).norm()>1e-7 || first.velocity.norm()>1e-7 || first.acceleration.norm()>1e-7 ||
+       last.velocity.norm()>1e-7 || last.acceleration.norm()>1e-7 || std::abs(wrapAngle(command.yaw-start.yaw))>1e-7)
+      throw std::invalid_argument("Candidate is stale or does not match a stationary robot");
+    const auto stamp=now();command.start_ns=stamp.nanoseconds()+std::llround(lead_*1e9);
+    pub_->publish(toTrajectoryMessage(command,stamp));publishPreview(command,stamp);
+  }
+  void publishPreview(const TimedTrajectory & command,const rclcpp::Time & stamp)
+  {
     nav_msgs::msg::Path preview; preview.header.frame_id="odom"; preview.header.stamp=stamp;
     const int count=std::max(1,static_cast<int>(std::ceil(command.curve.duration()/.05)));
     for(int i=0;i<=count;++i) {
-      const double t=command.curve.duration()*i/count; const auto value=command.curve.sample(t);
+      const double t=(double(i)/count)*command.curve.duration(); const auto value=command.curve.sample(t);
       geometry_msgs::msg::PoseStamped p; p.header.frame_id="odom";
       p.header.stamp=rclcpp::Time(command.start_ns+std::llround(t*1e9),RCL_ROS_TIME);
       p.pose.position.x=value.position.x(); p.pose.position.y=value.position.y();
@@ -84,6 +112,9 @@ private:
     preview_->publish(preview);
   }
   double speed_,lead_;
+  bool certified_;
+  motion2d_interfaces::msg::Trajectory2D::SharedPtr candidate_;
+  rclcpp::Subscription<motion2d_interfaces::msg::Trajectory2D>::SharedPtr candidate_sub_;
   tf2_ros::Buffer buffer_;
   tf2_ros::TransformListener listener_;
   nav_msgs::msg::Path::SharedPtr path_;

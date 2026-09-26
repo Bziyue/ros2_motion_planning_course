@@ -25,4 +25,8 @@ State2D sampleHeldTrajectory(const TimedTrajectory & trajectory, std::int64_t st
  * Endpoint holds have zero acceleration; caller guarantees C2 joins including holds.
  */
 double trajectoryAccelerationBound(const PolynomialTrajectory & curve, double begin, double end);
+/** @brief Apply a constant SE(2) transform to all position/velocity/acceleration data.
+ * @details Rotate every coefficient; translate only c0. Durations are unchanged.
+ */
+PolynomialTrajectory transformTrajectory(const PolynomialTrajectory & curve,const Pose2D & target_from_source);
 }  // namespace motion2d

@@ -140,7 +140,8 @@ foreach(node lidar_odometry estimated_odometry fusion slam planner esdf trajecto
   install(TARGETS ${node}_node DESTINATION lib/motion2d)
 endforeach()
 
-target_sources(planner_node PRIVATE src/ros/planning_messages.cpp)
+target_sources(planner_node PRIVATE src/ros/planning_messages.cpp src/ros/trajectory_messages.cpp)
+target_link_libraries(planner_node PRIVATE motion2d_interfaces::motion2d_interfaces__rosidl_typesupport_cpp)
 target_sources(trajectory_node PRIVATE src/ros/trajectory_messages.cpp)
 target_link_libraries(trajectory_node PRIVATE motion2d_interfaces::motion2d_interfaces__rosidl_typesupport_cpp
   std_srvs::std_srvs__rosidl_typesupport_cpp)

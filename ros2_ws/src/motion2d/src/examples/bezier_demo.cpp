@@ -30,7 +30,7 @@ int main(int argc,char ** argv) {
     if(!r.curve) {std::cerr<<r.solver.status<<'\n';return 2;}
     const auto certificate=certifyBezier(*r.curve,corridor.regions,c.limits);
     summary<<mode<<','<<r.solver.status<<','<<r.solver.objective.value<<','<<r.curve->duration()<<','<<r.samples.peak_speed<<','<<r.samples.peak_acceleration<<','<<r.samples.max_corridor_residual<<','<<r.samples.min_clearance_lower_bound<<','<<r.samples.samples_feasible<<','<<r.solver.iterations<<','<<r.solver.seconds<<','<<certificate.certified<<','<<certificate.speed_bound<<','<<certificate.acceleration_bound<<'\n';
-    for(int j=0;j<=1500;++j) {const double t=r.curve->duration()*j/1500;const auto p=r.curve->sample(t);samples<<mode<<','<<t<<','<<p.position.x()<<','<<p.position.y()<<','<<p.velocity.norm()<<','<<p.acceleration.norm()<<'\n';}
+    for(int j=0;j<=1500;++j) {const double t=(double(j)/1500)*r.curve->duration();const auto p=r.curve->sample(t);samples<<mode<<','<<t<<','<<p.position.x()<<','<<p.position.y()<<','<<p.velocity.norm()<<','<<p.acceleration.norm()<<'\n';}
     std::cout<<"mode="<<mode<<" "<<r.solver.status<<" cost="<<r.solver.objective.value<<" "<<r.samples.status<<" residual="<<r.samples.max_corridor_residual<<" certified="<<certificate.certified<<" clearance="<<r.samples.min_clearance_lower_bound<<'\n';
   }
 }

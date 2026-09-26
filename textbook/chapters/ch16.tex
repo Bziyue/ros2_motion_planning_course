@@ -170,3 +170,49 @@ ros2 run motion2d bezier_demo tmp/ch16_bezier
 \item \textbf{代码 ch16-2：}补全归一化基底映射中的二项式比例，保留 $T^k$。
 \item \textbf{实验：}从深度 0 增到 5，记录上界收紧和耗时变化；确认轨迹采样结果完全不变。
 \end{enumerate}
+
+\clearpage
+\section{认证候选与实际执行分开}
+\begin{lstlisting}[language=bash]
+ros2 launch motion2d_bringup ch16.launch.py rviz:=true
+# Place a goal in observed free space, then explicitly execute:
+ros2 service call /trajectory/execute std_srvs/srv/Trigger '{}'
+# Automated paused / single-step acceptance:
+/usr/bin/python3 scripts/check_ch16.py
+\end{lstlisting}
+本章配置采用 Spline2D、控制点软惩罚和独立连续认证。
+只有优化器收敛且 certifyBezier 通过，planner 才发布 /plan/certified\_candidate。
+它携带完整五次系数、规划时 odom 时间戳和固定 yaw；start\_time=0 表示候选曲线的局部原点，\textbf{不触发执行}。
+空 pieces 撤销候选；未收敛或认证失败时仍可看到诊断预览，但无法作为本章执行源。
+
+将 map 中曲线固定到 odom 时，令 $p_o=Rp_m+t$，则
+\begin{equation}
+ c_{o,0}=Rc_{m,0}+t,\qquad c_{o,k}=Rc_{m,k}\ (k>0).
+\end{equation}
+只对常数项加平移；速度、加速度和更高阶系数只旋转。刚性变换保持范数与包含关系。
+候选不会因之后的 map/odom 变换更新而反复移动；第十九章再处理新地图下的重规划。
+
+trajectory.source=certified 让服务读取此候选。发送实际命令前检查：
+\begin{itemize}
+\item 候选与当前 odom 时间差在 $[0,0.5]$ s，起点与当前位置一致。
+\item 机器人静止、首尾 v/a 为零、yaw 与当前一致，才能与等待/停止段连续衔接。
+\item 通过后才设置绝对开始时间 now+0.25 s，并发布 /plan/trajectory。
+\end{itemize}
+求解与执行分开，能避免点击目标时不知不觉让机器人运动；仿真仍保留原来的整段扫掠检查。
+静态地图上的曲线认证不能替代实际执行时的检测。
+
+\paragraph{ROS 验收与常见错误}
+默认真值定位、观测建图，起点 $(-8,-8)$ m、近目标 $(-7.5,-8)$ m。
+脚本确认候选曲线经过认证但机器人保持静止；显式服务调用后，用接收的系数独立计算 p/v/a，
+与每个仿真 tick 对照。发送非法目标后候选清空、执行服务拒绝；reset 后也不能复用旧候选。
+另有带旋转和平移的单元测试，检查导数只旋转、常数项才平移。
+
+RViz 预期同时显示几何优化预览和已发送命令的带时轨迹，圆盘沿后者运动。
+本机 ROS 消息和无界面执行已验证；GUI 仍未在当前桌面限制下验收。
+若服务拒绝，先看“候选过期/机器人未静止/起点不一致”，而不是绕开条件发送旧系数。
+
+\begin{enumerate}
+\item \textbf{理解：}为什么对每个系数都加 TF 平移，会使速度、加速度一起出错？
+\item \textbf{实验：}先预览再步进，确认没有自动执行；执行后验证 p/v/a，而不只检查最终位置。
+\item \textbf{扩展准备：}若当前机器人正在运动，写出新轨迹起点必须匹配的 p/v/a 条件；暂不删除本章静止检查。
+\end{enumerate}

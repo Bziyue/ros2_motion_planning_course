@@ -15,3 +15,6 @@ g++ -std=c++17 -I/usr/include/eigen3 -Iexercises/ch16/starter exercises/ch16/che
 5. 连续认证实验：运行bezier_demo。比较只惩罚轨迹采样与加入控制点惩罚的走廊残差、整段速度/加速度上界。
    找到“端点都在走廊、曲线中间越界”的反例；解释有限采样与充分条件的区别。
    修改二分深度0→5；深度增加不改变曲线，只收紧凸包上界。
+
+ROS实验：`scripts/check_ch16.py`逐tick独立计算接收到的系数对应p/v/a。
+理解：map到odom的刚性变换为什么仅c0加平移？让候选过期/发送非法目标/reset，确认不能执行旧候选。

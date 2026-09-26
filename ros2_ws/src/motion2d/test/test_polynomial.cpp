@@ -89,3 +89,13 @@ TEST(Polynomial, ContinuousHeldExecutionAndConservativeSweep)
   EXPECT_EQ(trajectoryAccelerationBound(curve,-2,-1),0);
   EXPECT_EQ(trajectoryAccelerationBound(curve,3,4),0);
 }
+
+TEST(Polynomial, ConstantFrameTransformPreservesDerivativeMeaning) {
+  motion2d::TranslationState a,b;b.position={1,.5};
+  motion2d::PolynomialTrajectory curve({motion2d::interpolateQuintic(a,b,2)});
+  motion2d::Pose2D transform{{3,-2},.7};const auto moved=motion2d::transformTrajectory(curve,transform);
+  for(double t:{0.,.3,1.4,2.}) for(int d=0;d<=3;++d) {
+    Eigen::Vector2d expected=motion2d::rotation(.7)*curve.evaluate(t,d);if(d==0) expected+=transform.position;
+    EXPECT_LT((moved.evaluate(t,d)-expected).norm(),1e-12);
+  }
+}

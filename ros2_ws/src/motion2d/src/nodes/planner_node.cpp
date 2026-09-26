@@ -8,6 +8,8 @@
 #include <tf2_ros/transform_listener.hpp>
 #include "motion2d/planning/astar.hpp"
 #include "motion2d/trajectory/trajectory_optimizer.hpp"
+#include "motion2d/trajectory/bezier_bounds.hpp"
+#include "motion2d/ros/trajectory_messages.hpp"
 #include "motion2d/ros/mapping_messages.hpp"
 #include "motion2d/ros/planning_messages.hpp"
 
@@ -31,6 +33,10 @@ public:
     extension_ = declare_parameter("corridor.max_extension", .6);
     if (!std::isfinite(extension_) || extension_ < 0) {throw std::invalid_argument("invalid corridor extension");}
     optimize_enabled_=declare_parameter("optimization.enabled",false);
+    backend_=declare_parameter("optimization.backend",std::string("minco"));
+    certify_=declare_parameter("optimization.publish_certified",false);
+    optimization_.bezier_penalties=declare_parameter("optimization.bezier_penalties",false);
+    if(backend_!="minco" && backend_!="spline") throw std::invalid_argument("Expected minco or spline backend");
     optimization_.cost.corridor_weight=declare_parameter("optimization.corridor_weight",500.);
     optimization_.cost.corridor_margin=declare_parameter("optimization.corridor_margin",.02);
     optimization_.solver.max_iterations=declare_parameter("optimization.max_iterations",200);
@@ -43,6 +49,7 @@ public:
     // Validate startup configuration even before the first map arrives.
     inflateGrid(GridConfig{}, std::vector<int8_t>(220*220, -1), config_);
     const auto retained = rclcpp::QoS(1).transient_local();
+    certified_pub_=create_publisher<motion2d_interfaces::msg::Trajectory2D>("/plan/certified_candidate",retained);
     optimized_pub_=create_publisher<nav_msgs::msg::Path>("/plan/optimized_preview",retained);
     optimized_status_pub_=create_publisher<std_msgs::msg::String>("/plan/optimization_status",retained);
     path_pub_ = create_publisher<nav_msgs::msg::Path>("/plan/path", retained);
@@ -116,7 +123,8 @@ private:
       alignment.pose.pose.position.y = tf.transform.translation.y;
       alignment.pose.pose.position.z = tf.transform.translation.z;
       alignment.pose.pose.orientation = tf.transform.rotation;
-      start = compose(poseFromOdometry(alignment), poseFromOdometry(*odom_));
+      map_from_odom_=poseFromOdometry(alignment);
+      start = compose(map_from_odom_, poseFromOdometry(*odom_));
     } catch (const tf2::TransformException &) {
       dirty_ = true; publish({}, "waiting_transform"); return;
     } catch (const std::invalid_argument &) {
@@ -149,6 +157,8 @@ private:
     message.data = corridor.status; corridor_status_pub_->publish(message);
     // corridor_snapshot_end
     // The corridor and ESDF below come from this same map callback snapshot.
+    motion2d_interfaces::msg::Trajectory2D candidate;
+    candidate.header.frame_id="odom";candidate.header.stamp=header.stamp;
     std::vector<Eigen::Vector2d> optimized;
     std::string diagnostic=optimize_enabled_ ? "waiting_corridor" : "disabled";
     if(optimize_enabled_ && corridor.success && corridor.waypoints.size()>=2 && field_) {
@@ -158,21 +168,33 @@ private:
         std::vector<double> times;
         for(std::size_t i=1;i<corridor.waypoints.size();++i)
           times.push_back(std::max(.5,(corridor.waypoints[i]-corridor.waypoints[i-1]).norm()/.5));
-        const auto solution=optimizeMinco(start,finish,q,times,optimization_,corridor.regions,&*field_);
+        const auto solution=(backend_=="spline" ? optimizeSpline : optimizeMinco)(start,finish,q,times,optimization_,corridor.regions,&*field_);
         diagnostic=solution.solver.status+";"+solution.samples.status+";preview_only";
         if(solution.curve) {
           const int n=std::max(1,int(std::ceil(solution.curve->duration()/.05)));
-          for(int j=0;j<=n;++j) optimized.push_back(solution.curve->sample(solution.curve->duration()*j/n).position);
+          for(int j=0;j<=n;++j) optimized.push_back(solution.curve->sample((double(j)/n)*solution.curve->duration()).position);
+          if(certify_) {
+            const auto certificate=certifyBezier(*solution.curve,corridor.regions,optimization_.limits);
+            diagnostic+=certificate.certified ? ";continuous_certificate_passed" : ";continuous_certificate_failed";
+            if(certificate.certified && solution.solver.converged()) {
+              TimedTrajectory frozen{transformTrajectory(*solution.curve,inverse(map_from_odom_)),0,poseFromOdometry(*odom_).yaw};
+              candidate=toTrajectoryMessage(frozen,header.stamp);
+            }
+          }
           diagnostic+=";corridor_residual="+std::to_string(solution.samples.max_corridor_residual);
         }
       } catch(const std::exception & e) {diagnostic=std::string("optimization_failed:")+e.what();}
     }
+    certified_pub_->publish(candidate);
     optimized_pub_->publish(toPath(optimized,header));
     message.data=diagnostic;optimized_status_pub_->publish(message);
   }
 
   InflationConfig config_;
-  bool optimize_enabled_;
+  bool optimize_enabled_,certify_;
+  std::string backend_;
+  Pose2D map_from_odom_;
+  rclcpp::Publisher<motion2d_interfaces::msg::Trajectory2D>::SharedPtr certified_pub_;
   TrajectoryOptimizationConfig optimization_;
   std::optional<Esdf2D> field_;
   bool corridor_enabled_, merge_convex_;

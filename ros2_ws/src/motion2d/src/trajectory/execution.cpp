@@ -37,4 +37,10 @@ double trajectoryAccelerationBound(const PolynomialTrajectory & curve,double beg
   return bound;
   // polynomial_sweep_end
 }
+PolynomialTrajectory transformTrajectory(const PolynomialTrajectory & curve,const Pose2D & transform) {
+  if(!transform.position.allFinite() || !std::isfinite(transform.yaw)) throw std::invalid_argument("Finite trajectory transform required");
+  auto pieces=curve.pieces();const auto R=rotation(transform.yaw);
+  for(auto & piece:pieces) {piece.coefficients=R*piece.coefficients;piece.coefficients.col(0)+=transform.position;}
+  return PolynomialTrajectory(std::move(pieces));
+}
 }  // namespace motion2d

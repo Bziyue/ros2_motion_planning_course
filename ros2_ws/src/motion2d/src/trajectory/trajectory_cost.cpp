@@ -79,7 +79,7 @@ SampledFeasibility checkTrajectorySamples(const PolynomialTrajectory & trajector
   for(std::size_t i=0;i<trajectory.pieces().size();++i) {
     const auto & piece=trajectory.pieces()[i];
     for(int j=0;j<=limits.samples_per_piece;++j) {
-      const double t=piece.duration*j/limits.samples_per_piece;const auto p=derivative(piece,t,0);
+      const double t=(double(j)/limits.samples_per_piece)*piece.duration;const auto p=derivative(piece,t,0);
       finite=finite && p.allFinite() && derivative(piece,t,1).allFinite() && derivative(piece,t,2).allFinite();
       result.peak_speed=std::max(result.peak_speed,derivative(piece,t,1).norm());
       result.peak_acceleration=std::max(result.peak_acceleration,derivative(piece,t,2).norm());

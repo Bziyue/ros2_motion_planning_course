@@ -45,3 +45,11 @@ TEST(TrajectoryCost, ViolationsRemainVisible) {
   EXPECT_FALSE(r.samples_feasible);EXPECT_EQ(r.status,"sampled_violation");
   EXPECT_NEAR(r.peak_speed,1.875,1e-10);
 }
+
+TEST(TrajectoryCost, InclusiveSamplesDoNotOvershootTheEndpoint) {
+  TranslationState a,b;b.position={1,0};
+  // T*200/200 rounds above T; form the fraction first instead.
+  const double T=1.9991570420961533;
+  PolynomialTrajectory curve({interpolateQuintic(a,b,T)});
+  EXPECT_NO_THROW(checkTrajectorySamples(curve,{}));
+}

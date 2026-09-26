@@ -23,7 +23,7 @@ int main(int argc,char ** argv)
     motion2d::PolynomialTrajectory trajectory(pieces);
     double speed=0,accel=0,jerk=0;
     for(int n=0;n<=2000;++n) {
-      const double t=trajectory.duration()*n/2000.; const auto s=trajectory.sample(t);
+      const double t=(n/2000.)*trajectory.duration(); const auto s=trajectory.sample(t);
       const auto j=trajectory.evaluate(t,3);
       speed=std::max(speed,s.velocity.norm()); accel=std::max(accel,s.acceleration.norm()); jerk=std::max(jerk,j.norm());
       data<<scenario<<','<<t<<','<<s.position.x()<<','<<s.position.y()<<','<<s.velocity.x()<<','<<s.velocity.y()<<','

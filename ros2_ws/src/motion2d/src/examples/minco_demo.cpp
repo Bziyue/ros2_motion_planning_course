@@ -24,7 +24,7 @@ int main(int argc,char ** argv)
     for(const auto & piece:curve.pieces()){
       const Eigen::Matrix<double,6,2>C=piece.coefficients.transpose();energy+=(C.array()*(jerkGram(piece.duration)*C).array()).sum();
     }
-    for(int i=0;i<=3000;++i){const double t=curve.duration()*i/3000.;const auto s=curve.sample(t);const auto j=curve.evaluate(t,3);
+    for(int i=0;i<=3000;++i){const double t=(i/3000.)*curve.duration();const auto s=curve.sample(t);const auto j=curve.evaluate(t,3);
       speed=std::max(speed,s.velocity.norm());acceleration=std::max(acceleration,s.acceleration.norm());
       samples<<mode<<','<<t<<','<<s.position.x()<<','<<s.position.y()<<','<<s.velocity.x()<<','<<s.velocity.y()<<','
         <<s.acceleration.x()<<','<<s.acceleration.y()<<','<<j.x()<<','<<j.y()<<'\n';

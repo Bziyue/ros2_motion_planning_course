@@ -268,3 +268,10 @@ model=trajectory只订阅该命令；本章要求当前及起终点静止、位�
 Minco2D固定首尾p/v/a，内部路点N-1个、正时长N个；coefficients为6N×2升幂行矩阵。
 trajectory()返回统一PolynomialTrajectory。energyPartials()的times是固定系数偏导；
 propagate()返回消元后的总路点/时长梯度，不能混用。核心仍无障碍/动力学约束，异常尺度报数值失败。
+
+### 第16章连续认证候选
+
+`/plan/certified_candidate`使用Trajectory2D，可靠保留1，odom帧，header.stamp为规划所用odom时刻；
+start_time=0是候选局部原点，不是执行命令。空pieces撤销；仅收敛且独立Bézier证书通过发布非空候选。
+`trajectory.source=certified`在`/trajectory/execute`时验证静止、匹配边界、时间差[0,.5]s，再给出实际绝对开始时刻并发`/plan/trajectory`。
+该证书只针对冻结的观测配置空间栅格和参考曲线，不覆盖后续地图变化/定位或跟踪误差。
