@@ -31,6 +31,7 @@
 | 16 | [二维 Spline2D](chapters/ch16/README.md) | [ch16](exercises/ch16/README.md) | `ch16.launch.py`、`spline_demo`、上游对照 |
 | 17 | [前馈与PD跟踪](chapters/ch17/README.md) | [ch17](exercises/ch17/README.md) | `ch17.launch.py` / `pd_tracking_demo` |
 | 18 | [线性MPC](chapters/ch18/README.md) | [ch18](exercises/ch18/README.md) | `ch18.launch.py` / `mpc_demo` |
+| 19 | [在线规划与导航](chapters/ch19/README.md) | [ch19](exercises/ch19/README.md) | 接续核心 `reference_handover_demo` |
 
 ~~~bash
 source /opt/ros/lyrical/setup.bash

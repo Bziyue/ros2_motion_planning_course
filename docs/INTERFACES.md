@@ -299,3 +299,9 @@ control.controller=pd/mpc，两者使用同一tracker与时间/坐标边界；mp
 /control/mpc_status使用MpcStatus，可靠volatile100，header为此次观测stamp/odom。compute_seconds包括QP组装/求解/热启动，不含整个ROS链路。
 max_violation只在solved有效，失败NaN；未迭代残差inf。/control/prediction为保留1的odom Path，点stamp=t+(k+1)h；失败清空。
 正常闭环以上一次发布的限幅力作为已接收执行器输入；不是额外的力反馈传感器。失效状态产生新的限幅制动并清热启动，yaw同样制动。
+
+## 第19章参考接续内核
+
+NavigationReference绑定TimedTrajectory、可选每段ConvexRegion和map快照ns，整体在一个固定坐标系；transformReference对曲线与区域一起冻结变换，yaw也旋转。
+ReferenceSchedule只保留活动和一个待交接参考；sample/region仅查询当前或未来，不因预读改变活动状态，advance以实际观测时间激活。
+accept要求未来开始、首p/v/a/yaw与旧参考该时刻匹配、终点静止；拒绝保留已有有效参考。reset(anchor)显式清空，紧急reset不承诺C2。

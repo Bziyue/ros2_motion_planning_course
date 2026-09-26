@@ -1,0 +1,60 @@
+\chapter{接通在线规划与完整导航}
+\begin{notebox}
+\textbf{目标}\quad 接续运动中的参考，再将地图、SLAM、规划和控制串成可测量的闭环。\\
+\textbf{先修}\quad 第 08--18 章；先单独验证交接，随后接入观测地图。
+\end{notebox}
+\section{重规划从未来交接时刻开始}
+\begin{lstlisting}[language=bash]
+ros2 run motion2d reference_handover_demo tmp/ch19_handover
+/usr/bin/python3 scripts/plot_ch19_handover.py
+\end{lstlisting}
+假设当前仿真时间为 $t_0$，预留一段计算和传输时间后，在 $t_s>t_0$ 切换到新曲线。
+新曲线不能从当前测量位置、零速度重新起步；应固定它的首边界为旧参考在 $t_s$ 的值：
+\begin{equation}
+ p_{\rm new}(0)=p_{\rm old}(t_s),\quad
+ v_{\rm new}(0)=v_{\rm old}(t_s),\quad
+ a_{\rm new}(0)=a_{\rm old}(t_s).
+\end{equation}
+这样交接前仍执行旧前缀，交接后才沿新路线走。实际机器人可能偏离参考，偏差由反馈处理；
+若偏离已超出可接受范围，应制动和重新建立参考，而不是伪称仍有无缝接续。
+
+\begin{figure}[!ht]
+\centering\includegraphics[width=\linewidth]{figures/ch19_handover.pdf}
+\caption{在 1.5 s 交接。旧曲线原本沿 x 轴到达 (2,0)，新曲线转向 (3,1)；
+红点和竖虚线标记交接时刻。速度与加速度保持连续，jerk 不要求连续。}
+\end{figure}
+
+此时 p=(0.550415,0) m、v=(0.823975,0) m/s、a=(0.439453,0) m/s$^2$。
+将新首速度简单置零，会立即产生与旧参考不匹配的速度跳变。
+ReferenceSchedule 保存一条活动参考和至多一条未来候选；末端必须静止，才能连续接到终点保持。
+这是参考调度实验，尚不以曲线平滑来声称已验证障碍或物理输入约束。
+
+\clearpage
+\section{预测未来，不等于提前切换}
+MPC 会采样未来多个时刻。如果 sample 一查到未来就移动“当前曲线”指针，
+下一次采样当前时刻时可能已经取错参考。
+因此 sample 为只读函数，按查询时刻选择活动曲线或未来候选；
+advance 只由真正推进的观测时刻调用。接口不保留过去所有曲线的历史，供当前与未来查询使用。
+\lstinputlisting[language=C++,linerange={reference_handover_begin-reference_handover_end},includerangemarker=false]{../ros2_ws/src/motion2d/src/trajectory/reference_schedule.cpp}
+过去的起点、尚未交接时积压的第二个候选，以及不连续边界都会被拒绝。
+拒绝不能覆盖已有效的参考；reset 则显式清空活动与候选并设置新的静止锚点。
+紧急重置会中断参考导数连续性，不能将它包装为普通 C$^2$ 重规划。
+
+\section{地图校正与执行参考分开}
+SLAM 回环可能改变 map 到 odom 的对齐关系。规划时冻结同一个变换，令
+$p_m=Rp_o+t$；把地图中的曲线交给控制器前，使用
+\begin{equation}
+ p_o=R^T(p_m-t),\qquad v_o=R^Tv_m,\qquad a_o=R^Ta_m.
+\end{equation}
+对五次系数而言，每列都旋转，只有常数项平移；区域的所有顶点也使用同一变换，
+再由顶点构建半空间。yaw 参考随坐标旋转一次，不从路径切向推断。
+已发出的 odom 系数随后保持不变；新的地图校正影响下一次规划，而不直接跳动当前控制参考。
+
+\paragraph{验证与练习}
+测试包含交接前后 1 ns 的 p/v/a、提前预读未来、待交接状态、非法候选保留旧曲线、
+终点保持与显式 reset。另将曲线和区域经平移 + 旋转送到 map 再变回 odom，验证所有导数和区域一致。
+\begin{enumerate}
+\item \textbf{ch19-1：}补齐 p/v/a 边界比较；同位置、不同速度或加速度必须拒绝。
+\item 把新参考错误地连接到 $t_0$ 的状态，观察为何到 $t_s$ 时不能再匹配。
+\item 分别说明定位误差、规划不满足约束、执行跟踪误差；平滑接续只解决其中的参考衔接。
+\end{enumerate}
