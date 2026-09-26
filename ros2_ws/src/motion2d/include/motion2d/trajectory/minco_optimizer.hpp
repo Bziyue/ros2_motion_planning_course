@@ -1,0 +1,31 @@
+#pragma once
+#include "motion2d/trajectory/minco2d.hpp"
+#include "motion2d/trajectory/trajectory_cost.hpp"
+#include "motion2d/optimization/bfgs.hpp"
+#include <optional>
+namespace motion2d {
+/** @brief Small teaching optimizer. Dense outer BFGS has quadratic memory. */
+struct MincoOptimizationConfig {
+  TrajectoryCostConfig cost;
+  TrajectoryLimits limits;
+  BfgsConfig solver;
+  bool optimize_waypoints=true, optimize_times=true;
+  double min_duration=.2;
+};
+/** @brief Last accepted iterate and diagnostics; no execution authorization. */
+struct MincoOptimizationResult {
+  BfgsResult solver;
+  std::optional<PolynomialTrajectory> curve;
+  std::vector<Eigen::Vector2d> waypoints;
+  std::vector<double> durations;
+  SampledFeasibility samples;
+};
+/** @brief Optimize internal positions and positive durations T=Tmin+exp(tau).
+ * @details Fixed p/v/a endpoints, one corridor per piece. Soft constraints and
+ * finite sampling cannot certify the continuous curve. Exceptions in trial
+ * evaluations cause a rejected line-search step; invalid initial data is reported.
+ */
+MincoOptimizationResult optimizeMinco(const TranslationState & start,const TranslationState & finish,
+  const std::vector<Eigen::Vector2d> & interior,const std::vector<double> & durations,
+  const MincoOptimizationConfig & config,const std::vector<ConvexRegion> & regions={},const Esdf2D * field=nullptr);
+}

@@ -10,21 +10,6 @@ namespace motion2d
  */
 Eigen::Matrix<double,6,6> jerkGram(double duration);
 
-/** @brief Derivatives of a cost before eliminating polynomial coefficients. */
-struct CoefficientGradient
-{
-  double cost = 0;
-  Eigen::MatrixX2d coefficients;  ///< 6N rows, x/y columns; partial cost / partial c.
-  Eigen::VectorXd times;         ///< N partials holding c fixed, not the final dJ/dT.
-};
-
-/** @brief Derivatives after eliminating coefficients with a MINCO adjoint solve. */
-struct MincoGradient
-{
-  Eigen::MatrixX2d waypoints;  ///< N-1 rows; start/finish boundaries are held fixed.
-  Eigen::VectorXd times;
-};
-
 /** @brief Clamped planar minimum-jerk trajectory through fixed positions at fixed times.
  * @details Solves a 6N band system for ascending coefficients, using C4 interior
  * continuity and p/v/a endpoint conditions. Equivalent to an equality-constrained
@@ -51,7 +36,7 @@ public:
   /** @brief Backpropagate any differentiable coefficient/time cost in O(N).
    * @details Solves A^T Lambda = dJ/dC, then dJ/dT = partial_T J - Lambda : (dA/dT) C.
    */
-  MincoGradient propagate(const Eigen::MatrixX2d & coefficient_gradient,
+  TrajectoryGradient propagate(const Eigen::MatrixX2d & coefficient_gradient,
     const Eigen::VectorXd & direct_time_gradient) const;
 private:
   std::vector<double> durations_;

@@ -21,6 +21,26 @@ struct QuinticPiece
   Eigen::Matrix<double, 2, 6> coefficients = Eigen::Matrix<double, 2, 6>::Zero();
 };
 
+/** @brief Derivatives of a cost before eliminating polynomial coefficients. */
+struct CoefficientGradient
+{
+  double cost = 0;
+  Eigen::MatrixX2d coefficients;  ///< 6N rows, x/y columns; partial cost / partial c.
+  Eigen::VectorXd times;         ///< N partials holding c fixed, not the final dJ/dT.
+};
+
+/** @brief Derivatives after eliminating coefficients with an adjoint solve. */
+struct TrajectoryGradient
+{
+  Eigen::MatrixX2d waypoints;  ///< N-1 rows; start/finish boundaries are held fixed.
+  Eigen::VectorXd times;
+};
+
+/** @brief Coefficient Jacobian for derivative order 0..5 at a finite local time.
+ * @pre order in [0,5]; time>=0. Row entries are d^order(t^k)/dt^order.
+ */
+Eigen::Matrix<double,1,6> polynomialBasis(double time,int order);
+
 /** @brief Evaluate derivative order 0..5 by Horner's method; no extrapolation.
  * @throws std::invalid_argument for invalid order, local time or piece data.
  */

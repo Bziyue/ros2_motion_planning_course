@@ -130,4 +130,72 @@ every last row/.style={after row=\bottomrule}]{data/ch15_minco.csv}
 \item \textbf{代码 ch15-1：}完成 jerkGram 的一个条目，检查低次项为零、积分指数和因子。
 \item \textbf{实验：}固定相同边界、路点和时长，对比能量；改变一段时长检查解析梯度的符号与数值。
 \end{enumerate}
-本章下一功能将加入正时长参数化、软约束优化与独立的可行性检查。
+
+
+\clearpage
+\section{把约束违反量变成软代价}
+令 $[h]_+=\max(0,h)$，用 $w[h]_+^3$ 惩罚违反；它的一阶导数是 $3w[h]_+^2$。
+速度和加速度使用平方范数残差，走廊使用单位法向量残差，ESDF 使用原始中心距离：
+\begin{equation}
+ h_v=\|v\|^2-v_*^2,\quad h_a=\|a\|^2-a_*^2,\quad
+ h_c=n^Tp-b+\epsilon,\quad h_d=d_*-d(p).
+\end{equation}
+走廊已经在圆盘配置空间检查过；$\epsilon$ 是额外优化余量，不再加一遍半径。
+$d(p)$ 用于可微软惩罚；独立检查仍使用第十二章的净空下界。
+各项单位不同，权重负责尺度换算。总目标为 $w_JJ+w_T\sum T_i+\int\sum w[h]_+^3dt$。
+
+每段在 $s_j=j/K$ 处求梯形积分，局部时间 $t_j=s_jT$。
+改变 $T$ 时，积分权重 $T/K$ 和采样位置都变化。
+下列代码里的 gp/gv/ga 是惩罚对 p/v/a 的偏导，weight 在两端取 $1/2$：
+\lstinputlisting[language=C++,linerange={trajectory_quadrature_begin-trajectory_quadrature_end},
+ includerangemarker=false]{../ros2_ws/src/motion2d/src/trajectory/trajectory_cost.cpp}
+先求直接偏导，再经 MINCO 的 propagate 传回路点和时长，不能只改变采样间隔。
+测试固定系数、分别扰动十二个系数和时长，检查全部软项；差分步长 $10^{-6}$。
+
+\section{始终保持时长为正}
+令 $T_i=T_{\min}+e^{\tau_i}$，优化无约束变量 $\tau_i$。
+链式法则给出 $dK/d\tau_i=(dK/dT_i)(T_i-T_{\min})$：
+\lstinputlisting[language=C++,linerange={positive_time_begin-positive_time_end},
+ includerangemarker=false]{../ros2_ws/src/motion2d/src/trajectory/minco_optimizer.cpp}
+不把越界时间硬裁剪后假装梯度不变。指数溢出、线性求解失败、ESDF 越出有效域都使该试探步无效。
+BFGS 用 Armijo 回溯寻找有限且下降的步；逆 Hessian 更新使用实际变量差和梯度差。
+内层 MINCO 随段数线性增长，\textbf{外层教学版密集 BFGS 使用二次内存}，两者不要混淆。
+状态分别报告 converged、max\_iterations、line\_search\_failed 和 time\_limit；
+时间预算在迭代和试探步之间检查，不是硬实时保证。
+
+\clearpage
+\section{收敛之后仍要检查}
+\begin{lstlisting}[language=bash]
+ros2 run motion2d corridor_demo tmp/ch13_corridor
+ros2 run motion2d trajectory_optimization_demo tmp/ch15_optimization
+/usr/bin/python3 scripts/plot_ch15_optimization.py
+\end{lstlisting}
+这是提供栅格的算法实验，非未知环境导航。沿用第十三章墙体、0.1 m 栅格、0.15 m 圆盘和三段走廊，
+初始时长为对应折线长度除以 0.6 m/s；两端静止。速度/加速度软目标均为 0.8，独立上限均为 1（SI）；
+ESDF 目标 0.4 m，净空检查要求严格大于 0.15 m。每段积分 24 格，独立检查 200 格。
+
+\begin{figure}[!ht]
+\centering\includegraphics[width=\linewidth]{figures/ch15_optimization.pdf}
+\caption{相同初值下分别锁定全部变量、只优化内部位置、联合优化位置与时间。浅色多边形为走廊。
+联合优化缩短时间并降低目标，但局部穿出走廊，不能直接作为安全命令。}
+\end{figure}
+
+\begin{center}\small
+\begin{tabular}{lrrrr}\toprule
+模式 & 总代价 & 时长/s & 走廊最大残差/m & 净空下界/m\\\midrule
+初始 & 12.5815 & 12.2428 & $-0.0500$ & 0.4607\\
+仅位置 & 12.3159 & 12.2428 & 0.0166 & 0.2160\\
+位置与时间 & 11.4043 & 10.7129 & 0.0233 & 0.1322\\\bottomrule
+\end{tabular}
+\end{center}
+三个问题都返回 converged，只有初始曲线通过本次采样检查。
+优化变量为零时，converged 仅表示没有可调变量。小代价、驻点和可行性是不同问题。
+即使 samples\_feasible 为真，也仅是有限采样；下一章用 Bézier 凸包给出整段的充分条件。
+本功能只输出诊断，未向机器人发送未经认证的优化轨迹。
+
+\begin{enumerate}
+\item \textbf{推导：}只有单段 jerk 与时间代价时，证明最优时长为
+$T^*=(3600w_J\|\Delta p\|^2/w_T)^{1/6}$，并用实验核对。
+\item \textbf{代码 ch15-2：}补全正时长变量的链式梯度。改变 $T_{\min}$ 后仍应通过差分。
+\item \textbf{实验：}逐次加大走廊权重，记录残差、迭代数、终止状态；解释为什么权重很大仍不构成连续证明。
+\end{enumerate}

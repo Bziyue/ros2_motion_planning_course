@@ -12,3 +12,6 @@ g++ -std=c++17 -Iexercises/ch15/starter exercises/ch15/check_jerk_gram.cpp -o /t
 ```
 
 评分：导数与积分50%，完整时间梯度30%，固定同问题实验20%。小能量不等于避障或动力学可行。
+
+代码ch15-2：正时长变量的链式梯度。用同一命令将文件换成check_time_gradient.cpp。
+参考解和starter分别编译；参考解应通过，starter应失败。实验比较软约束收敛与独立残差，不能把converged等同安全。

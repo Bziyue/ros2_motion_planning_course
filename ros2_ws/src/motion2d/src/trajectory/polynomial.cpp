@@ -53,4 +53,14 @@ TranslationState PolynomialTrajectory::sample(double time) const
 {
   return {evaluate(time,0),evaluate(time,1),evaluate(time,2)};
 }
+Eigen::Matrix<double,1,6> polynomialBasis(double time,int order)
+{
+  Eigen::Matrix<double,1,6> b=Eigen::Matrix<double,1,6>::Zero();
+  double power=1;
+  for(int k=order;k<6;++k) {
+    double factor=1; for(int j=0;j<order;++j) {factor*=k-j;}
+    b(k)=factor*power; power*=time;
+  }
+  return b;
+}
 }  // namespace motion2d

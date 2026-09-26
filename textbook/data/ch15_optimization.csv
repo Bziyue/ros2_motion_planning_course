@@ -1,0 +1,4 @@
+mode,status,cost,duration,speed,acceleration,corridor_residual,clearance,sampled_feasible,iterations,seconds
+0,converged,12.5815,12.2428,0.940833,0.482154,-0.0499999,0.460745,1,0,1.996e-05
+1,converged,12.3159,12.2428,0.868183,0.426468,0.0165672,0.215985,0,12,0.00020855
+2,converged,11.4043,10.7129,0.96601,0.543729,0.0232795,0.132174,0,20,0.000573611

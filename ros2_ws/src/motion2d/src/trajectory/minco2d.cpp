@@ -4,19 +4,6 @@
 
 namespace motion2d
 {
-namespace
-{
-Eigen::Matrix<double,1,6> basis(double time,int order)
-{
-  Eigen::Matrix<double,1,6> b=Eigen::Matrix<double,1,6>::Zero();
-  double power=1;
-  for(int k=order;k<6;++k) {
-    double factor=1; for(int j=0;j<order;++j) {factor*=k-j;}
-    b(k)=factor*power; power*=time;
-  }
-  return b;
-}
-}  // namespace
 
 Eigen::Matrix<double,6,6> jerkGram(double T)
 {
@@ -43,22 +30,22 @@ Minco2D::Minco2D(const TranslationState & start,const TranslationState & finish,
     for(int k=0;k<6;++k) if(b(k)!=0) {factor_.at(row,6*segment+k)+=sign*b(k);}
   };
   rhs.row(0)=start.position.transpose();rhs.row(1)=start.velocity.transpose();rhs.row(2)=start.acceleration.transpose();
-  for(int d=0;d<3;++d) {insert(d,0,basis(0,d));}
+  for(int d=0;d<3;++d) {insert(d,0,polynomialBasis(0,d));}
   // minco_conditions_begin
   for(int i=0;i<n-1;++i) {
     const double T=durations_[i]; const int r=6*i+3;
-    insert(r,i,basis(T,3)); insert(r,i+1,basis(0,3),-1);     // jerk continuity
-    insert(r+1,i,basis(T,4)); insert(r+1,i+1,basis(0,4),-1); // snap continuity
-    insert(r+2,i,basis(T,0)); rhs.row(r+2)=interior[i].transpose();
+    insert(r,i,polynomialBasis(T,3)); insert(r,i+1,polynomialBasis(0,3),-1);     // jerk continuity
+    insert(r+1,i,polynomialBasis(T,4)); insert(r+1,i+1,polynomialBasis(0,4),-1); // snap continuity
+    insert(r+2,i,polynomialBasis(T,0)); rhs.row(r+2)=interior[i].transpose();
     for(int d=0;d<3;++d) {
-      insert(r+3+d,i,basis(T,d)); insert(r+3+d,i+1,basis(0,d),-1);
+      insert(r+3+d,i,polynomialBasis(T,d)); insert(r+3+d,i+1,polynomialBasis(0,d),-1);
     }
   }
   // minco_conditions_end
   const int last=6*n-3;
   rhs.row(last)=finish.position.transpose();rhs.row(last+1)=finish.velocity.transpose();
   rhs.row(last+2)=finish.acceleration.transpose();
-  for(int d=0;d<3;++d) {insert(last+d,n-1,basis(durations_.back(),d));}
+  for(int d=0;d<3;++d) {insert(last+d,n-1,polynomialBasis(durations_.back(),d));}
   factor_.factor(); coefficients_=factor_.solve(rhs);
 }
 
@@ -78,25 +65,25 @@ CoefficientGradient Minco2D::energyPartials() const
     const auto C=coefficients_.middleRows<6>(6*i); const auto Q=jerkGram(durations_[i]);
     result.cost+=(C.array()*(Q*C).array()).sum();
     result.coefficients.middleRows<6>(6*i)=2*Q*C;
-    result.times(i)=(basis(durations_[i],3)*C).squaredNorm();
+    result.times(i)=(polynomialBasis(durations_[i],3)*C).squaredNorm();
   }
   return result;
 }
 
-MincoGradient Minco2D::propagate(const Eigen::MatrixX2d & gradient,const Eigen::VectorXd & direct) const
+TrajectoryGradient Minco2D::propagate(const Eigen::MatrixX2d & gradient,const Eigen::VectorXd & direct) const
 {
   const int n=durations_.size();
   if(gradient.rows()!=6*n || direct.size()!=n || !gradient.allFinite() || !direct.allFinite())
   {throw std::invalid_argument("Invalid MINCO cost partials");}
   // minco_adjoint_begin
   const Eigen::MatrixX2d lambda=factor_.solve(gradient,true);
-  MincoGradient result{Eigen::MatrixX2d::Zero(n-1,2),direct};
+  TrajectoryGradient result{Eigen::MatrixX2d::Zero(n-1,2),direct};
   for(int i=0;i<n;++i) {
     const auto C=coefficients_.middleRows<6>(6*i); const double T=durations_[i];
     const int row=i<n-1 ? 6*i+3 : 6*n-3;
     const std::vector<int> orders=i<n-1 ? std::vector<int>{4,5,1,1,2,3} : std::vector<int>{1,2,3};
     for(std::size_t j=0;j<orders.size();++j) {
-      result.times(i)-=lambda.row(row+j).dot(basis(T,orders[j])*C);
+      result.times(i)-=lambda.row(row+j).dot(polynomialBasis(T,orders[j])*C);
     }
     if(i<n-1) {result.waypoints.row(i)=lambda.row(6*i+5);}
   }
