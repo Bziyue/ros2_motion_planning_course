@@ -250,3 +250,104 @@ Marker 最多 20 Hz，原始 IMU 默认 200 Hz，两者频率不同。
 暂停后新订阅者收不到旧 IMU 属于 Volatile QoS 行为，恢复运行再观察。
 检查程序会 reset 并最终暂停。重置会让时间回退，已有 TF 缓存需要进入新试验；
 必要时恢复运行或重新启动 RViz，不把旧缓存警告当作新运动数据。
+
+\clearpage
+\section{采样时间不是回调到达时间}
+一个 137 Hz 传感器的周期约为 7.29927 ms，无法写成 5 ms 仿真步长的整数倍。
+若强行每一个 tick 采样，它会变成 200 Hz；每两个 tick 则变成 100 Hz。
+本章为每个传感器保留独立的采样序号 k，共享同一条模拟时间轴：
+\begin{equation}
+t_k=\operatorname{round}\!\left(\frac{10^9 k}{f_s}\right)\ \mathrm{ns},
+\qquad k=0,1,2,\ldots
+\end{equation}
+每次从 k 计算，舍入误差不会像反复累加一个已舍入的周期那样增长。
+纳秒网格的量化误差至多半个纳秒，具体纳秒间隔可能相差 1。
+
+\lstinputlisting[language=C++,linerange={sample_grid_begin-sample_grid_end},
+ includerangemarker=false]{../ros2_ws/src/motion2d/src/sim/sensor_scheduler.cpp}
+
+\begin{center}
+\begin{tikzpicture}[x=.46cm,y=1cm,>=Stealth]
+\draw[->,navy] (0,0)--(21,0) node[right] {ms};
+\foreach \t in {0,5,10,15,20} {
+ \draw[navy] (\t,-.08)--(\t,.08) node[below=6pt] {\t};
+}
+\draw[thick,tealblue] (5,.6)--(10,.6);
+\node[above left] at (8.8,.6) {已接受的运动区间};
+\draw[->,tealblue,thick] (7.29927,-1)--(7.29927,0);
+\node[below,align=center] at (7.29927,-1) {采样 7.29927\\写入 header};
+\draw[->,navy,thick] (10,1.5)--(10,0);
+\node[above] at (13,1.5) {到 10 ms 后派发};
+\end{tikzpicture}
+\end{center}
+
+采样、模拟器派发、订阅端墙钟到达，是三个不同的时间。
+本实现等一个 tick 通过运动与碰撞检查后才派发，因此模拟派发时间与采样时间相差小于 dt。
+这个上界不包含墙钟执行、DDS 传输或排队时间。主机忙时，模拟时间也可能走得更慢。
+估计器应按 header 时间计算积分间隔，不能拿两次回调的墙钟差代替它。
+
+\textbf{代码练习 ch06-3：}补全 \path{starter/sample_stamp.hpp}。
+检查 200、7、137.5 Hz 以及一小时后的采样点。单位测试保留第五章的整数 tick
+辅助函数作对照；实际模拟器已使用本章调度器，启动 7 Hz 不再报错。
+
+\clearpage
+\section{先接受运动区间，再产生观测}
+设刚接受的运动区间为 $[t_a,t_b]$。传感器时刻 $t_s$ 落在其中时，
+只用已经确定的区间输入计算 $x(t_s)$，然后生成测量。
+reference 直接计算绝对时刻的圆轨迹；inertial 和 velocity 从 $x(t_a)$ 出发，
+用本区间保持的命令积分 $t_s-t_a$。两者复用第四章解析解，
+不是分别线性插值位置、速度和加速度。以后接入数值动力学时才需重新设计一致的区间插值。
+
+\lstinputlisting[language=C++,linerange={sensor_dispatch_begin-sensor_dispatch_end},
+ includerangemarker=false]{../ros2_ws/src/motion2d/src/nodes/simulator_node.cpp}
+
+代码先选两个采样网格中较早的时刻；同一时刻可同时生成 IMU 和激光。
+每个采样位姿先发布对应的真值 TF，最后补齐 tick 末端的 TF。
+这样按采样 stamp 查询得到精确的模拟位姿，而不是误用最新一帧 TF。
+暂停时仍重复当前 TF 供晚加入者显示，但不重采样传感器。
+
+\textbf{边界约定。}恰好在 tick 末端的 IMU 使用刚结束区间的加速度；
+晚到命令不能重写过去的测量。t=0 是初始状态，之后施力影响之后的区间。
+瞬移模型只在 tick 末端切换位置，不虚构中间轨迹，也不允许启用 IMU。
+碰撞拒绝整个候选区间，状态、时间、传感器序号均停在上次接受的位置。
+
+\clearpage
+\section{不对齐频率也要逐帧可验证}
+停止旧场景，用无噪声空房间配置运行：
+\begin{lstlisting}[language=bash,numbers=none]
+ros2 launch motion2d_bringup ch06.launch.py rviz:=false \
+  config:=src/motion2d_bringup/config/ch06_time_lab.yaml
+# Another terminal, same ROS environment
+/usr/bin/python3 ../scripts/check_ch06_time.py
+\end{lstlisting}
+配置为 200 Hz 物理、137 Hz IMU、7 Hz 雷达，90 束扫描、20 m 正方形房间。
+启动时暂停，检查脚本走 200 个 tick 到 1 s。包含 t=0，应有 138 条 IMU 与 8 帧激光。
+IMU 第一个非零 stamp 为 7299270 ns，雷达为 142857143 ns；
+它们分别在 10 ms 和 145 ms 的 tick 结束后派发。
+
+\textbf{解析检查。}reference 用圆轨迹核对比力、墙距和 TF。
+惯性实验的启动参数为 \path{model:=inertial}，检查脚本需加
+\code{--model inertial}。
+其质量 2 kg、线性阻力 .4 kg/s、转动惯量 .04 $\mathrm{kg\,m^2}$、角阻力 .02
+$\mathrm{kg\,m^2/s}$。先静止 .1 s，然后施加 $(1,-.3)$ N 与 .01 N\,m。
+脚本按独立公式求出不断变化的运动，逐条比较比力、90 束墙距及采样位姿 TF。
+随后另起一次试验向墙运动，检查碰撞冻结。
+
+\textbf{reset 是新试验。}它重置状态、命令、轨迹历史、采样序号与两个传感器的随机引擎。
+服务无法撤回已在 DDS 队列中的旧消息；后续估计器必须在模拟时间回退时清理积分和历史，
+或在新试验开始后重新建立消费者。验收脚本在 reset 屏障后建立新的 TF 监听器，
+并不表示修复了外部 RViz 的缓存实现。
+
+\begin{notebox}
+主机 RViz 在 reset 附近曾出现静态 TF 缓存异常，关闭时也曾异常退出。
+自动检查建议先用 \code{rviz:=false}。显示时恢复模拟，再单独启动 RViz：
+\begin{lstlisting}[language=bash,numbers=none]
+ros2 service call /sim/pause std_srvs/srv/SetBool '{data: false}'
+ros2 run rviz2 rviz2 -d src/motion2d_bringup/rviz/ch06.rviz \
+  --ros-args -p use_sim_time:=true
+\end{lstlisting}
+\end{notebox}
+
+\textbf{本章验收：}会区分比力与运动加速度、标准差与方差、采样与到达时间；
+完成三道独立代码练习，能复现白噪声、积分漂移和不对齐频率实验。
+原始 IMU 仍不是位置、姿态或里程计答案；下一章再明确接入真值里程计与观测建图。

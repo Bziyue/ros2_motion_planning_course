@@ -1,6 +1,6 @@
 # 第 06 章：高斯白噪声 IMU 与传感器时间
 
-先修 01-05。本章逐功能实施；当前完成理想比力、六轴白噪声、ROS 原始 IMU、统计/积分漂移实验和 RViz。非整数频率调度在随后增量中实现。
+先修 01-05。本章已完成理想比力、六轴白噪声、ROS 原始 IMU、统计/积分漂移实验、RViz 与统一采样时间调度，分三个独立功能提交，配套三道代码练习。
 
 ## 从理想测量开始
 
@@ -47,7 +47,7 @@ ros2 launch motion2d_bringup ch06.launch.py
 | 参数 | 默认 | 含义 |
 | --- | --- | --- |
 | imu.enabled | true | ch01-05 默认 false |
-| imu.rate | 200 | Hz；当前增量周期与 dt 对齐 |
+| imu.rate | 200 | Hz；支持 [0.1,1/dt] 内的非对齐频率 |
 | imu.gravity | 9.81 | 世界重力大小，m/s² |
 | imu.gyro_stddev | [0.002, 0.003, 0.004] | x/y/z 每采样标准差，rad/s |
 | imu.accel_stddev | [0.04, 0.05, 0.06] | x/y/z 每采样标准差，m/s² |
@@ -73,3 +73,46 @@ ros2 run motion2d imu_noise_demo --drift > ../textbook/data/ch06_drift.csv
 --drift 固定 200 Hz、10 s、1000 次独立试验；sigma 倍率 1/2 使用相同种子作配对比较。只用 x 加速度误差和 z 角速度误差，已知固定姿态并去掉重力，展示一维积分误差，不是 SLAM。每步 p+=v*dt+0.5*a*dt²、v+=a*dt、yaw+=gyro*dt。该模型下标准差翻倍使每条误差轨迹和 RMS 翻倍；更长时间会积累更大不确定性，单条轨迹的绝对误差不保证单调。
 
 噪声密度不是每采样 sigma。只有先规定单/双边谱、滤波带宽和采样方式，才可换算。对连续白噪声强度 q、独立区间均值这一特定定义，有 Var(n_k)=q/dt；本章参数固定每采样 sigma，改变频率不会自动重标度。
+
+## 一条模拟时间轴，两个传感器采样网格
+
+SensorScheduler 的第 k 个采样时间是 round(k*1e9/rate) ns，从 k=0 开始；每次从序号重算，不累加舍入后的周期。频率支持 [0.1,1/dt] Hz，默认 dt=.005，所以最高 200 Hz。不用两个墙钟定时器分别推进传感器。
+
+模拟器先求下一 tick 状态并检查整个运动区间；只有通过，才按时间先后释放区间内到期的 IMU/激光帧。reference 在采样绝对时刻求解析状态，inertial/velocity 复用第四章的解析积分，从区间起点按当时保持的命令求子步状态。ideal 瞬移仅在 tick 末端发生，期间不虚构中间运动，并禁止 IMU。
+
+每个采样时刻有对应的真值 TF，采样时的雷达姿态、比力和 TF 一致；/clock 仍只由模拟器发布。header.stamp 是采样时间，可能早于刚接受的 tick 末端；两者相差小于 dt，这是模拟时间里的派发延迟，不是墙钟/DDS 时延上界。主机慢时模拟时间也会推进得慢。
+
+边界约定：恰在 tick 末端采样时，使用刚结束区间的加速度。后到命令不能改写已发布的 IMU；t=0 样本对应初始状态。暂停/碰撞冻结不推进采样序号、不消耗噪声；reset 同时清状态、命令、轨迹历史、采样序号和两个传感器随机引擎。DDS 已发送的旧消息无法由服务远程撤回，消费者应在时间回退时清本地历史；离线试验可在 reset 屏障后新建监听器。
+
+## 137 Hz IMU 与 7 Hz 雷达实验
+
+停止旧场景，再运行无噪声空房间实验（start_paused=true）：
+
+~~~bash
+# ros2_ws；建议自动 reset 检查时先不启动 RViz
+ros2 launch motion2d_bringup ch06.launch.py rviz:=false \
+  config:=src/motion2d_bringup/config/ch06_time_lab.yaml
+# 另一终端，相同 ROS 环境
+/usr/bin/python3 ../scripts/check_ch06_time.py
+~~~
+
+脚本单步 200 次至 t=1 s，应得到 138 条 IMU、8 帧雷达，均包含 t=0。它逐一核对采样时间、解析 IMU、90 束墙距、采样位姿 TF、暂停和 reset。IMU 第一个非零时间为 7299270 ns，雷达为 142857143 ns；不能把它们改写为派发时刻 10 ms 和 145 ms。
+
+再停止并切换惯性模式：
+
+~~~bash
+ros2 launch motion2d_bringup ch06.launch.py rviz:=false model:=inertial \
+  config:=src/motion2d_bringup/config/ch06_time_lab.yaml
+# 另一终端
+/usr/bin/python3 ../scripts/check_ch06_time.py --model inertial
+~~~
+
+m=2 kg、线性阻力 .4 kg/s、Iz=.04 kg*m²、角阻力 .02 kg*m²/s。先静止 .1 s，再施加 F=(1,-.3) N、tau=.01 N*m；脚本使用独立解析公式核对旋转、变速和比力。随后另起试验以 2 N 向墙施力，验证碰撞后时间、IMU 和扫描冻结。结束停在 reset 后的 t=0。
+
+主机 RViz 在 reset 时间回退附近可能触发外部 TF 缓存异常；自动验收建议 rviz:=false，显示时再单独启动。关闭阶段也观察到主机 RViz exit -11，未在本章修复。显示命令如下，先恢复模拟以获取 Volatile 扫描：
+
+~~~bash
+ros2 service call /sim/pause std_srvs/srv/SetBool '{data: false}'
+ros2 run rviz2 rviz2 -d src/motion2d_bringup/rviz/ch06.rviz \
+  --ros-args -p use_sim_time:=true
+~~~

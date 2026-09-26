@@ -39,8 +39,9 @@ std::vector<float> scanCpu(const World2D & world, const Pose2D & pose,
  * @param rate Scan rate in Hz, finite and >= 0.1.
  * @param dt Simulation step in s, finite and positive.
  * @return Positive integer ticks, requiring 1/rate = ticks*dt within 1 ns.
- * @details This chapter samples only existing states; it never silently rounds
- * a 7 Hz request to another frequency. Nonaligned scheduling needs interpolation.
+ * @details Chapter 05's aligned-grid teaching helper, retained for comparison.
+ * The running simulator now uses ch06 SensorScheduler and analytic state sampling
+ * instead, so it accepts 7 Hz. This helper still rejects nonaligned periods.
  */
 std::int64_t lidarPeriodTicks(double rate, double dt);
 

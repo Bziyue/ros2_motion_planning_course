@@ -20,7 +20,7 @@ ros2 launch motion2d_bringup ch05.launch.py
 | --- | --- | --- |
 | lidar.beams | 720 | 均匀角度束数，支持 2-100000 |
 | lidar.angle_min / lidar.fov | -pi / 2*pi | 雷达系起始角和视场，rad |
-| lidar.rate | 10 | Hz；周期须为 dt 的整数倍，且不低于 0.1 Hz |
+| lidar.rate | 10 | Hz；第 06 章调度器现支持 [0.1, 1/dt] 内的非对齐频率 |
 | lidar.range_min / lidar.range_max | 0.05 / 10 | m，包含两个端点 |
 | lidar.range_stddev / lidar.noise_seed | 0.01 / 4242 | 每个有效回波的标准差（m）与独立随机种子 |
 | lidar.visualize_beams | true | 发布光束显示辅助量，可关闭 |
@@ -28,7 +28,7 @@ ros2 launch motion2d_bringup ch05.launch.py
 
 整周角间隔为 2*pi/N，不重复首末方向；部分视场为 FOV/(N-1)，包含两个端点。近距真实命中为 NaN；量程内无回波为 +inf；不跳过近障碍而报告后墙。课程 NaN 约定与 REP-117 对过近的 -inf 编码不同，硬件适配时需区别。
 
-所有束使用同一采样位姿，time_increment=0，scan_time=1/rate。周期不对齐时（如 dt=.005、rate=7）报错，不悄悄改变频率。暂停/碰撞冻结不重采样；reset 在 t=0 开始新序列。晚加入的 /scan 订阅者在暂停时需等恢复运行，才能收到新帧。
+所有束使用同一采样位姿，time_increment=0，scan_time=1/rate。本章初始版本只接受整数 tick 周期；保留的 lidarPeriodTicks 教学函数仍拒绝 7 Hz。当前运行代码使用第 06 章统一调度，支持 dt=.005、rate=7；它按采样时刻求状态，不悄悄改变频率。暂停/碰撞冻结不重采样；reset 在 t=0 开始新序列。晚加入的 /scan 订阅者在暂停时需等恢复运行，才能收到新帧。
 
 RViz2 显示橙色有效射线、淡蓝无回波射线及红色命中点。/scan 为 Best Effort、Volatile；光束 Marker 保留在采样时刻的 odom 坐标，不随当前机器人移动。光束辅助量不供 SLAM 使用。reset 后如 RViz 显示正在恢复，先恢复运行，等待下一帧；已知的主机 RViz 关闭问题见验收记录。
 
@@ -49,9 +49,9 @@ colcon test-result --verbose
 - `include/motion2d/sim/raycast.hpp`：单位、坐标与输入前提。
 - `src/sim/raycast.cpp`：圆二次方程、线段叉积求交、所有表面取最近值。
 - `src/examples/raycast_demo.cpp`：可手算的最小实验。
-- `src/sim/lidar_cpu.cpp`：角度、量程编码和整数 tick 周期。
+- `src/sim/lidar_cpu.cpp`：角度、量程编码和整数 tick 周期教学基线；当前调度见 ch06 sensor_scheduler.cpp。
 - `src/ros/lidar_messages.cpp`：标准消息与光束 Marker 转换。
-- `src/nodes/simulator_node.cpp`：直接在同一仿真 tick 调用扫描，没有第二个世界或时钟。
+- `src/nodes/simulator_node.cpp`：按同一模拟时间轴采样，没有第二个世界或时钟。
 - `test/test_raycast.cpp`：相切、背向、线段端点、平行/共线、边界、遮挡、刚体变换。
 
 射线写为 o+t*d，d 必须为单位向量，t 才是米。返回最近的 t>=0；没有表面命中时为正无穷。圆内起点返回出口交点；实际机器人起点应在自由空间。雷达在圆心且不检测自身，机器人半径只影响碰撞。

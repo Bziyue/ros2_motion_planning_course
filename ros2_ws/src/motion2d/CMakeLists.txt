@@ -17,7 +17,7 @@ add_library(motion2d_core
   src/sim/sim_clock.cpp src/sim/world.cpp src/sim/world_generator.cpp
   src/sim/ideal_model.cpp src/sim/swept_collision.cpp src/sim/velocity_model.cpp
   src/sim/inertial_model.cpp src/sim/reference_model.cpp src/sim/raycast.cpp src/sim/lidar_cpu.cpp
-  src/sim/imu.cpp)
+  src/sim/imu.cpp src/sim/sensor_scheduler.cpp)
 target_compile_features(motion2d_core PUBLIC cxx_std_17)
 target_compile_options(motion2d_core PRIVATE -Wall -Wextra -Wpedantic)
 target_include_directories(motion2d_core PUBLIC
@@ -107,6 +107,8 @@ if(BUILD_TESTING)
   target_link_libraries(test_lidar motion2d_core)
   ament_add_gtest(test_imu test/test_imu.cpp)
   target_link_libraries(test_imu motion2d_core)
+  ament_add_gtest(test_sensor_scheduler test/test_sensor_scheduler.cpp)
+  target_link_libraries(test_sensor_scheduler motion2d_core)
 endif()
 
 ament_package()

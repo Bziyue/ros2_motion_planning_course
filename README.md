@@ -2,7 +2,7 @@
 
 从二维世界、圆盘机器人和模拟传感器开始，逐步学习定位建图、路径与轨迹规划、跟踪控制。教材、代码和练习按章节对应。
 
-**当前状态：第 01-05 章已完成，第 06 章实施中。** 已有随机世界、四种机器人模型、CPU 激光雷达、六轴白噪声 IMU 与统计/漂移实验。大纲提交为 `5c0c642`；每完成一个可运行、已验证的功能就单独提交，教材和练习同步更新。非整数传感器调度、SLAM 和规划尚未完成。
+**当前状态：第 01-06 章已完成。** 已有随机世界、四种机器人模型、CPU 激光雷达、六轴白噪声 IMU、统一传感器时间调度与统计/漂移实验。大纲提交为 `5c0c642`；每完成一个可运行、已验证的功能就单独提交，教材和练习同步更新。真值里程计适配、建图、SLAM 和规划尚未实现。
 
 [教材 PDF](output/pdf/course.pdf) · [实施进度](docs/PROGRESS.md) · [主机验收记录](docs/VALIDATION.md)
 
@@ -20,7 +20,7 @@ source /opt/ros/lyrical/setup.bash
 cd /home/zdp/ForCodex/ros2_motion_planning_course/ros2_ws
 colcon build --symlink-install --cmake-args -DCMAKE_BUILD_TYPE=RelWithDebInfo -DPython3_EXECUTABLE=/usr/bin/python3
 source install/setup.bash
-ros2 launch motion2d_bringup ch05.launch.py
+ros2 launch motion2d_bringup ch06.launch.py
 ~~~
 
 上面使用 bash；zsh 对应使用 setup.zsh。启动时加 `rviz:=false` 可仅运行节点。同一时间只启动一个章节，避免多个时钟与 TF 发布者。初次学习请从第 01 章开始。
@@ -28,6 +28,8 @@ ros2 launch motion2d_bringup ch05.launch.py
 第 04 章支持 `model:=ideal`、`velocity`、`inertial`，分别接收位姿、速度、力/力矩；`model:=reference` 自动运行解析圆轨迹，适合后续传感器实验。完整输入命令、参数与实验见 [第 04 章说明](chapters/ch04/README.md)。惯性模式初始静止，需要发送力；停发命令后仍可能滑行。
 
 第 05 章默认沿圆参考运动并发布 720 束、10 Hz 的 CPU snapshot 激光，测距噪声标准差 0.01 m。RViz2 同时显示光束和命中点；参数、无噪声基准、空房间统计与束数实验见 [第 05 章说明](chapters/ch05/README.md)。
+
+第 06 章加入 200 Hz 的 /imu/data_raw、可配置的六轴白噪声与采样时间调度，也支持 137 Hz IMU / 7 Hz 雷达。仅 reference/inertial 支持 IMU，不发布真值姿态。运行命令、静止比力、噪声/漂移与时间实验见 [第 06 章说明](chapters/ch06/README.md)。本机 RViz 在 reset/退出时的已知异常及显示建议已记录，自动重置验收可加 `rviz:=false`。
 
 ## 审阅入口
 
@@ -43,7 +45,7 @@ ros2 launch motion2d_bringup ch05.launch.py
 
 仿真与传感器 → 真值里程计和激光建图 → 激光/IMU 定位 → 闭环 SLAM → A* → ESDF 与安全走廊 → 二维 MINCO / SplineTrajectory → PD / MPC → 在线重规划。CUDA 激光仿真为选学章节。
 
-采用已批准的全向圆盘与 C++17 算法主线，当前已完成第 01-05 章的环境、机器人与 CPU 雷达。大纲 PDF 保留为原始审阅记录，实际教材使用独立 PDF。
+采用已批准的全向圆盘与 C++17 算法主线，当前已完成第 01-06 章的环境、机器人、CPU 雷达与 IMU。大纲 PDF 保留为原始审阅记录，实际教材使用独立 PDF。
 
 ## 当前目录
 

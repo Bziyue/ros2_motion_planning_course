@@ -15,7 +15,7 @@ g++ -std=c++17 -Iexercises/ch05/starter exercises/ch05/check_root.cpp -o /tmp/ch
 
 4. 理解：为何小于 range_min 的真实命中不能写成 +inf？为何不能忽略它并继续寻找后面的墙？解释 NaN 在浮点比较中的特殊性。
 5. 代码 ch05-2：补全 beam_angle.hpp，兼容整周和部分视场。90/360/720 束的首末方向不能重复；90 度视场必须覆盖两个端点。
-6. 实验：以 720 束、10 Hz 运行默认 reference 场景。暂停并单步 19 次、再走第 20 步，观察 /scan 时间戳；把频率改为 20 Hz，预测间隔。试填 7 Hz，阅读拒绝原因，不要静默改成邻近频率。
+6. 实验：以 720 束、10 Hz 运行默认 reference 场景。暂停并单步 19 次、再走第 20 步，观察 /scan 时间戳；把频率改为 20 Hz，预测间隔。理解本章 lidarPeriodTicks 辅助函数为何拒绝 7 Hz；当前模拟器已有第 06 章调度，可运行 7 Hz 并对比它与整数 tick 基线的区别。
 
 ~~~bash
 g++ -std=c++17 -Iexercises/ch05/starter exercises/ch05/check_angles.cpp -o /tmp/ch05_angles

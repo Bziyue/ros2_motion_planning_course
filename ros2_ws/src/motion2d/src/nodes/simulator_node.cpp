@@ -26,6 +26,7 @@
 #include "motion2d/ros/imu_messages.hpp"
 #include "motion2d/sim/robot_model.hpp"
 #include "motion2d/sim/sim_clock.hpp"
+#include "motion2d/sim/sensor_scheduler.hpp"
 
 namespace motion2d
 {
@@ -97,20 +98,68 @@ public:
     timer_ = create_wall_timer(clock_.stepDuration(), [this]() {
         if (!clock_.paused()) {advanceTick(false);}
         publishState();  // Frozen timestamps also serve late subscribers when paused.
-        publishLidarIfDue();
-        publishImuIfDue();
       });
     static_timer_ = create_wall_timer(std::chrono::seconds(1), [this]() {publishStaticFrames();});
     marker_timer_ = create_wall_timer(std::chrono::milliseconds(50), [this]() {publishMarkers();});
     publishState();
-    publishLidarIfDue();
-    publishImuIfDue();
     publishMarkers();
     RCLCPP_INFO(get_logger(), "model=%s, radius=%.3f m; /sim/* is simulation truth",
       model_.c_str(), radius_);
   }
 
 private:
+  SensorScheduler readSchedule(const std::string & name, double default_rate)
+  {
+    const double rate = declare_parameter(name, default_rate);
+    SensorScheduler schedule(rate);
+    if (rate > 1.0 / dt()) {
+      throw std::invalid_argument(name + " must not exceed the simulation tick rate");
+    }
+    return schedule;
+  }
+
+  /** @brief Exact sample inside the last accepted ZOH/reference interval.
+   * @details A boundary sample belongs to the interval that just ended (left
+   * limit of acceleration); a later command cannot rewrite a published sample.
+   * Ideal pose changes happen only at the tick endpoint, with IMU disabled.
+   */
+  State2D acquisitionState(std::int64_t stamp) const
+  {
+    if (stamp == clock_.nanoseconds()) {return state_;}
+    const double offset = (stamp - interval_start_ns_) * 1e-9;
+    if (model_ == "reference") {
+      return sampleCircle(initial_, reference_radius_, reference_omega_, stamp * 1e-9);
+    }
+    if (model_ == "inertial") {
+      return stepInertial(interval_start_, interval_wrench_, inertia_, offset);
+    }
+    if (model_ == "velocity") {
+      return stepVelocity(interval_start_, interval_velocity_, offset);
+    }
+    return interval_start_;  // No interpolation through a nonphysical teleport.
+  }
+
+  // sensor_dispatch_begin
+  void publishSensors()
+  {
+    const auto now = clock_.nanoseconds();
+    std::int64_t last_transform = -1;
+    while (true) {
+      const auto never = std::numeric_limits<std::int64_t>::max();
+      const auto laser_time = lidar_schedule_ ? lidar_schedule_->nextStamp() : never;
+      const auto imu_time = imu_schedule_ ? imu_schedule_->nextStamp() : never;
+      const auto stamp = std::min(laser_time, imu_time);
+      if (stamp > now) {break;}
+      const auto sampled = acquisitionState(stamp);
+      publishTransform(sampled.pose, stamp);
+      last_transform = stamp;
+      if (stamp == laser_time) {publishLidar(sampled, stamp); lidar_schedule_->advance();}
+      if (stamp == imu_time) {publishImu(sampled, stamp); imu_schedule_->advance();}
+    }
+    if (last_transform != now) {publishTransform(state_.pose, now);}
+  }
+  // sensor_dispatch_end
+
   void readImu()
   {
     if (model_ != "reference" && model_ != "inertial") {
@@ -135,29 +184,25 @@ private:
     }
     imu_seed_ = static_cast<std::uint32_t>(seed);
     imu_random_.seed(imu_seed_);
-    const double rate = declare_parameter("imu.rate", 200.0);
-    imu_period_ns_ = lidarPeriodTicks(rate, dt()) * clock_.stepDuration().count();
+    imu_schedule_ = readSchedule("imu.rate", 200.0);
     imu_pub_ = create_publisher<sensor_msgs::msg::Imu>("/imu/data_raw", rclcpp::SensorDataQoS());
     if (declare_parameter("imu.visualize", true)) {
       imu_marker_pub_ = create_publisher<visualization_msgs::msg::MarkerArray>(
         "/visualization/imu", rclcpp::QoS(1).reliable().transient_local());
     }
     RCLCPP_INFO(get_logger(), "Raw IMU: %.3f Hz, seed=%u, gravity=%.3f; no orientation",
-      rate, imu_seed_, gravity_);
+      1.0 / imu_schedule_->period(), imu_seed_, gravity_);
   }
 
-  void publishImuIfDue()
+  void publishImu(const State2D & sampled, std::int64_t stamp)
   {
-    const auto now = clock_.nanoseconds();
-    if (!imu_pub_ || now == last_imu_ns_ || now % imu_period_ns_ != 0) {return;}
-    const auto sample = addImuNoise(idealImu(state_, gravity_), imu_noise_, imu_random_);
-    const auto message = toImuMessage(sample, imu_noise_, rclcpp::Time(now, RCL_ROS_TIME));
+    const auto sample = addImuNoise(idealImu(sampled, gravity_), imu_noise_, imu_random_);
+    const auto message = toImuMessage(sample, imu_noise_, rclcpp::Time(stamp, RCL_ROS_TIME));
     imu_pub_->publish(message);
-    if (imu_marker_pub_ && (last_imu_marker_ns_ < 0 || now - last_imu_marker_ns_ >= 50000000)) {
-      imu_marker_pub_->publish(imuMarkers(message, state_.pose));
-      last_imu_marker_ns_ = now;
+    if (imu_marker_pub_ && (last_imu_marker_ns_ < 0 || stamp - last_imu_marker_ns_ >= 50000000)) {
+      imu_marker_pub_->publish(imuMarkers(message, sampled.pose));
+      last_imu_marker_ns_ = stamp;
     }
-    last_imu_ns_ = now;
   }
 
   void readLidar()
@@ -175,8 +220,7 @@ private:
     }
     lidar_seed_ = static_cast<std::uint32_t>(seed);
     lidar_random_.seed(lidar_seed_);
-    const double rate = declare_parameter("lidar.rate", 10.0);
-    lidar_period_ns_ = lidarPeriodTicks(rate, dt()) * clock_.stepDuration().count();
+    lidar_schedule_ = readSchedule("lidar.rate", 10.0);
     if (declare_parameter<std::string>("lidar.backend", "cpu") != "cpu" ||
       declare_parameter<std::string>("lidar.scan_model", "snapshot") != "snapshot")
     {
@@ -189,21 +233,18 @@ private:
     }
     RCLCPP_INFO(get_logger(),
       "CPU snapshot lidar: %d beams, %.3f Hz, range [%.3f, %.3f] m, sigma=%.4f m, seed=%u",
-      lidar_config_.beams, rate, lidar_config_.range_min, lidar_config_.range_max,
+      lidar_config_.beams, 1.0 / lidar_schedule_->period(), lidar_config_.range_min, lidar_config_.range_max,
       lidar_config_.range_stddev, lidar_seed_);
   }
 
-  void publishLidarIfDue()
+  void publishLidar(const State2D & sampled, std::int64_t stamp)
   {
-    const auto now = clock_.nanoseconds();
-    if (!scan_pub_ || now == last_scan_ns_ || now % lidar_period_ns_ != 0) {return;}
-    auto ranges = scanCpu(world_, state_.pose, lidar_config_);
+    auto ranges = scanCpu(world_, sampled.pose, lidar_config_);
     addRangeNoise(ranges, lidar_config_, lidar_random_);
     const auto scan = toLaserScan(lidar_config_, ranges,
-      rclcpp::Time(now, RCL_ROS_TIME), lidar_period_ns_ * 1e-9);
+      rclcpp::Time(stamp, RCL_ROS_TIME), lidar_schedule_->period());
     scan_pub_->publish(scan);
-    if (beam_pub_) {beam_pub_->publish(lidarBeamMarkers(scan, state_.pose));}
-    last_scan_ns_ = now;
+    if (beam_pub_) {beam_pub_->publish(lidarBeamMarkers(scan, sampled.pose));}
   }
 
   void readInertia()
@@ -346,6 +387,10 @@ private:
       RCLCPP_WARN(get_logger(), "Swept disk blocked; state/time frozen. Reset to begin a new trial");
       return false;
     }
+    interval_start_ = state_;
+    interval_start_ns_ = clock_.nanoseconds();
+    interval_velocity_ = have_command_ ? velocity_command_ : VelocityCommand{};
+    interval_wrench_ = have_command_ ? wrench_command_ : Wrench2D{};
     state_ = next;
     if (single_step) {clock_.singleStep();} else {clock_.advance();}
     rememberPosition();
@@ -371,8 +416,6 @@ private:
         response->success = clock_.paused() && advanceTick(true);
         response->message = response->success ? "advanced one tick" : "pause first; reset if blocked";
         publishState();
-        publishLidarIfDue();
-        publishImuIfDue();
         publishMarkers();
       });
     reset_service_ = create_service<std_srvs::srv::Trigger>("/sim/reset",
@@ -388,17 +431,20 @@ private:
         trail_.clear();
         rememberPosition();
         setStatus("paused");
+        interval_start_ = state_;
+        interval_start_ns_ = 0;
+        interval_velocity_ = {};
+        interval_wrench_ = {};
+        if (lidar_schedule_) {lidar_schedule_->reset();}
+        if (imu_schedule_) {imu_schedule_->reset();}
+        lidar_random_.seed(lidar_seed_);
+        last_imu_marker_ns_ = -1;
+        imu_random_.seed(imu_seed_);
         publishStaticFrames();
         publishState();
-        last_scan_ns_ = -1;
-        lidar_random_.seed(lidar_seed_);
-        last_imu_ns_ = last_imu_marker_ns_ = -1;
-        imu_random_.seed(imu_seed_);
-        publishLidarIfDue();
-        publishImuIfDue();
         publishMarkers();
         response->success = true;
-        response->message = "new paused trial; state, command and trail cleared";
+        response->message = "new paused trial; state, command, trail, sensor grid and RNG reset";
       });
   }
 
@@ -452,12 +498,19 @@ private:
     acceleration.accel.linear.y = state_.acceleration.y();
     acceleration.accel.angular.z = state_.yaw_acceleration;
     acceleration_pub_->publish(acceleration);
+    publishSensors();  // Includes exact acquisition TF and the endpoint/paused heartbeat TF.
+  }
+
+  void publishTransform(const Pose2D & pose, std::int64_t stamp)
+  {
     geometry_msgs::msg::TransformStamped tf;
-    tf.header = pose.header;
+    tf.header.stamp = rclcpp::Time(stamp, RCL_ROS_TIME);
+    tf.header.frame_id = "odom";
     tf.child_frame_id = "base_link";
-    tf.transform.translation.x = pose.pose.position.x;
-    tf.transform.translation.y = pose.pose.position.y;
-    tf.transform.rotation = pose.pose.orientation;
+    tf.transform.translation.x = pose.position.x();
+    tf.transform.translation.y = pose.position.y();
+    tf.transform.rotation.z = std::sin(pose.yaw / 2);
+    tf.transform.rotation.w = std::cos(pose.yaw / 2);
     broadcaster_.sendTransform(tf);
   }
 
@@ -506,6 +559,10 @@ private:
   World2D world_;
   Pose2D initial_;
   State2D state_;
+  State2D interval_start_;
+  std::int64_t interval_start_ns_ = 0;
+  VelocityCommand interval_velocity_;
+  Wrench2D interval_wrench_;
   std::optional<Pose2D> pending_pose_;
   VelocityCommand velocity_command_;
   Wrench2D wrench_command_;
@@ -515,10 +572,10 @@ private:
   double gravity_ = 9.81;
   std::uint32_t imu_seed_ = 6060;
   std::mt19937 imu_random_;
-  std::int64_t imu_period_ns_ = 1, last_imu_ns_ = -1, last_imu_marker_ns_ = -1;
+  std::int64_t last_imu_marker_ns_ = -1;
+  std::optional<SensorScheduler> lidar_schedule_, imu_schedule_;
   std::uint32_t lidar_seed_ = 4242;
   std::mt19937 lidar_random_;
-  std::int64_t lidar_period_ns_ = 1, last_scan_ns_ = -1;
   double radius_, command_timeout_, speed_max_, yaw_rate_max_;
   double reference_radius_ = 1.0, reference_omega_ = .4;
   std::int64_t command_deadline_ = 0;

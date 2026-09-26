@@ -40,7 +40,7 @@ simulator:
     lidar.beams: 720
     lidar.angle_min: -3.141592653589793
     lidar.fov: 6.283185307179586  # full turn excludes the duplicate endpoint
-    lidar.rate: 10.0            # period must be an integer multiple of dt
+    lidar.rate: 10.0            # Hz; nonaligned rates are supported by the ch06 scheduler
     lidar.range_min: 0.05       # nearer true hit -> NaN, not free space
     lidar.range_max: 10.0       # no in-range echo -> +inf
     lidar.range_stddev: 0.01    # m per valid beam/sample; 0 disables noise
