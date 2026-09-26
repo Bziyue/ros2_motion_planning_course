@@ -5,16 +5,22 @@
 \end{notebox}
 
 \section{静止的加速度计为什么不为零}
-把一个加速度计平放在桌上，它的 z 轴向上时会测到约 $+9.81\ \mathrm{m/s^2}$。
-这不是机器人正在加速上升，而是桌面的支持力产生了比力。自由落体才接近零比力；
-本课程机器人受平面约束，不模拟自由落体。
-
-设 $R$ 将机体系向量转到世界系，$a$ 是圆心的世界运动加速度，$g$ 是世界重力：
+把一个加速度计平放在桌上，令它的 z 轴向上，读数约为 $+9.81\ \mathrm{m/s^2}$。
+要理解这个读数，可以从牛顿第二定律出发。把重力以外的力（例如桌面的支持力、驱动力）
+合写为 $F_{\mathrm{other}}$，则质量为 $m$ 的物体满足
 \begin{equation}
-f=R^\top(a-g),\qquad g=(0,0,-g_0)^\top,\qquad g_0=9.81\ \mathrm{m/s^2}.
+ma=mg+F_{\mathrm{other}},\qquad
+\frac{F_{\mathrm{other}}}{m}=a-g.
 \end{equation}
-后续估计器若要恢复运动加速度，需要 $a=Rf+g$，并且必须使用自己的姿态估计。
-仿真器内部可用真值 yaw 生成测量，估计器不能把它当作 IMU 给出的姿态。
+加速度计测量的正是右边这种\textbf{单位质量受到的非重力作用}，称为比力。
+它在自己的坐标轴上报告读数。设 $R$ 将机体系向量转到世界系，转回机体系得到
+\begin{equation}
+f=R^\top(a-g),\qquad g=(0,0,-g_0)^\top,\quad g_0=9.81\ \mathrm{m/s^2}.
+\end{equation}
+静止时 $a=0$，桌面支持力抵消向下的重力，因此向上的比力为 $g_0$。
+自由落体时 $a=g$，比力为零。这两个例子说明：运动加速度 $a$ 与传感器读数 $f$
+要通过重力联系起来。反过来求运动加速度，只需左乘 $R$ 再加 $g$：$a=Rf+g$。
+仿真器用真值姿态生成读数；第九章的估计器用估计姿态将读数转回世界系。
 
 \begin{center}
 \begin{tikzpicture}[>=Stealth]
@@ -31,7 +37,6 @@ f=R^\top(a-g),\qquad g=(0,0,-g_0)^\top,\qquad g_0=9.81\ \mathrm{m/s^2}.
 加速度计理想输出的单位是 $\mathrm{m/s^2}$，不是 g 的倍数。
 这一约定参考 \href{https://github.com/ros-infrastructure/rep/blob/master/rep-0145.rst}{REP-145 的 IMU 报告约定（草案）}。
 
-\clearpage
 \section{用三行公式读懂理想 IMU}
 二维部分只需要一个旋转转置：
 \begin{equation}
@@ -43,28 +48,53 @@ f=R^\top(a-g),\qquad g=(0,0,-g_0)^\top,\qquad g_0=9.81\ \mathrm{m/s^2}.
 例如 yaw 为 $90^\circ$、世界加速度为 $(2,0)$ 时，
 世界的 +x 方向正好是机体的 -y，故 $f=(0,-2,9.81)$。
 
+\par\noindent\begin{minipage}{\linewidth}
 \lstinputlisting[language=C++,linerange={imu_ideal_begin-imu_ideal_end},
   includerangemarker=false]{../ros2_ws/src/motion2d/src/sim/imu.cpp}
+\end{minipage}\par
 
 \code{ImuSample} 只保存角速度与比力两个三维向量，算法不依赖 ROS。
-输入的 \code{acceleration} 成员由动力学或解析轨迹提供；
-不要用含噪位置二阶差分代替它。
+输入的 \code{acceleration} 成员由第四章的运动模型提供。
+\code{reference} 对解析轨迹求导，\code{inertial} 从力、质量和阻力求加速度，
+\code{ackermann} 还包含转弯产生的向心项。这三种模型都适合生成 IMU。
+瞬移位置或瞬间改变速度会使导数中出现突变；需要 IMU 的实验应选择上述连续运动模型。
 
-\textbf{运动模型的选择。}第四章的 \code{reference} 提供一致的解析位置、速度和加速度；
-\code{inertial} 从力、质量和阻力计算加速度。二者适合本章。
-\code{ideal} 瞬移没有物理导数，\code{velocity} 的速度突变需要脉冲加速度，
-都不能据此伪造可融合的 IMU。
+\subsection{为什么安装位置也影响读数}
+圆心原地自转时，圆心加速度为零；离圆心越远的点，转动的线速度越大。
+用 $r$ 表示机体系中从圆心指向传感器的固定安装向量，传感器的世界位置为
+$p_I=p_C+Rr$。定义把平面向量逆时针转 $90^\circ$ 的矩阵
+\[
+J=\begin{bmatrix}0&-1\\1&0\end{bmatrix},\qquad J^2=-I.
+\]
+逐项对第二章的旋转矩阵求导可得 $\dot R=\omega RJ$，其中 $\omega=\dot\psi$。
+对 $p_I$ 求两次导数，利用 $r$ 不随时间变化，得到
+\begin{align}
+v_I&=v_C+\omega RJr,\\
+a_I&=a_C+\dot\omega RJr+\omega R(\omega J)Jr
+    =a_C+R(\dot\omega Jr-\omega^2r).
+\end{align}
+括号里的第一项沿切向，来自角速度变化；第二项指向转动中心，是向心加速度。
+例如 $r=(0.2,0)$ m、$\omega=2$ rad/s、$\dot\omega=0$，
+传感器多测到机体系的 $(-0.8,0)$ $\mathrm{m/s^2}$。
+本章配置 $r=0$，这两个安装位置项都为零；圆心沿曲线运动时，$a_C$ 本身仍可非零。
 
-\textbf{安装位置的意义。}圆心原地自转时，圆心不产生向心加速度。
-圆心本身沿圆轨迹移动时则有。若以后把 IMU 安装到偏离圆心的位置，
-需要加入角速度和角加速度引起的杆臂项；本章不暗中模拟这些项。
+\begin{center}
+\begin{tikzpicture}[x=1cm,y=1cm,>=Stealth]
+\draw[navy] (0,0) circle (1.15);
+\fill[navy] (0,0) circle (.035) node[below] {$C$};
+\draw[->,navy] (0,0)--(1.15,0) node[midway,below] {$r$};
+\fill[tealblue] (1.15,0) circle (.045) node[right] {偏心 IMU};
+\draw[->,thick,tealblue] (1.15,.12)--(.25,.12) node[midway,above] {$-\omega^2r$};
+\draw[->,thick,tealblue] (1.15,0)--(1.15,1.25) node[above] {$\dot\omega Jr$};
+
+\end{tikzpicture}
+\end{center}
 
 \begin{notebox}
 加速度计不能区分静止和匀速直线运动；两者的运动加速度都是零。
 原始 IMU 也不直接测量位置、速度或绝对 yaw。
 \end{notebox}
 
-\clearpage
 \section{先手算，再运行五个场景}
 重新构建工作空间、加载 install 后运行：
 \begin{lstlisting}[language=bash,numbers=none]
@@ -87,7 +117,10 @@ $r=1$，$\omega=0.4$ 的圆参考 & 0.4 & 0 & 0.16 & 9.81\\
 \end{tabular}
 \end{center}
 圆参考的机体 x 轴沿切向，y 轴朝路径圆心，故 $f_y=r\omega^2$。
-这与圆盘碰撞半径无关；不要把路径圆半径 r 与机器人半径混淆。
+这里的 $r$ 是圆心运动路径的半径，机器人外形半径仍由 \code{robot.radius} 配置。
+由第四章 $p=(r\cos\omega t,r\sin\omega t)$ 求两次导数，
+$a=-r\omega^2(\cos\omega t,\sin\omega t)$ 指向路径圆心；
+将它投影到沿切向的机体 x 轴为零，投影到向内的 y 轴为 $r\omega^2$。
 
 \textbf{代码练习 ch06-1。}在 \path{exercises/ch06/starter/specific_force.hpp}
 补全世界加速度到机体比力的变换，从仓库根目录编译：
@@ -104,52 +137,79 @@ $\omega$ 翻倍，预测和记录陀螺仪、加速度计的变化。验收包�
 \textbf{常见错误。}直接把世界加速度写入机体系消息；把 $g_z$ 符号写反；
 将陀螺仪单位写成度每秒；认为“运动很快”就意味着加速度很大。
 
-\clearpage
 \section{让每个采样点带上一点白噪声}
-最小测量模型将理想值与独立的高斯误差相加：
+沿用第五章的高斯噪声模型，将理想值与随机误差相加：
 \begin{equation}
-\omega_m=\omega+b_g+n_g,\qquad f_m=f+b_a+n_a,\qquad b_g=b_a=0.
+\omega_m=\omega+n_g,\qquad f_m=f+n_a.
 \end{equation}
-每个轴的每次采样独立，$n_i\sim\mathcal N(0,\sigma_i^2)$。
-本章先不模拟偏置、温漂或随机游走，也不把噪声裁剪到几个标准差内。
-同一采样的六个误差各抽一次；不能为整段运动只抽一个常数误差。
+每个轴、每个时刻各抽取一次独立误差，$n_i\sim\mathcal N(0,\sigma_i^2)$。
+“白”描述不同时刻的误差互不相关；“高斯”描述单个误差的分布形状。
+本模型进一步取各轴、各时刻相互独立，使实现只需六次独立抽样。
+若整段运动都加同一个常数，得到的是偏置；附录 C 再研究这种会持续积累的误差。
 
+\par\noindent\begin{minipage}{\linewidth}
 \lstinputlisting[language=C++,linerange={imu_noise_begin-imu_noise_end},
   includerangemarker=false]{../ros2_ws/src/motion2d/src/sim/imu.cpp}
+\end{minipage}\par
 
 默认陀螺仪三轴标准差为 $(.002,.003,.004)$ rad/s，加速度计为
 $(.04,.05,.06)\ \mathrm{m/s^2}$。这些是\textbf{每采样标准差}，不同轴可以不同。
 世界、雷达、IMU 各自拥有随机引擎；改变雷达束数不会推进 IMU 随机流。
-\code{reset} 重新设置 IMU 种子 6060，没有跨帧保留的高斯分布缓存。
-同配置、同轨迹、同采样顺序和同一标准库下可逐值重放，不承诺跨标准库字节一致。
+\code{reset} 重新设置 IMU 种子 6060。在同一标准库下，保持配置、轨迹和采样顺序，
+即可逐值重放同一组噪声。跨平台比较时，更适合比较均值、标准差等统计量。
 
-\begin{notebox}
-\textbf{标准差不等于噪声密度。}必须先说明频谱约定、滤波带宽与采样方式才能换算。
-若连续白噪声强度为 q，且每个读数是长度 $\Delta t$ 的独立区间均值，
-则 $\operatorname{Var}(n_k)=q/\Delta t$。这只是一个明确假设下的关系；
-本章直接配置每采样 $\sigma$，改频率时不会自动改变它。
-\end{notebox}
+\subsection{每采样标准差与连续噪声强度}
+改变采样率时，“保持噪声不变”有两种含义。本章配置的是每个读数的标准差 $\sigma$；
+提高频率会在同样一秒内获得更多个标准差相同的独立读数。
+另一种模型先规定\emph{噪声在一段时间内积分的方差}。
+设长度为 $h$ 的区间中，噪声积分记为 $W_h$，定义强度 $q$ 使
+\[
+\operatorname{Var}(W_h)=qh.
+\]
+这个定义符合独立区间的方差相加：两段各长 $h$ 的积分合并后，方差为 $2qh$。
+若传感器报告区间平均值 $n=W_h/h$，由
+$\operatorname{Var}(cX)=c^2\operatorname{Var}(X)$ 可得
+\begin{equation}
+\sigma^2=\operatorname{Var}(n)=\frac{qh}{h^2}=\frac qh,
+\qquad \sigma=\sqrt{q/h}.
+\end{equation}
+这里 $q$ 的单位是“测量单位的平方乘秒”。在这种区间平均模型中，
+采样率翻倍使 $h$ 减半，每采样标准差变为原来的 $\sqrt2$ 倍。
+使用硬件手册中的噪声密度时，还需按手册的频谱和滤波约定换算 $q$。
+本章直接配置 $\sigma$，因此改频率后 $\sigma$ 保持原值。
 
-\clearpage
-\section{原始消息不提供航向答案}
+\section{读懂 IMU 消息与协方差}
 话题 \code{/imu/data_raw} 使用 \code{sensor_msgs/Imu}，帧为 \code{imu_link}。
 \code{linear_acceleration} 字段装比力，不能仅凭字段名认为它已经去重力。
 姿态四元数用单位值占位，协方差首项 -1 明确表示没有姿态估计。
 这遵循主机定义及\href{https://github.com/ros2/common_interfaces/blob/rolling/sensor_msgs/msg/Imu.msg}{官方 Imu 消息约定}。
 
+协方差描述多个误差怎样一起变化。设 $\mu_i=E[n_i]$，定义
+\begin{equation}
+C_{ij}=E[(n_i-\mu_i)(n_j-\mu_j)].
+\end{equation}
+当 $i=j$，这就是该轴方差 $\sigma_i^2$；当 $i\ne j$，
+若两个误差常常同时为正或同时为负，乘积的平均值就偏正。
+本章误差独立且零均值，因此 $E[n_i n_j]=E[n_i]E[n_j]=0$，得到
+\[
+C=\begin{bmatrix}\sigma_x^2&0&0\\0&\sigma_y^2&0\\0&0&\sigma_z^2\end{bmatrix}.
+\]
+ROS 将矩阵按行摊平成九个数：第 $i$ 行第 $j$ 列放在 $3i+j$，索引从零开始。
+对角线 $i=j$ 因而对应 $4i$，即代码中的 0、4、8；单位是测量单位的平方。
+
+六个标准差均设为零可做理想实验。消息协议另有两个约定：协方差全零表示
+\textbf{协方差未知}，首项为 $-1$ 表示\textbf{该测量未提供}。
+因此原始姿态字段的首项写 $-1$；使用零噪声实验数据的滤波器，则通过自身配置指定噪声模型。
+
+\par\noindent\begin{minipage}{\linewidth}
 \lstinputlisting[language=C++,linerange={imu_message_begin-imu_message_end},
   includerangemarker=false]{../ros2_ws/src/motion2d/src/ros/imu_messages.cpp}
-
-独立噪声使 $C=\operatorname{diag}(\sigma_x^2,\sigma_y^2,\sigma_z^2)$；
-行主序对角位置是 0、4、8，单位也是原测量单位的平方。
-六个标准差均设为零可做理想实验；但全零测量协方差在 ROS 协议中表示\textbf{未知}，
-后续滤波器需要明确配置噪声模型，不能理解成无限置信度。
+\end{minipage}\par
 
 \textbf{代码练习 ch06-2：}补全 \path{starter/covariance.hpp}，检验三轴方差和非对角项。
 例如 $\sigma_z=.004$ rad/s 对应方差 $1.6\times10^{-5}\ (\mathrm{rad/s})^2$。
 
-\clearpage
-\section{用统计量验收噪声}
+\section{从数据观察噪声分布}
 先在 ros2\_ws 运行独立实验：
 \begin{lstlisting}[language=bash,numbers=none]
 ros2 run motion2d imu_noise_demo
@@ -174,37 +234,83 @@ s=\sqrt{\frac1N\sum_k(n_k-\bar n)^2}.
 ]{data/ch06_noise.csv}
 \end{center}
 零均值指分布的期望，不要求有限样本均值恰好为零。均值的标准误为 $\sigma/\sqrt N$，
-因此测试使用 $|\bar n|<5\sigma/\sqrt N$，标准差相对误差小于 2\%。
-单元测试还检查六轴间和相邻时刻的相关量，防止不小心复用随机误差。
+推导见第五章。以 $\sigma=.004$、$N=60000$ 为例，标准误约为
+$1.63\times10^{-5}$ rad/s；可据此判断表中微小的非零均值是否合理。
+还可以计算 $N^{-1}\sum_k n_{x,k}n_{y,k}$ 或相邻样本的乘积平均值，
+观察它们是否接近零。前者反映轴间相关性，后者反映时间相关性。
 
 \textbf{真实 ROS 消息实验。}启动默认第 06 章场景后运行 \code{check_ch06.py}。
 它收集 200 Hz、$t=0$ 到 10 s 的 2001 条圆参考消息。先减掉理想值
 $(0,0,.4)$ 和 $(0,.16,9.81)$，再检验残差；不要对包含运动的原始值直接求“噪声均值”。
-因样本较少，标准差容差为 8\%，均值仍用五个标准误。
-脚本也检查无缺帧、协方差、QoS、暂停和 41 帧 reset 重放；缺帧会明确失败。
+例如对 y 轴读数 $f_{m,y}$，先计算 $n_{a,y}=f_{m,y}-.16$，
+再对这些残差求均值和标准差。运动信号与噪声的分离，是读懂传感器实验的第一步。
 
-\clearpage
 \section{零均值误差也会积成漂移}
-暂时假设姿态已知且固定，只研究一个水平加速度轴和 yaw 角速度的噪声。
-这排除了姿态误差与重力耦合，便于手算，不是惯性定位算法。
-把每个噪声样本看作一个时长 $h$ 内的常值：
-\begin{equation}
-\delta\psi_{k+1}=\delta\psi_k+n_{g,k}h,\quad
-\delta p_{k+1}=\delta p_k+\delta v_k h+\tfrac12 n_{a,k}h^2,\quad
-\delta v_{k+1}=\delta v_k+n_{a,k}h.
-\end{equation}
-独立噪声的方差相加。经历 $N$ 个区间后，
+先固定已知姿态，只研究一个水平加速度轴和 yaw 角速度的误差，初始误差都为零。
+这样可以单独看清积分的作用；第九章再把姿态误差和位置误差联系起来。
+把每个噪声样本看作时长 $h$ 内的常值，两次积分得到
 \begin{align}
-\operatorname{Var}(\delta\psi_N)&=\sigma_g^2Nh^2,\\
-\operatorname{Var}(\delta p_N)&=\sigma_a^2h^4
- \sum_{j=0}^{N-1}(j+\tfrac12)^2
- =\sigma_a^2h^4\frac{N(4N^2-1)}{12}.
+\delta\psi_{k+1}&=\delta\psi_k+n_{g,k}h,\\
+\delta p_{k+1}&=\delta p_k+\delta v_kh+\tfrac12 n_{a,k}h^2,\\
+\delta v_{k+1}&=\delta v_k+n_{a,k}h.
 \end{align}
-当 $T=Nh$ 固定且 N 较大，位置方差近似 $\sigma_a^2hT^3/3$。
-固定每采样 sigma 与固定连续白噪声强度，是两个不同的频率对比实验。
+角度只积分一次。把递推式逐步展开，得到 $\delta\psi_N=h\sum_{k=0}^{N-1}n_{g,k}$。
+独立零均值误差的交叉项期望为零，故
+\begin{equation}
+\operatorname{Var}(\delta\psi_N)=h^2\sum_{k=0}^{N-1}\operatorname{Var}(n_{g,k})
+=\sigma_g^2Nh^2.
+\end{equation}
+位置积分两次，每个样本的作用时间不同。第 $k$ 个加速度误差在自己的区间内
+产生 $\tfrac12 n_{a,k}h^2$ 位移误差；区间结束后留下 $n_{a,k}h$ 的速度误差，
+它还会持续 $N-1-k$ 个区间。两部分相加，得到
+\begin{equation}
+\delta p_N=h^2\sum_{k=0}^{N-1}(N-k-\tfrac12)n_{a,k}.
+\end{equation}
+下图只画第零个正误差的贡献：位置误差就是速度误差曲线下的面积。
+越早出现的加速度误差，留下的速度误差作用越久。
+\begin{center}
+\begin{tikzpicture}[x=1cm,y=1cm,>=Stealth]
+\fill[tealblue!12] (0,0)--(1.6,1.2)--(6,1.2)--(6,0)--cycle;
+\draw[->,navy] (0,0)--(6.6,0) node[right] {$t$};
+\draw[->,navy] (0,0)--(0,1.9) node[above] {$\delta v$};
+\draw[thick,tealblue] (0,0)--(1.6,1.2)--(6,1.2);
+\draw[dashed] (1.6,0)--(1.6,1.2);
+\node[below] at (0,0) {$0$};\node[below] at (1.6,0) {$h$};
+\node[below] at (6,0) {$Nh$};\node[above] at (3.8,1.2) {$n_{a,0}h$};
+\node at (1,.28) {\small 三角形};\node at (3.9,.5) {\small 矩形：$n_{a,0}h(N-1)h$};
+\node[anchor=west] at (0,-.8) {三角形面积 $=\tfrac12 n_{a,0}h^2$};
+\end{tikzpicture}
+\end{center}
 
+对位置误差求方差，将权重平方后相加，再令 $j=N-1-k$：
+\begin{equation}
+\operatorname{Var}(\delta p_N)=\sigma_a^2h^4
+\sum_{j=0}^{N-1}(j+\tfrac12)^2.
+\end{equation}
+这个求和可以直接化简。首尾配对得到 $\sum j=N(N-1)/2$。
+再将 $(j+1)^3-j^3=3j^2+3j+1$ 从 $j=0$ 加到 $N-1$，
+左边相邻立方项相消，只剩 $N^3$，所以
+\begin{align}
+\sum_{j=0}^{N-1}j^2&=\frac{N^3-3N(N-1)/2-N}{3}
+=\frac{N(N-1)(2N-1)}6,\\
+\sum_{j=0}^{N-1}(j+\tfrac12)^2
+&=\sum j^2+\sum j+\frac N4=\frac{N(4N^2-1)}{12}.
+\end{align}
+写成总时长 $T=Nh$，结果更容易解释：
+\begin{equation}
+\operatorname{Var}(\delta p_N)=\sigma_a^2
+\left(\frac{hT^3}{3}-\frac{h^3T}{12}\right)
+\approx\frac{\sigma_a^2hT^3}{3}\quad(N\text{ 较大}).
+\end{equation}
+固定每采样标准差时，减小 $h$ 会降低累计误差方差。
+若固定连续强度 $q$，则代入 $\sigma_a^2=q/h$，得到
+$q(T^3/3-h^2T/12)$，在小步长下接近 $qT^3/3$。
+这说明比较频率前，必须确定保持的是哪一种噪声参数。
+
+\par\noindent\begin{minipage}{\linewidth}
 \lstinputlisting[language=C++,linerange={drift_integration_begin-drift_integration_end},
   includerangemarker=false]{../ros2_ws/src/motion2d/src/examples/imu_noise_demo.cpp}
+\end{minipage}\par
 
 \begin{lstlisting}[language=bash,numbers=none]
 ros2 run motion2d imu_noise_demo --drift
@@ -221,10 +327,16 @@ ros2 run motion2d imu_noise_demo --drift
  every last row/.style={after row=\bottomrule}
 ]{data/ch06_drift.csv}
 \end{center}
-\textbf{练习与验收：}解释配对实验为何恰好翻倍；改变试验时长验证增长趋势。
-统计上的 RMS 增长不意味着单次误差的绝对值每步都增大。
+RMS 是 $M$ 次独立试验末端误差的均方根：
+$\mathrm{RMS}=\sqrt{M^{-1}\sum_{i=1}^M(\delta p_N^{(i)})^2}$。
+由于理论均值为零，试验次数足够多时，RMS 接近上述方差的平方根。
+这里 $M=1000$ 是试验次数，$N=T/h=2000$ 是每次试验的积分步数。
+递推式对噪声是线性的，所以同一随机序列乘二后，每个末端误差和 RMS 都恰好乘二。
 
-\clearpage
+观察单次轨迹时，误差可能增大也可能回落；方差描述的是许多次试验的分散程度。
+\textbf{练习：}用 $N=2$ 手算 $\delta p_2=h^2(\tfrac32 n_{a,0}+\tfrac12 n_{a,1})$，
+检验其方差与通式一致，再改变实验时长观察 RMS 的增长。
+
 \section{在 RViz 中同时观察激光与 IMU}
 从 ros2\_ws 构建、加载 install 后运行，默认选择连续的圆参考：
 \begin{lstlisting}[language=bash,numbers=none]
@@ -235,8 +347,8 @@ ros2 launch motion2d_bringup ch06.launch.py
 参数在 \path{motion2d_bringup/config/ch06.yaml}，改后重启。
 \code{imu.rate} 默认 200 Hz，\code{imu.noise_seed} 为 6060；
 \code{imu.gyro_stddev}、\code{imu.accel_stddev} 均为长度 3 的数组。
-当前比力依赖连续运动，因此启用 IMU 时只接受 reference 或 inertial。
-要做静止实验，可选 inertial 且不发力；不可切换到瞬移模型生成伪 IMU。
+启用 IMU 时选择 reference、inertial 或 ackermann 模型。
+静止实验可选 inertial，保持初速度为零且不施力。
 
 \begin{center}
 \includegraphics[width=.96\linewidth]{figures/ch06_imu_rviz.png}
@@ -244,14 +356,14 @@ ros2 launch motion2d_bringup ch06.launch.py
 紫色箭头显示实测水平比力，长度按 $1\ \mathrm{m/s^2}\mapsto3$ m 放大；
 标签显示竖直比力和 z 角速度。噪声会让箭头轻微抖动。
 Marker 最多 20 Hz，原始 IMU 默认 200 Hz，两者频率不同。
-这些 Marker 使用真值采样姿态定位，只能辅助显示，不能交给 SLAM。
+显示节点用采样时刻的真值姿态放置这些 Marker，便于观察读数方向。
+后续 SLAM 的输入是原始 IMU 消息与激光消息。
 
 \textbf{常见问题：}只收到激光而无 IMU，先检查本章配置及模型；
 暂停后新订阅者收不到旧 IMU 属于 Volatile QoS 行为，恢复运行再观察。
-检查程序会 reset 并最终暂停。重置会让时间回退，已有 TF 缓存需要进入新试验；
-必要时恢复运行或重新启动 RViz，不把旧缓存警告当作新运动数据。
+检查程序会 reset 并最终暂停；继续观察时可恢复运行。
+重置开始新试验，估计器和显示程序也应清理旧试验的时间历史。
 
-\clearpage
 \section{采样时间不是回调到达时间}
 一个 137 Hz 传感器的周期约为 7.29927 ms，无法写成 5 ms 仿真步长的整数倍。
 若强行每一个 tick 采样，它会变成 200 Hz；每两个 tick 则变成 100 Hz。
@@ -260,11 +372,16 @@ Marker 最多 20 Hz，原始 IMU 默认 200 Hz，两者频率不同。
 t_k=\operatorname{round}\!\left(\frac{10^9 k}{f_s}\right)\ \mathrm{ns},
 \qquad k=0,1,2,\ldots
 \end{equation}
-每次从 k 计算，舍入误差不会像反复累加一个已舍入的周期那样增长。
-纳秒网格的量化误差至多半个纳秒，具体纳秒间隔可能相差 1。
+推导只有两步：频率 $f_s$ 表示每秒采样次数，所以第 $k$ 次采样在 $k/f_s$ 秒；
+乘 $10^9$ 换成纳秒，再舍入到最近整数。每个时刻的舍入误差至多半纳秒。
+若先将 137 Hz 的周期舍入为 7299270 ns，再乘 1000，得到 7299270000 ns；
+直接计算第 1000 个时刻则为 7299270073 ns。前一种写法将每周期的误差累加了 1000 次。
+从序号直接计算可以保持长期相位，代价只是相邻纳秒间隔偶尔相差 1。
 
+\par\noindent\begin{minipage}{\linewidth}
 \lstinputlisting[language=C++,linerange={sample_grid_begin-sample_grid_end},
  includerangemarker=false]{../ros2_ws/src/motion2d/src/sim/sensor_scheduler.cpp}
+\end{minipage}\par
 
 \begin{center}
 \begin{tikzpicture}[x=.46cm,y=1cm,>=Stealth]
@@ -282,39 +399,39 @@ t_k=\operatorname{round}\!\left(\frac{10^9 k}{f_s}\right)\ \mathrm{ns},
 \end{center}
 
 采样、模拟器派发、订阅端墙钟到达，是三个不同的时间。
-本实现等一个 tick 通过运动与碰撞检查后才派发，因此模拟派发时间与采样时间相差小于 dt。
-这个上界不包含墙钟执行、DDS 传输或排队时间。主机忙时，模拟时间也可能走得更慢。
-估计器应按 header 时间计算积分间隔，不能拿两次回调的墙钟差代替它。
+本实现等一个 tick 通过运动与碰撞检查后派发。若步长为 $h$，采样时刻为 $t_s$，
+最早派发时刻为 $t_d=h\lceil t_s/h\rceil$，其中向上取整表示等到下一个 tick 边界。
+由 $t_s/h\le\lceil t_s/h\rceil<t_s/h+1$ 得 $0\le t_d-t_s<h$。
+这描述模拟时间中的等待；墙钟到达还叠加计算、DDS 传输和排队所花的实际时间。
+因此估计器用 header 中的时间差积分，回调晚到不会改变测量对应的运动时刻。
 
 \textbf{代码练习 ch06-3：}补全 \path{starter/sample_stamp.hpp}。
-检查 200、7、137.5 Hz 以及一小时后的采样点。单位测试保留第五章的整数 tick
-辅助函数作对照；实际模拟器已使用本章调度器，启动 7 Hz 不再报错。
+检查 200、7、137.5 Hz 以及一小时后的采样点，并与“先舍入周期再累加”比较。
 
-\clearpage
 \section{先接受运动区间，再产生观测}
 设刚接受的运动区间为 $[t_a,t_b]$。传感器时刻 $t_s$ 落在其中时，
 只用已经确定的区间输入计算 $x(t_s)$，然后生成测量。
 reference 直接计算绝对时刻的圆轨迹；inertial 和 velocity 从 $x(t_a)$ 出发，
-用本区间保持的命令积分 $t_s-t_a$。两者复用第四章解析解，
-不是分别线性插值位置、速度和加速度。新增阿克曼模型从区间起点按同一保持输入
-积分到采集时刻；位姿用 RK4，速度、转角与加速度由第四章的一致模型给出。
+用本区间保持的命令积分 $t_s-t_a$，复用第四章解析解。
+阿克曼模型同样从区间起点积分到采集时刻，位姿用 RK4，速度、转角与加速度由第四章模型给出。
+这样一条观测里的位姿和加速度来自同一段运动。
 
+\par\noindent\begin{minipage}{\linewidth}
 \lstinputlisting[language=C++,linerange={sensor_dispatch_begin-sensor_dispatch_end},
  includerangemarker=false]{../ros2_ws/src/motion2d/src/nodes/simulator_node.cpp}
+\end{minipage}\par
 
 代码先选两个采样网格中较早的时刻；同一时刻可同时生成 IMU 和激光。
 每个采样位姿先发布对应的真值 TF，最后补齐 tick 末端的 TF。
-这样按采样 stamp 查询得到该采集时刻的模拟位姿，而不是误用最新一帧 TF；
-阿克曼位姿包含已说明的数值积分误差。
-暂停时仍重复当前 TF 供晚加入者显示，但不重采样传感器。
+这样按采样 stamp 查询得到该采集时刻的模拟位姿。
+暂停时仍重复当前 TF 供晚加入者显示，传感器采样序号保持不变。
 
 \textbf{边界约定。}恰好在 tick 末端的 IMU 使用刚结束区间的加速度；
 晚到命令不能重写过去的测量。t=0 是初始状态，之后施力影响之后的区间。
 瞬移模型只在 tick 末端切换位置，不虚构中间轨迹，也不允许启用 IMU。
 碰撞拒绝整个候选区间，状态、时间、传感器序号均停在上次接受的位置。
 
-\clearpage
-\section{不对齐频率也要逐帧可验证}
+\section{动手观察不对齐的采样网格}
 停止旧场景，用无噪声空房间配置运行：
 \begin{lstlisting}[language=bash,numbers=none]
 ros2 launch motion2d_bringup ch06.launch.py rviz:=false \
@@ -323,9 +440,19 @@ ros2 launch motion2d_bringup ch06.launch.py rviz:=false \
 /usr/bin/python3 ../scripts/check_ch06_time.py
 \end{lstlisting}
 配置为 200 Hz 物理、137 Hz IMU、7 Hz 雷达，90 束扫描、20 m 正方形房间。
-启动时暂停，检查脚本走 200 个 tick 到 1 s。包含 t=0，应有 138 条 IMU 与 8 帧激光。
-IMU 第一个非零 stamp 为 7299270 ns，雷达为 142857143 ns；
-它们分别在 10 ms 和 145 ms 的 tick 结束后派发。
+启动时暂停，检查脚本走 200 个 tick 到 $T=1$ s。
+采样序号满足 $k/f_s\le T$，即 $k\le f_sT$；包含 $k=0$ 时，样本数为
+$\lfloor f_sT\rfloor+1$。由此可以先预测结果：
+\begin{center}
+\begin{tabular}{lrrr}
+\toprule
+传感器 & 1 s 内样本数 & 首个非零 stamp/ns & 派发时刻/ms\\
+\midrule
+IMU（137 Hz） & 138 & 7299270 & 10\\
+激光（7 Hz） & 8 & 142857143 & 145\\
+\bottomrule
+\end{tabular}
+\end{center}
 
 \textbf{解析检查。}reference 用圆轨迹核对比力、墙距和 TF。
 惯性实验的启动参数为 \path{model:=inertial}，检查脚本需加
@@ -335,37 +462,24 @@ $\mathrm{kg\,m^2/s}$。先静止 .1 s，然后施加 $(1,-.3)$ N 与 .01 N\,m。
 脚本按独立公式求出不断变化的运动，逐条比较比力、90 束墙距及采样位姿 TF。
 随后另起一次试验向墙运动，检查碰撞冻结。
 
-\textbf{reset 是新试验。}它重置状态、命令、轨迹历史、采样序号与两个传感器的随机引擎。
-服务无法撤回已在 DDS 队列中的旧消息；后续估计器必须在模拟时间回退时清理积分和历史，
-或在新试验开始后重新建立消费者。验收脚本在 reset 屏障后建立新的 TF 监听器，
-并不表示修复了外部 RViz 的缓存实现。
+\textbf{reset 开始新试验。}运动状态、命令、采样序号与随机引擎一起重置。
+时间回退时，消费者清理旧积分与历史；脚本重新建立 TF 监听器，从初态处理新数据。
 
-\begin{notebox}
-主机 RViz 在 reset 附近曾出现静态 TF 缓存异常，关闭时也曾异常退出。
-自动检查建议先用 \code{rviz:=false}。显示时恢复模拟，再单独启动 RViz：
-\begin{lstlisting}[language=bash,numbers=none]
-ros2 service call /sim/pause std_srvs/srv/SetBool '{data: false}'
-ros2 run rviz2 rviz2 -d src/motion2d_bringup/rviz/ch06.rviz \
-  --ros-args -p use_sim_time:=true
-\end{lstlisting}
-\end{notebox}
-
-\textbf{本章验收：}会区分比力与运动加速度、标准差与方差、采样与到达时间；
-完成三道独立代码练习，能复现白噪声、积分漂移和不对齐频率实验。
-原始 IMU 仍不是位置、姿态或里程计答案；下一章再明确接入真值里程计与观测建图。
-
-\clearpage
 \section{阿克曼转弯时的 IMU 与采集时间}
-新增模型复用同一采样调度，先接受整个运动区间，再发布区间内观测。
-取纵向力 $F$、转向速率 $r_\delta$ 恒定，质量 $m$、阻尼 $c>0$，从静止、零转角起步：
+阿克曼模型提供一个同时检验运动学与采样时刻的例子。
+取纵向力 $F$、转向速率 $r_\delta$ 恒定，质量 $m$、阻尼 $c>0$，从静止、零转角起步。
+第四章给出 $\dot s=(F-cs)/m$、$\omega=s\tan\delta/L$，以及
+$a=\dot s\,e+s\omega e_\perp$，其中 $e$ 沿车头，$e_\perp$ 向左。
+转到机体系后 $R^\top e=(1,0)^\top$、$R^\top e_\perp=(0,1)^\top$，
+所以纵向比力就是 $\dot s$，侧向比力就是 $s\omega$。代入积分解可得
 \begin{align}
  s(t)&=\frac{F}{c}\left(1-e^{-ct/m}\right), & \delta(t)&=r_\delta t,\\
  f_x(t)&=\frac{F-cs(t)}m, &
  f_y(t)&=\frac{s(t)^2\tan\delta(t)}L,\\
- \omega_z(t)&=\frac{s(t)\tan\delta(t)}L, & f_z(t)&=g.
+ \omega_z(t)&=\frac{s(t)\tan\delta(t)}L, & f_z(t)&=g_0.
 \end{align}
-这里 $f_x,f_y$ 已在机体系，$f_y$ 为无侧滑转弯的向心项。
-不能把世界加速度的 x 分量直接当作纵向 IMU，也不能漏掉速度与角速度的乘积。
+这些式子在转角尚未达到限幅时成立。$f_y=s\omega$ 的单位为
+$(\mathrm{m/s})(1/\mathrm{s})=\mathrm{m/s^2}$，左转时为正、右转时为负。
 
 从仓库根目录、两个已加载 ROS/install 环境的终端运行，仅启动此实验：
 \begin{lstlisting}[language=bash,numbers=none]
@@ -381,12 +495,14 @@ $r_\delta=0.12$ rad/s，单步 40 次到 0.2 s，尚未超过命令有效期和�
 清除初始零时刻消息后，应收到 $\lfloor0.2\times137\rfloor=27$ 条 IMU。
 逐条以消息 stamp 代入上式，不能以收到消息时的 tick 代入；
 首个非零激光时刻为 142857143 ns，也不落在 5 ms 网格上。
-主机测得这些比力与角速度的最大误差约 $1.11\times10^{-16}$，reset 后逐值重放一致。
-速度和转角在这个保持输入例子中有解析式，因此这些量可以达到浮点精度；
-这不意味着一般 RK4 位姿误差也为零，位姿精度另由步长减半测试检查。
+先用解析式核对速度、转角和 IMU，再将物理步长减半比较位姿变化，
+就能分别观察传感器公式与 RK4 积分精度。
 
-\paragraph{练习与验收}
+\paragraph{练习}
 分别把 IMU 改成 200 Hz、将力改为 0 N、把转向速率改成负值，
 先推导样本数量、纵向和侧向项，再修改实验检查器的预期式。
 解释为什么零纵向力不总意味着零加速度：已有速度在有阻尼时仍会减速。
-最后恢复白噪声，比较均值与理论值；不要要求有噪声样本逐条等于解析信号。
+最后恢复白噪声，减去每个采样时刻的解析信号，比较残差的均值与配置标准差。
+
+本章从运动加速度构造比力，再给读数加入噪声与采样时间。
+下一章将把有时间戳的激光与位姿配对，逐束更新观测地图。
