@@ -242,3 +242,10 @@ planner内同一次搜索生成走廊，直接复用PlanningGrid和原始A*路�
 这些路径和Marker使用起点里程计时间、map frame；无执行时长，单位姿态不是yaw规划。
 /plan/corridor_status单列走廊构造状态；关闭功能为disabled。每批DELETEALL后重新画闭合LINE_STRIP。
 错误/reset清空全部规划显示；算法消费ConvexRegion，不解析Marker。半径只在配置栅格处理一次。
+
+## 第14章轨迹内核
+
+QuinticPiece包含正duration和2×6秒制升幂系数；列k单位m/s^k。
+PolynomialTrajectory验证非空/有限/C²连接，evaluate/sample只接收[0,total]，内部连接点取右段。
+TranslationState给p/v/a，yaw独立。stopAtWaypoints每路点零v/a，nominal_speed是平均速度参数。
+CSV包含段时长与全部系数；ROS时刻与执行策略在后续接入中定义，不以Path伪装有时间的轨迹。

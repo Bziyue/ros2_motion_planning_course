@@ -1,0 +1,110 @@
+\chapter{给路径加上时间：五次轨迹}
+\begin{notebox}
+\textbf{目标}\quad 从端点位置、速度、加速度求五次曲线，按同一个时间采样，再接入理想执行。\\
+\textbf{先修}\quad 第 04、11、13 章；一阶与二阶导数。
+\end{notebox}
+
+\section{同样走一米，为什么感觉不同}
+\begin{lstlisting}[language=bash]
+ros2 run motion2d quintic_demo tmp/ch14_quintic
+/usr/bin/python3 scripts/plot_ch14_quintic.py
+\end{lstlisting}
+几何路径只说经过哪里；轨迹还要说何时到达、到达时多快。
+本章先从静止出发，沿 x 轴走 1 m 后静止，分别用 2 s 和 4 s 完成。
+所有实验使用解析多项式导数，不通过相邻位置差分估计速度或加速度。
+
+\begin{figure}[!ht]
+\centering\includegraphics[width=\linewidth]{figures/ch14_scaling.pdf}
+\caption{同一几何线段的时间缩放。时长翻倍，速度缩为一半，加速度缩为四分之一。}
+\end{figure}
+
+\section{六个系数对应六个边界条件}
+每个坐标分别写成五次式；二维系数 $c_k$ 是包含 x、y 的列向量：
+\begin{equation}
+p(t)=\sum_{k=0}^{5}c_k t^k,\quad
+\dot p(t)=\sum_{k=1}^{5}k c_k t^{k-1},\quad
+\ddot p(t)=\sum_{k=2}^{5}k(k-1)c_k t^{k-2}.
+\end{equation}
+给定 $(p_0,v_0,a_0)$、$(p_1,v_1,a_1)$ 与正时长 $T$，每个坐标有六个线性约束。
+前三项直接得到 $c_0=p_0,c_1=v_0,c_2=a_0/2$。
+为看清时间尺度，先用 $s=t/T$，写成 $p(s)=\sum b_k s^k$，最后转换 $c_k=b_k/T^k$。
+这里 $b_k$ 单位都是 m；$c_k$ 的单位是 $\mathrm{m}/\mathrm{s}^k$。
+
+剩余端点残差为
+\begin{align}
+r_0&=p_1-b_0-b_1-b_2,\nonumber\\
+r_1&=Tv_1-b_1-2b_2,\qquad r_2=T^2a_1-2b_2.
+\end{align}
+它们分别等于 $b_3+b_4+b_5$、$3b_3+4b_4+5b_5$、$6b_3+12b_4+20b_5$。
+解这个固定的三阶系统，即得到代码中的三个组合。
+
+\section{从公式到系数与采样}
+\lstinputlisting[language=C++,linerange={quintic_boundary_begin-quintic_boundary_end},
+  includerangemarker=false]{../ros2_ws/src/motion2d/src/trajectory/quintic.cpp}
+函数 interpolateQuintic 接收 TranslationState，返回 QuinticPiece：一个正 duration 和 $2\times6$ 系数矩阵。
+列按\textbf{升幂}排列，时间从每段起点开始计秒，不是整条轨迹开始以来的累计秒数。
+
+求导后用 Horner 法从高次项向低次项计算，避免反复调用幂函数：
+\lstinputlisting[language=C++,linerange={polynomial_derivative_begin-polynomial_derivative_end},
+  includerangemarker=false]{../ros2_ws/src/motion2d/src/trajectory/polynomial.cpp}
+公开 derivative 支持 0 到 5 阶，拒绝外推。第 0 阶为位置，第 3 阶为 jerk，单位 $\mathrm{m/s^3}$。
+所有维度都共用相同 $T$；分别给 x、y 分配不同时长会改变二维运动的含义。
+
+\clearpage
+\section{最容易手算的静止到静止}
+令 $\Delta p=p_1-p_0$、$v_0=v_1=a_0=a_1=0$，则
+\begin{equation}
+p(t)=p_0+\Delta p\,h(s),\quad h(s)=10s^3-15s^4+6s^5,\quad s=t/T.
+\end{equation}
+因为 $h'(s)=30s^2(1-s)^2\geq0$ 且 $h(0)=0,h(1)=1$，这一段始终在线段 $[p_0,p_1]$ 上。
+最大速度为 $1.875\|\Delta p\|/T$，不是平均速度 $\|\Delta p\|/T$。
+若整条线段已经分配到安全凸走廊中，本特殊构造保持其几何包含性；任意非零边界导数没有这个结论。
+
+\section{连接处连续到哪一阶}
+将第 $i$ 段终点和第 $i+1$ 段起点设置为同一组 $(p,v,a)$，便有 $C^2$ 连续。
+jerk 可以跳变；五次本身不意味着所有阶导数连续，也不意味着满足速度、力或碰撞约束。
+
+PolynomialTrajectory 构造时检查正时长、有限系数、总时长与连接条件。
+连接容差为位置、速度和加速度分别 $10^{-7}$ 对应 SI 单位的绝对误差。
+采样范围为闭区间 $[0,\sum_i T_i]$；内部连接时刻选择右段，最终时刻选择末段终点。
+这让 p/v/a 一致，而 jerk 的单侧定义明确。区间外抛出错误，由执行器单独决定等待或终点保持。
+
+\begin{figure}[!ht]
+\centering\includegraphics[width=\linewidth]{figures/ch14_join.pdf}
+\caption{两个 4 s 分段，连接点 $(1,1)$ m，连接速度 $(0.8,0)$ m/s、加速度 $(0,-0.5)$ $\mathrm{m/s^2}$。
+虚线是连接时刻；图形坐标等比例，速度与加速度连续。}
+\end{figure}
+
+最简单的 stopAtWaypoints 在每个路点设 $v=a=0$，分配
+\begin{equation}
+T_i=\max\left(T_{\min},\frac{\|q_{i+1}-q_i\|}{v_{\mathrm{nom}}}\right).
+\end{equation}
+$v_{\mathrm{nom}}$ 是平均速度参数，\textbf{不是峰值上限}。重复点产生正时长的原地停留段。
+每个中间点都停下易于验证，但速度不流畅；第十五、十六章将求解内部导数，减少 jerk 能量。
+
+\clearpage
+\section{实验、保存与验收}
+演示输出 samples.csv、summary.csv 和 coefficients.csv。
+系数文件逐行保存案例、段号、时长、坐标轴与六个升幂系数，可用相同采样器重建；不包含 yaw。
+本章平移参考与 yaw 分离，不能把切线方向默认为机器人的朝向。
+
+\begin{center}\small
+\pgfplotstabletypeset[col sep=comma,
+columns={case,duration,peak_speed,peak_acceleration,peak_jerk},
+columns/case/.style={column name=案例},columns/duration/.style={column name=总时长/s},
+columns/peak_speed/.style={column name=速度峰值, fixed,precision=4},
+columns/peak_acceleration/.style={column name=加速度峰值, fixed,precision=4},
+columns/peak_jerk/.style={column name=jerk 峰值, fixed,precision=4},
+every head row/.style={before row=\toprule,after row=\midrule},
+every last row/.style={after row=\bottomrule}]{data/ch14_quintic.csv}
+\end{center}
+各段采样到同一总时长网格的 2001 个点；这些峰值是采样统计，不冒充任意多项式的解析全局界。
+案例 0/1 的速度与 jerk 峰值也能解析验证；案例 2 使用上述非零连接导数。
+端点测试采用 seed=1414 的 100 组边界，并用有限差分检查导数；还覆盖重复点、连接时刻和非法时长。
+
+\begin{enumerate}
+\item \textbf{推导：}从六个静止端点约束推导 $h(s)$，说明 $T$ 翻倍后的各阶导数缩放。
+\item \textbf{代码 ch14-1：}完成升幂系数的一阶、二阶导数；避免重复时间缩放。
+\item \textbf{实验：}修改中间点速度，比较曲线形状与连续性；解释为何路点安全不足以证明曲线安全。
+\end{enumerate}
+ROS 消息与理想连续执行将在本章下一功能接入。
