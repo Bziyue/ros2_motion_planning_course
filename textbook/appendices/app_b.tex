@@ -1,58 +1,178 @@
-\chapter{差速扫地机器人：先约束运动方向}
+\chapter{差速扫地机器人：从轮速到平面运动}
 \begin{notebox}
-\textbf{目标}\quad 从左右轮速得到圆心位姿，理解不能横移的含义。\\
-\textbf{范围}\quad 独立无滑移运动学实验；主线仍为全向圆盘，未接入轮力矩或 NMPC。
+\textbf{目标}\quad 从无滑移滚动推导左右轮速、圆弧积分与平坦输出，理解侧向速度约束。\\
+\textbf{实验}\quad 使用独立运动学函数与圆弧演示，比较直行、倒车、原地旋转和转弯。
 \end{notebox}
-\section{圆盘外形相同，能做的动作不同}
-若希望先学建图与轨迹优化，全向圆盘能把问题分开；若研究扫地机器人，差速模型更贴近驱动约束。
-圆盘半径仍负责碰撞，车轮半径 $r_w$ 和左右接地点间距 $b$ 则负责运动换算，三者不要混用。
-轮速 $w_L,w_R$ 单位为 rad/s，同号为前进，理想无滑移模型为
+\section{三个长度，分别决定什么}
+差速车用左右两个驱动轮改变运动。定义车轮半径为 $r_w$，两轮接地点间距为 $b$，
+两轮中点为状态位置；朝前为机体系 x，朝左为机体系 y。
+碰撞外形仍可选以状态点为中心的圆盘，半径记为 $r$。
+$r_w$ 决定轮子每转一圈走多远，$b$ 决定相同轮速差产生多大转向，$r$ 决定通过障碍所需空间。
+
+车轮滚过角度 $\Delta\phi$ 时，无滑移接触使前进距离为 $r_w\Delta\phi$。
+除以时间并取极限，左右轮接地点的前进速度为
+\[
+ u_L=r_w w_L,\qquad u_R=r_w w_R,
+\]
+其中轮角速度 $w_L,w_R$ 以 rad/s 计，按前进方向定义正号，$u_L,u_R$ 为 m/s。
+本附录把轮速视为直接给定的运动学输入，用于研究轨迹几何与速度换算。
+
+\section{左右轮速之差为什么产生转向}
+设车体中点前进速度为 $v$，逆时针角速度为 $\omega$。
+小角度 $\Delta\psi$ 下，左轮相对中点的向量 $(0,b/2)$ 旋转后，其 x 分量变化约为
+$-(b/2)\Delta\psi$；右轮 $(0,-b/2)$ 则为 $+(b/2)\Delta\psi$。
+除以时间，叠加中点平移速度，得到
+\[
+ u_L=v-\frac b2\omega,\qquad u_R=v+\frac b2\omega.
+\]
+两式相加、相减，再代入 $u=r_ww$，即得正运动学：
 \begin{equation}
- v=\frac{r_w(w_R+w_L)}2,\quad
- \omega=\frac{r_w(w_R-w_L)}b,\qquad
- \dot x=v\cos\psi,\quad\dot y=v\sin\psi,\quad\dot\psi=\omega.
+ v=\frac{r_w(w_R+w_L)}2,\qquad
+ \omega=\frac{r_w(w_R-w_L)}b.
+ \label{eq:diff_forward}
 \end{equation}
-横向速度满足 $-\sin\psi\,\dot x+\cos\psi\,\dot y=0$。
-它约束瞬时速度，不能写成一个简单的位置等式消掉；因此称为非完整约束。
-机器人可以通过前进和转向改变横向位置，但不能直接侧移。
+反过来，给定车体 $v,\omega$，逐个解出轮速就是逆运动学：
+\begin{equation}
+ w_L=\frac{v-b\omega/2}{r_w},\qquad
+ w_R=\frac{v+b\omega/2}{r_w}.
+ \label{eq:diff_inverse}
+\end{equation}
+右轮更快时，$\omega>0$，车体向左转。
+当 $v>0,\omega>0$ 时，瞬时转弯中心在左侧 $R=v/\omega$ 处，
+图示情形 $R>b/2$ 下，左右轮的圆弧半径为 $R-b/2$、$R+b/2$，因此也有 $u_{L,R}=\omega(R\mp b/2)$。
+
+\begin{center}\begin{minipage}{\linewidth}\makeatletter\def\@captype{figure}\makeatother
+\centering
+\begin{tikzpicture}[x=1cm,y=1cm,>=stealth,font=\small]
+\draw[muted,dashed] (0,-1.2)--(0,3.1);
+\draw[fill=pale,draw=tealblue] (-.35,.88) rectangle (.35,1.12);
+\draw[fill=pale,draw=tealblue] (-.35,-1.12) rectangle (.35,-.88);
+\fill[navy] (0,0) circle (.045) node[below right]{中点};
+\fill[tealblue] (0,3) circle (.05) node[right]{瞬时转弯中心};
+\draw[->,thick,tealblue] (.35,1)--(1.4,1) node[right]{$u_L=v-b\omega/2$};
+\draw[->,thick,tealblue] (.35,-1)--(2.45,-1) node[right]{$u_R=v+b\omega/2$};
+\draw[->,navy] (.1,0)--(1.65,0) node[above]{$v$};
+\node[anchor=east] at (-.5,1){左轮};\node[anchor=east] at (-.5,-1){右轮};
+\draw[<->,muted] (-1.8,-1)--node[left,yshift=3mm]{$b$}(-1.8,1);
+\draw[<->,muted] (-2.6,0)--node[left]{$R$}(-2.6,3);
+\draw[muted,dotted] (-2.6,3)--(-.1,3);
+\draw[muted,dotted] (-2.6,0)--(-.1,0);
+\end{tikzpicture}
+\caption{朝右前进并向左转时的轮速关系。外侧右轮走过更大的圆弧，因此速度更大；两轮间距为 $b$。}
+\end{minipage}\end{center}
+
+\section{“不能侧移”约束的是瞬时速度}
+中点的机体系速度为 $(v,0)$。旋转到世界坐标后，运动方程为
+\[
+ \dot x=v\cos\psi,\qquad \dot y=v\sin\psi,\qquad \dot\psi=\omega.
+\]
+沿机体左向单位轴 $(-\sin\psi,\cos\psi)$ 投影，得到
+\[
+ -\sin\psi\,\dot x+\cos\psi\,\dot y=0.
+\]
+这表示轮子无侧滑时，当前朝向下的横向速度为零。
+但车体可以先原地转 $90^\circ$，前进一小段，再转回原方向，实现最终位置向侧面移动。
+因此可达的位置并没有被固定在某条曲线上；限制随姿态变化，作用在速度上。
+这种不能仅用位置等式描述的速度限制称为\textbf{非完整约束}。
+
+同一个世界速度也会因朝向不同而可行或不可行。例如 $(\dot x,\dot y)=(0,0.2)$ m/s：
+朝向零时它是侧移；朝向 $\pi/2$ 时它是正常前进。
+规划差速轨迹时，应同时安排运动方向与车体朝向。
+
+\section{恒定轮速的一步积分}
+保持轮速意味着 $v,\omega$ 恒定，于是 $\psi(t)=\psi_0+\omega t$。
+把它代入位置导数并积分，在 $\omega\ne0$ 时得到
+\begin{align*}
+ x(t)&=x_0+\frac v\omega[\sin(\psi_0+\omega t)-\sin\psi_0],\\
+ y(t)&=y_0-\frac v\omega[\cos(\psi_0+\omega t)-\cos\psi_0].
+\end{align*}
+$\omega\to0$ 时，利用 $\sin(\psi_0+\omega t)-\sin\psi_0\approx\omega t\cos\psi_0$，
+得到直线极限 $x=x_0+vt\cos\psi_0,y=y_0+vt\sin\psi_0$。
+实现复用第 04 章的 \code{stepVelocity}，其小角度分支避免除以接近零的角速度。
 
 \lstinputlisting[language=C++,linerange={differential_kinematics_begin-differential_kinematics_end},
  includerangemarker=false]{../ros2_ws/src/motion2d/src/sim/differential_drive.cpp}
-stepDifferential 复用第 04 章恒定机体系速度的精确 SE(2) 积分，避免另写一套近似积分器。
-本函数没有电机、轮胎滑移或质量；阶跃轮速也不能凭空生成物理正确的瞬时 IMU 加速度。
+\code{differentialVelocity} 返回机体系 $(v,0)$ 与角速度，末尾 true 指明速度表达在机体系。
 
-\section{手算一次圆弧}
-取 $r_w=0.05$ m、$b=0.4$ m、$w_L=2$、$w_R=6$ rad/s，
-得到 $v=0.2$ m/s、$\omega=0.5$ rad/s、转弯半径 $v/\omega=0.4$ m。
-从原点、yaw=0 出发，$t=\pi$ s 时应到达 $(0.4,0.4)$ m、yaw=$\pi/2$；
-$t=4\pi$ s 恰好一圈。速度初始样本为施加轮速前的静止状态，随后为保持命令的运动学状态。
+\code{differentialWheels} 按左、右顺序返回式\eqref{eq:diff_inverse}。
 
-\clearpage
-\begin{lstlisting}[language=bash]
+\code{stepDifferential} 先完成换算，再调用已有积分函数，保持相同的状态和坐标约定。
+
+\subsection{用四分之一圆核对符号}
+取 $r_w=0.05$ m、$b=0.4$ m、$w_L=2,w_R=6$ rad/s，得到
+$v=0.2$ m/s、$\omega=0.5$ rad/s、$R=0.4$ m。
+从原点且 $\psi_0=0$ 出发，在 $t=\pi$ s 时角度为 $\pi/2$，因此
+\[
+ x=0.4\sin(\pi/2)=0.4\ \mathrm m,\qquad
+ y=0.4[1-\cos(\pi/2)]=0.4\ \mathrm m.
+\]
+一圈时间由 $\omega T=2\pi$ 给出 $T=4\pi$ s。
+将两轮速都乘 2，$v,\omega$ 同时加倍，圆半径保持 $v/\omega=0.4$ m，一圈时间减半。
+
+\begin{lstlisting}[language=bash,numbers=none]
 ros2 run motion2d differential_drive_demo > textbook/data/appB_circle.csv
 /usr/bin/python3 scripts/plot_appB.py
 \end{lstlisting}
-\begin{figure}[!ht]
+\begin{center}\begin{minipage}{\linewidth}\makeatletter\def\@captype{figure}\makeatother
 \centering\includegraphics[width=.69\linewidth]{figures/appB_circle.pdf}
-\caption{实际积分得到的圆弧，坐标等比例；箭头表示朝向，始终与运动方向相切。
-这是独立几何实验，不包含障碍、轮动力学或 ROS 轨迹跟踪。}
-\end{figure}
+\caption{恒定轮速积分得到的圆周，坐标等比例。箭头表示车体朝向；前进运动时始终与轨迹相切。}
+\end{minipage}\end{center}
+输出 CSV 的初始速度取施加指令前的静止状态，后续样本取保持轮速的状态。
+若研究启动加速度，可以先将轮速指令平滑过渡，再对连续速度求导。
+阶跃指令的理想速度跳变满足平均加速度 $\Delta v/\Delta t$，时间间隔趋零时会无限增大，
+因此力矩驱动的启动过程需要第 04 章一类的动力学状态。
 
-\section{怎样接到轨迹与控制}
-对非零、正向运动的平滑参考 $p(t)$，可从速度与加速度计算
+\section{从平滑位置曲线反求轮速}
+在非零、正向运动区间，令平坦输出为 $p(t)=(x(t),y(t))$，记 $V=\|\dot p\|>0$。
+由 $\dot p=v(\cos\psi,\sin\psi)$，立即得到
+\[
+ v=V,\qquad \psi=\operatorname{atan2}(\dot y,\dot x).
+\]
+为求转速，对 $\dot p=v e$ 求导，其中 $e=(\cos\psi,\sin\psi)$，
+$e_\perp=(-\sin\psi,\cos\psi)$。由 $\dot e=\omega e_\perp$，
+\[
+ \ddot p=\dot v e+v\omega e_\perp.
+\]
+与 $\dot p=ve$ 取二维叉积，第一项平行而消失，第二项给出
+$\dot p\times\ddot p=v^2\omega$，故
 \begin{equation}
- \psi=\operatorname{atan2}(v_y,v_x),\qquad v=\|\dot p\|,\qquad
- \omega=\frac{v_xa_y-v_ya_x}{v_x^2+v_y^2},\qquad \kappa=\omega/v.
+ \omega=\frac{\dot x\ddot y-\dot y\ddot x}{\dot x^2+\dot y^2},\qquad
+ \kappa=\frac\omega v.
 \end{equation}
-此时 yaw 不能再独立任意指定。低速处上述分母接近零，停点和倒车必须定义单独的运动模式；
-不能靠一个很小的分母下限，把不一致轨迹变成“可行”。原地旋转则应使用 $v=0$、左右反向轮速。
+把 $v,\omega$ 代入式\eqref{eq:diff_inverse}，位置、朝向和两个轮速均由 $p$ 的有限阶导数得到，
+所以该运动学模型在这一区间以 $(x,y)$ 为\textbf{局部微分平坦输出}。
+$\kappa$ 表示每走单位弧长转过多少角度：由 $d\psi/dt=\omega,ds/dt=v$，有
+$d\psi/ds=\omega/v$，单位为 $\mathrm{m^{-1}}$。
 
-第 18 章预测矩阵是全向受力模型，直接换话题名不会变成差速控制。
-一种扩展是以 $(x,y,\psi)$ 为状态、$(v,\omega)$ 为输入做 NMPC：在每次滚动优化中保留
-三角函数运动方程，加入轮速及变化率限制，并在求解失败时制动。
-若输入轮力矩，还应增加轮惯量、质量和轮地接触模型；这些扩展本课程未实现。
+例如 $\dot p=(0.2,0)$、$\ddot p=(0,0.1)$，得到 $v=0.2$、$\omega=0.5$，
+再次反求出左右轮速 2、6 rad/s，与圆弧例子一致。
+停点 $\dot p=0$ 时，位置本身无法决定朝向；原地旋转可保持同一位置而改变 $\psi$。
+此时安排独立旋转段 $v=0,w_L=-b\omega/(2r_w),w_R=b\omega/(2r_w)$。
+倒车区间则选择负的 $v$ 并把车头设为速度方向加 $\pi$，与前进区间分别管理。
 
-\paragraph{练习与验收}
-appB-1 补全逆运动学，手算直行、倒车、原地转动与圆弧四组轮速。
-核心测试另外检查四分之一圆解析解、分步积分一致性和零侧向速度。
-改变两轮速的公共倍率，解释为何圆半径不变、转完一圈所需时间改变。
+\subsection{轮速上限怎样成为轨迹约束}
+若两轮均要求 $|w_L|,|w_R|\le w_{\max}$，由逆运动学直接得到
+\[
+ |v-b\omega/2|\le r_ww_{\max},\qquad
+ |v+b\omega/2|\le r_ww_{\max}.
+\]
+向左前进的圆弧通常先碰到外侧右轮上限。
+同一几何轨迹按 $p_s(t)=p(t/s)$ 慢放 $s>1$ 倍，速度缩为 $1/s$，加速度缩为 $1/s^2$，
+代入叉积公式可见 $\omega$ 也缩为 $1/s$，两轮速均缩为 $1/s$，曲率保持不变。
+这与第 16 章阿克曼车“转角由曲率决定”的情况形成有用对照：差速轮速限制可通过减速降低，
+阿克曼转角超限则需要改变几何。
+
+若继续实现预测控制，可用 $(x,y,\psi)$ 为状态、$(v,\omega)$ 为输入，
+从上面的三条运动方程离散化，并把轮速与轮速变化限制加入每一步。
+第 18 章的滚动求解流程仍适用，预测方程则应改为这一带三角函数的模型。
+轮力矩输入还需要质量、转动惯量和轮地作用关系，可在运动学实验之后逐项加入。
+
+\section{练习：从手算到曲线输入}
+\begin{enumerate}
+\item \textbf{代码 appB-1：}补全逆运动学；按左、右顺序检查直行、倒车、原地旋转和圆弧四种情形。
+\item 从轮子小角度位移推导式\eqref{eq:diff_forward}，标明轮距、轮半径和碰撞半径的不同作用。
+\item 从零朝向积分四分之一圆，再把左右轮速交换，预测圆心与轨迹落在哪一侧。
+\item 推导从 $p,\dot p,\ddot p$ 到 $\psi,v,\omega,w_L,w_R$ 的计算顺序；说明在停点应补充哪种运动模式。
+\item 取 $w_{\max}=5$ rad/s，判断 2/6 rad/s 的圆弧是否可行；计算保持几何所需的最小慢放倍数。
+\end{enumerate}
+练习编译入口和各情形的数值见 \code{exercises/appB/README.md}。
