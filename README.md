@@ -2,7 +2,7 @@
 
 从二维世界、圆盘机器人和模拟传感器开始，逐步学习定位建图、路径与轨迹规划、跟踪控制。教材、代码和练习按章节对应。
 
-**当前状态：第 01–19 章已完成。** 已有随机世界、四种机器人模型、CPU 激光雷达、六轴白噪声 IMU、统一传感器时间、真值建图、激光/IMU 融合与回环 SLAM。大纲提交为 `5c0c642`；每完成一个可运行、已验证的功能就单独提交，教材和练习同步更新。已接入观测地图上的 A* 和 RViz 目标；已提供距离场与梯度可视化，第13章走廊已接入观测地图，第14章五次轨迹和理想连续执行已完成，第15章 MINCO 内核、软约束优化与观测地图ROS预览已完成，第16章样条、连续认证与执行已完成，第17章前馈PD与ROS跟踪已完成，第18章线性MPC与ROS已完成，第19章已接通A/B/C在线导航、故障制动与九组ROS对照，继续实施第20章选学CUDA。
+**当前状态：第 01–19 章已完成。** 已有随机世界、四种机器人模型、CPU 激光雷达、六轴白噪声 IMU、统一传感器时间、真值建图、激光/IMU 融合与回环 SLAM。大纲提交为 `5c0c642`；每完成一个可运行、已验证的功能就单独提交，教材和练习同步更新。已接入观测地图上的 A* 和 RViz 目标；已提供距离场与梯度可视化，第13章走廊已接入观测地图，第14章五次轨迹和理想连续执行已完成，第15章 MINCO 内核、软约束优化与观测地图ROS预览已完成，第16章样条、连续认证与执行已完成，第17章前馈PD与ROS跟踪已完成，第18章线性MPC与ROS已完成，第19章已接通A/B/C在线导航、故障制动与九组ROS对照，第20章已有可选CUDA内核与CPU/GPU正确性和性能对照，继续接入ROS。
 
 [教材 PDF](output/pdf/course.pdf) · [实施进度](docs/PROGRESS.md) · [主机验收记录](docs/VALIDATION.md)
 
@@ -32,6 +32,7 @@
 | 17 | [前馈与PD跟踪](chapters/ch17/README.md) | [ch17](exercises/ch17/README.md) | `ch17.launch.py` / `pd_tracking_demo` |
 | 18 | [线性MPC](chapters/ch18/README.md) | [ch18](exercises/ch18/README.md) | `ch18.launch.py` / `mpc_demo` |
 | 19 | [在线规划与导航](chapters/ch19/README.md) | [ch19](exercises/ch19/README.md) | `ch19.launch.py route:=A/B/C` / `run_ch19.py` |
+| 20 | [可选CUDA雷达](chapters/ch20/README.md) | [ch20](exercises/ch20/README.md) | `lidar_cuda_benchmark` |
 
 ~~~bash
 source /opt/ros/lyrical/setup.bash

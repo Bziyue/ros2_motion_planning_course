@@ -39,3 +39,9 @@ Felzenszwalb 与 Huttenlocher，*Distance Transforms of Sampled Functions*，The
 
 [OSQP 官方求解器说明](https://osqp.org/docs/solver/index.html)，2026-09-26核对二次型、ADMM线性系统/投影、残差终止及原始不可行证书。
 课程为独立编写的强凸稠密教学实现，不复制OSQP源码，不包含其完整预处理/缩放/抛光功能。
+
+## ch20 CUDA原始资料与工具链
+
+- [NVIDIA CUDA 13.2.1官方组件清单](https://developer.download.nvidia.com/compute/cuda/redist/redistrib_13.2.1.json)：本机nvcc13.2.78、runtime13.2.75；脚本锁定各组件SHA256、保留LICENSE，不将NVIDIA二进制加入Git。
+- [CUDA C++ Programming Guide](https://docs.nvidia.com/cuda/archive/13.0.2/cuda-c-programming-guide/index.html)：线程索引、内存传输、事件计时。课程逐束求交自行编写，不复制上游代码。
+- [NVIDIA Linux安装指南](https://docs.nvidia.com/cuda/cuda-installation-guide-linux/)：按主机/编译器/驱动选择工具链；主机实测13.0.2与glibc2.43头冲突，改用官方13.2.1而非修改系统头文件。

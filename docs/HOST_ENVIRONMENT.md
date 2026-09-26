@@ -22,3 +22,8 @@
 `ros2 doctor --report` 成功返回环境信息，本次没有发现活动话题。它不能替代节点构建、通信和 RViz2 图形测试。为避免记录无关网络信息，本仓库不保存完整原始报告。
 
 第 01 章计划给出当前主机已有环境的检查步骤，并提供干净主机上的安装说明。具体软件源、支持平台与安装命令在实施当天依据 ROS 官方资料复核。不会把其他 ROS 发行版的命令直接套到本机。
+
+## 可选CUDA选学工具链
+
+主机原先无nvcc；现以scripts/setup_cuda_local.py在ignored tmp/cuda-13.2.1/toolkit准备官方CUDA13.2.1最小编译组件（nvcc13.2.78、cudart13.2.75），各archive SHA256锁定，许可证同目录保留；没有修改驱动、系统头、系统编译器或全局PATH。
+RTX5060 compute capability12.0、driver595.91.07、GCC15.2，最小sm_120 GPU核与课程CUDA测试均成功。13.0.2在本机glibc2.43发生rsqrt noexcept头冲突，未用绕过标志；更换官方13.2.1解决。
