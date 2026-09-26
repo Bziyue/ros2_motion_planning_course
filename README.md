@@ -6,7 +6,7 @@
 
 [教材 PDF](output/pdf/course.pdf) · [实施进度](docs/PROGRESS.md) · [主机验收记录](docs/VALIDATION.md)
 
-选学附录入口见 [附录说明](chapters/appendices/README.md)，数学回查与差分练习已完成。
+选学附录入口见 [附录说明](chapters/appendices/README.md)，数学回查、差分练习与差速运动学实验已完成。
 
 | 章节 | 内容与运行说明 | 练习 | 启动文件 |
 | --- | --- | --- | --- |
