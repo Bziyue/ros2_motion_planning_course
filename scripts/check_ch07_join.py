@@ -63,6 +63,10 @@ def main():
         count = len(clouds)
         scan(0)  # Repeated reset while already paused at zero must refresh outputs.
         assert len(clouds) == count + 1 and stamp(clouds[-1]) == 0
+        scan(1)  # Failed localization: this timestamp will never have a pose.
+        pose(2, 4); scan(2)
+        assert stamp(clouds[-1]) == 2_000_000_000
+        assert xyz(clouds[-1]) == [(5.0, 0.0, 0.0)], "Missing frame must not block newer pairs"
         print("PASS exact-time join: both arrival orders, stale pose rejected, duplicates and paused reset")
     finally:
         node.destroy_node()

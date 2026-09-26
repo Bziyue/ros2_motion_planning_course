@@ -21,3 +21,19 @@ g++ -std=c++17 -I/usr/include/eigen3 -Iexercises/ch08/starter \
 能说明点到线的局部 Hessian 秩检查不能识别所有对称几何错误关联。
 分级提示见 hints.md，参考解见 solutions/point_jacobian.hpp 和 solutions/README.md。
 将编译命令的 starter 换为 solutions 即可检查参考解。
+
+## ch08-2：按成功观测间隔预测
+
+完成 `starter/constant_velocity.hpp`。输入为前后两次成功配准的位姿、两者间隔与预测时长。
+处理跨越 ±pi 的航向；失败帧不改变上次成功时间。仓库根目录运行：
+
+```bash
+g++ -std=c++17 -I/usr/include/eigen3 -Iros2_ws/src/motion2d/include \
+  -Iexercises/ch08/starter exercises/ch08/check_prediction.cpp \
+  ros2_ws/src/motion2d/src/geometry/se2.cpp -o /tmp/ch08_predict
+/tmp/ch08_predict
+```
+
+通过标准：位置误差和角误差都小于 1e-12；starter 应失败，替换为 solutions 验证参考解。
+理解题：为什么一次失败后不能继续用固定 0.1 s 计算割线速度？
+实验题：运行本章六组回放，分别报告成功帧误差、失败率与失败时保持旧位姿的误差。

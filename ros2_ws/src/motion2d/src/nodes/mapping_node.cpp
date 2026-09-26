@@ -104,9 +104,16 @@ private:
   void processReady()
   {
     while (!pending_.empty()) {
-      const auto scan = pending_.begin();
+      auto scan = pending_.begin();
+      while (scan != pending_.end() && poses_.find(scan->first) == poses_.end()) {++scan;}
+      if (scan == pending_.end()) {break;}
+      // A failed estimate has no pose. Process the next matched timestamp;
+      // otherwise one rejected frame would block every subsequent good frame.
+      if (scan != pending_.begin()) {
+        RCLCPP_WARN(get_logger(), "Dropping older scans without matching odometry");
+        pending_.erase(pending_.begin(), scan);
+      }
       const auto pose = poses_.find(scan->first);
-      if (pose == poses_.end()) {break;}
       // scan_pose_join_begin
       const auto points = motion2d::projectScan(scan->second.scan);
       laser_cloud_->publish(motion2d::toPointCloud(points, scan->second.header));

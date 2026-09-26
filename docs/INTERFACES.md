@@ -192,3 +192,12 @@ ESDF 与走廊采用一致的配置空间语义。以原始障碍 ESDF 计算净
 | `control.rate` | 50 | Hz |
 
 传感器各自持有可配置种子。接口支持真值/估计里程计、理想/惯性模型和 CPU/CUDA 后端独立选择，但提供经过验证的 A/B/C 完整预设；不支持的组合在启动时给出一条直接、可理解的错误。
+
+## 第 08 章落地：估计入口与失败帧
+
+ch08 的 lidar_odometry 只读 /scan，在采样时刻发布 /odometry/estimated（odom/base_link）；
+estimated_odometry 适配器发布 /odometry、运动 TF 与 /path/estimated。该入口与 truth 适配器互斥。
+首帧定义 odom 的原点与朝向，map 暂同 odom。/cloud/local_map 是有限关键帧表面，/map 仍由观测建图生成。
+/estimation/status 给出初始化、收敛、退化、迭代耗尽或 tracking_lost 等状态。
+失败帧没有位姿输出；mapping 可越过缺失位姿的旧扫描处理更新的精确配对。
+协方差为未经标定的固定测量尺度；twist 为成功帧之间的割线速度，不把估计信息矩阵当成真实协方差。

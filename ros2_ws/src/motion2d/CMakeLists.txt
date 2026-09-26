@@ -20,7 +20,7 @@ add_library(motion2d_core
   src/sim/inertial_model.cpp src/sim/reference_model.cpp src/sim/raycast.cpp src/sim/lidar_cpu.cpp
   src/sim/imu.cpp src/sim/sensor_scheduler.cpp src/mapping/scan_projection.cpp
   src/mapping/occupancy_grid.cpp src/evaluation/map_evaluation.cpp
-  src/estimation/scan_matcher.cpp)
+  src/estimation/scan_matcher.cpp src/estimation/lidar_odometry.cpp)
 target_compile_features(motion2d_core PUBLIC cxx_std_17)
 target_compile_options(motion2d_core PRIVATE -Wall -Wextra -Wpedantic)
 target_include_directories(motion2d_core PUBLIC
@@ -119,8 +119,25 @@ target_link_libraries(mapping_node PRIVATE motion2d_core rclcpp::rclcpp
   nav_msgs::nav_msgs__rosidl_typesupport_cpp)
 install(TARGETS mapping_node DESTINATION lib/motion2d)
 
+add_executable(lidar_odometry_demo src/examples/lidar_odometry_demo.cpp)
+target_link_libraries(lidar_odometry_demo PRIVATE motion2d_core)
+install(TARGETS lidar_odometry_demo DESTINATION lib/motion2d)
+
+foreach(node lidar_odometry estimated_odometry)
+  add_executable(${node}_node src/nodes/${node}_node.cpp src/ros/mapping_messages.cpp)
+  target_compile_features(${node}_node PRIVATE cxx_std_20)
+  target_compile_options(${node}_node PRIVATE -Wall -Wextra -Wpedantic)
+  target_link_libraries(${node}_node PRIVATE motion2d_core rclcpp::rclcpp tf2_ros::tf2_ros
+    sensor_msgs::sensor_msgs__rosidl_typesupport_cpp
+    nav_msgs::nav_msgs__rosidl_typesupport_cpp
+    std_msgs::std_msgs__rosidl_typesupport_cpp)
+  install(TARGETS ${node}_node DESTINATION lib/motion2d)
+endforeach()
+
 if(BUILD_TESTING)
   find_package(ament_cmake_gtest REQUIRED)
+  ament_add_gtest(test_lidar_odometry test/test_lidar_odometry.cpp)
+  target_link_libraries(test_lidar_odometry motion2d_core)
   ament_add_gtest(test_scan_matcher test/test_scan_matcher.cpp)
   target_link_libraries(test_scan_matcher motion2d_core)
   ament_add_gtest(test_se2 test/test_se2.cpp)
