@@ -12,3 +12,6 @@ g++ -std=c++17 -I/usr/include/eigen3 -Iexercises/ch17/starter exercises/ch17/che
 ```
 
 评分：误差方程40%，限幅和物理单位30%，固定同参考的实验与解释30%。练习不影响完整演示。
+
+4. EXERCISE(ch17-2)：补全body_velocity.hpp。上述编译命令换为check_body_velocity.cpp，检查机体系到odom旋转。
+5. ROS实验：运行check_ch17.py；暂停墙钟1s无重复参考，独立check_tracker_boundary.py仅推进/clock制造断流，观察新制动命令而非旧跟踪力。

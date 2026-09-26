@@ -275,3 +275,13 @@ propagate()返回消元后的总路点/时长梯度，不能混用。核心仍�
 start_time=0是候选局部原点，不是执行命令。空pieces撤销；仅收敛且独立Bézier证书通过发布非空候选。
 `trajectory.source=certified`在`/trajectory/execute`时验证静止、匹配边界、时间差[0,.5]s，再给出实际绝对开始时刻并发`/plan/trajectory`。
 该证书只针对冻结的观测配置空间栅格和参考曲线，不覆盖后续地图变化/定位或跟踪误差。
+
+## 第17章控制接口
+
+tracker_node只读取/odometry（odom/base_link），先将body twist旋转到odom；不读取truth、TF或world。
+/control/reference为odom/reference_base诊断Odometry（不发布TF）；/control/reference_acceleration为odom系AccelStamped。
+/control/wrench_requested是限幅前输入；/command/wrench为实际限幅输入，header.frame_id=odom，正常stamp为观测时刻。
+/control/reference_path仅预览；/control/status可靠保留1。/tracker/enable SetBool关闭后发新阻尼制动，reset保留启用选择。
+50Hz按唯一仿真观测时间戳，无补发突发；回退清空曲线和计时起点，暂停不重复控制。
+.12s仿真时间无新观测或积压旧观测触发最后可用速度的限幅阻尼制动，stamp为当前ROS时间；无停车/避障保证。
+reference.source=trajectory时消费/plan/trajectory，要求当前与首尾静止、起点位置/yaw匹配、未来开始；执行中拒绝替换。

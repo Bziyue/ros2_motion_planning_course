@@ -95,3 +95,46 @@ dampingBrake 按当前速度给出 $F=-\hat m k_bv$、$\tau=-\hat I_zk_b\omega$ 
 \item \textbf{实验：}同样参考依次改变质量估计、阻力和力上限；报告 RMS、最大误差、力峰值与净空，
 不能只说“增益更大所以更稳定”。
 \end{enumerate}
+
+\clearpage
+\section{接入 ROS：时间与坐标也属于控制律}
+\begin{lstlisting}[language=bash]
+ros2 launch motion2d_bringup ch17.launch.py rviz:=false
+# 另一个已 source 的终端；初始暂停，检查脚本负责推进
+/usr/bin/python3 scripts/check_ch17.py
+# 手动运行时解除暂停
+ros2 service call /sim/pause std_srvs/srv/SetBool '{data: false}'
+\end{lstlisting}
+默认受力模型从静止开始，控制器每 0.02 s 使用一个新的里程计时刻，
+输出 odom 系 WrenchStamped。Odometry 的 pose 在 odom，twist 却在 child\_frame\_id=base\_link：
+\begin{equation}
+ v_{\rm odom}=R(\psi)v_{\rm body}.
+\end{equation}
+不能把机体系速度直接带入世界系反馈；参考速度的发布也必须按参考 yaw 反向旋转。
+控制器只订阅选择后的 /odometry；真值仅由明确的 truth 适配器提供，控制器不读取仿真内部状态。
+
+\begin{center}\small
+\begin{tabular}{lp{8.5cm}}\toprule
+接口 & 含义\\\midrule
+/control/reference & 同观测时刻的参考位姿与机体系速度\\
+/control/reference\_acceleration & odom 系平移加速度和 yaw 角加速度\\
+/control/wrench\_requested & 限幅前的力与力矩，实际值在 /command/wrench\\
+/control/status & tracking、saturated 或明确的制动/拒绝原因\\
+/tracker/enable & SetBool；关闭后立即产生新的限幅阻尼制动\\\bottomrule
+\end{tabular}
+\end{center}
+同一时间戳只处理一次；暂停不会重复控制，仿真时间回退时清空参考并重建起点。
+观测超过 0.12 s 未更新，或收到积压的旧观测，则以最后可用速度产生新的限幅制动；
+这是失去观测时的退化措施，不能保证停车距离或当前速度准确。暂停时 /clock 不动，不按墙钟误触发超时。
+
+\paragraph{外部轨迹与验证}
+reference.source=trajectory 时等待第 14 章的系数消息，必须有当前静止状态、匹配的静止首尾边界和未来起点。
+本章执行中拒绝替换；错误新消息保留原有效参考。第 19 章再处理运动中的 p/v/a 接续。
+主机 12 s ROS 实验匹配 600 个观测时刻，位置 RMS 为 0.000940 m、最大 0.001758 m，
+yaw RMS 为 $6.52\times10^{-5}$ rad，最小净空 2.79979 m。
+check\_tracker\_boundary.py 用独立 /clock 与合成里程计检查旋转、重复时间、旧数据、断流制动及回退清理。
+RViz 预期为八字参考、圆盘轨迹与观测地图；本机本轮仅验收无界面 ROS 链路。
+
+\paragraph{练习 ch17-2}
+补全机体速度到 odom 的旋转；用 yaw=$\pi/2$、机体系速度 $(0.2,0.3)$ m/s 验算。
+实验暂停后等待墙钟 1 s，确认参考没有新增；再仅推进 /clock，观察超时制动。
