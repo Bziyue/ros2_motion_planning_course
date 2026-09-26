@@ -11,8 +11,8 @@ ros2 run motion2d scan_matcher_demo
 \end{lstlisting}
 演示先造两面互相垂直的墙，再用已知位姿
 $t=(0.12,-0.08)$ m、$\psi=0.04$ rad 生成当前帧。
-配准函数只收到两组点和初值，不收到这个答案。输出包括两种残差的状态、位姿、
-RMSE、关联数与迭代次数。真实雷达点还会受遮挡、噪声和视角变化影响。
+配准函数根据两组点和一个位姿初值，尝试找回这个变换。
+输出包括两种残差的状态、位姿、均方根误差（RMSE）、关联数与迭代次数。真实雷达点还会受遮挡、噪声和视角变化影响。
 实验同时使用零初值，以及 $(0.11,-0.075,0.038)$ 的邻近初值。
 零初值下，点到点结果约为 $(0.1030,-0.0865,0.0474)$：
 虽然报告收敛，仍有约 1.8 cm 的位置误差。邻近初值能恢复本例答案，
@@ -24,8 +24,14 @@ $T_{\rm reference\leftarrow current}$：
 e_i=R(\psi)p_i+t-q_{j(i)},\qquad
 j(i)=\arg\min_j\|R(\psi)p_i+t-q_j\|.
 \end{equation}
-先用当前猜测寻找最近邻，固定这些对应关系解一个小问题，再重新寻找对应关系。
-这就是 ICP 的交替过程。对应关系也在变化，所以它不是一次线性求解，也不保证找到全局最优。
+$j(i)$ 表示与第 $i$ 个当前点配对的参考点编号；$\arg\min$ 表示取距离最小时的编号。
+残差 $e_i$ 是“变换后的当前点减参考点”，单位为米；对齐得越好，残差越接近零。
+ICP（迭代最近点）交替做两件事：先用当前位姿寻找最近邻，再固定对应关系求位姿的小修正。
+新的位姿会改变最近邻，因此修正后要重新关联。
+
+例如在一维中，参考点位于 1 m 和 2 m，当前点实际对应 1 m；
+若初值把它放到 1.6 m，最近邻会选 2 m，后续可能继续向右移动 .4 m。
+残差虽然降为零，对应关系却错了。这解释了演示中“增量很小”与“位姿准确”为何可能分开出现。
 
 \begin{center}
 \begin{tikzpicture}[x=1cm,y=1cm,>=Stealth,
@@ -38,79 +44,322 @@ j(i)=\arg\min_j\|R(\psi)p_i+t-q_j\|.
 \draw[->] (pairs)--(solve);
 \draw[->] (solve)--(update);
 \draw[->] (update.south)--++(0,-.7)-|(pairs.south);
-\node[below] at (6.3,-1.3) {重新关联，直到小增量收敛或明确失败};
+\node[below] at (6.3,-1.3) {重新关联，检查增量、残差与几何约束};
 \end{tikzpicture}
 \end{center}
 
 超过关联距离的点不参与本轮优化。默认门限为 0.5 m，最多 40 次迭代，
 至少 20 个有效关联。门限不是越大越好：太大容易认错墙，太小则运动稍快就没有足够的点。
 
-\clearpage
-\section{点到点残差的两行雅可比}
-本章使用加法更新 $(t_x,t_y,\psi)$。记 $u=R(\psi)p_i$，则
+\section{把位姿的小变化写成一阶近似}
+本章直接把 $\theta=(t_x,t_y,\psi)^\top$ 作为待求的三个数，
+更新为 $\theta+\delta$，其中 $\delta=(\delta_x,\delta_y,\delta_\psi)^\top$。
+先看一对已经关联的点。展开旋转矩阵，有
+\begin{align}
+e_x&=p_x\cos\psi-p_y\sin\psi+t_x-q_x,\\
+e_y&=p_x\sin\psi+p_y\cos\psi+t_y-q_y.
+\end{align}
+分别对三个变量求偏导，记旋转后的点 $u=Rp$，得到
+\begin{align}
+\frac{\partial e_x}{\partial t_x}=1,\quad
+\frac{\partial e_x}{\partial t_y}=0,\quad
+\frac{\partial e_x}{\partial\psi}=-p_x\sin\psi-p_y\cos\psi=-u_y,\\
+\frac{\partial e_y}{\partial t_x}=0,\quad
+\frac{\partial e_y}{\partial t_y}=1,\quad
+\frac{\partial e_y}{\partial\psi}=p_x\cos\psi-p_y\sin\psi=u_x.
+\end{align}
+将这些偏导按“残差分量为行、位姿变量为列”排列，就是\textbf{雅可比矩阵}：
 \begin{equation}
-J_i=\frac{\partial e_i}{\partial(t_x,t_y,\psi)}
+J_i=\frac{\partial e_i}{\partial\theta}
 =\begin{bmatrix}1&0&-u_y\\0&1&u_x\end{bmatrix}.
 \end{equation}
-旋转列不包含平移。这里的增量约定不是 SE(2) 左乘或右乘指数映射；
-换一种更新方式，雅可比也要随之改变。
+雅可比是多变量函数的一阶导数。用一阶泰勒展开，两个残差分量的变化为
+\begin{equation}
+e_i(\theta+\delta)\approx e_i(\theta)+J_i\delta
+= e_i+\begin{bmatrix}\delta_x-u_y\delta_\psi\\
+\delta_y+u_x\delta_\psi\end{bmatrix}.
+\end{equation}
+例如 $u=(2,1)$ m，只增加 $0.01$ rad 航向，点的位置约变化 $(-.01,.02)$ m。
+这也符合直觉：绕原点转动时，瞬时位移垂直于半径。
+这里转动的是 $Rp$，平移 $t$ 在我们的加法更新中独立变化，因此旋转列使用 $u$。
+
+\par\noindent\begin{minipage}{\linewidth}
 \lstinputlisting[language=C++,linerange={icp_jacobian_begin-icp_jacobian_end},
   includerangemarker=false]{../ros2_ws/src/motion2d/src/estimation/scan_matcher.cpp}
-
-线性化后 $e_i(\theta+\delta)\approx e_i+J_i\delta$。求导令零得到
-\begin{equation}
-H=\sum_i w_iJ_i^\top J_i,\qquad
-g=\sum_i w_iJ_i^\top e_i,\qquad H\delta=-g.
-\end{equation}
-不要显式求 $H^{-1}$；用分解求解线性方程。默认 Huber 尺度为 0.08 m：
-\begin{equation}
-\rho(s)=
-\begin{cases}\frac12s^2,&|s|\le a,\\a|s|-\frac12a^2,&|s|>a,\end{cases}
-\qquad w=\min(1,a/|s|).
-\end{equation}
-零残差时直接取 $w=1$。点到点使用残差模长，点到线使用有符号距离。
-鲁棒权重减弱大残差的影响，不能凭空识别所有错误对应。
+\end{minipage}\par
 
 \textbf{代码练习 ch08-1：}补完 \path{starter/point_jacobian.hpp}。
-检查程序在三个朝向对独立投影公式做中心差分。先手算，再运行；
-不要照抄一个与自己实现完全相同的公式充当测试。
+用 $(e(\theta+\epsilon e_j)-e(\theta-\epsilon e_j))/(2\epsilon)$ 检查第 $j$ 列，
+其中 $e_j$ 是只在第 $j$ 项为 1 的单位向量。
+中心差分来自 $+\epsilon$ 与 $-\epsilon$ 两个泰勒式相减：常数与二阶项相消，
+除以 $2\epsilon$ 后留下导数及 $O(\epsilon^2)$ 误差。
+取 $\epsilon=10^{-6}$，并在多个朝向核对，可检查旋转方向与符号。
+
+\section{从残差平方和推导位姿增量}
+一帧有许多点，我们希望整体误差小。固定对应关系后，令
+\begin{equation}
+F(\delta)=\frac12\sum_iw_i\|e_i+J_i\delta\|^2.
+\end{equation}
+先取所有权重 $w_i=1$；下一节再让可疑的大残差权重变小。
+平方使正负误差都产生正代价，系数 $1/2$ 用来抵消求导时的 2。
+令 $r_{i,a}=e_{i,a}+\sum_bJ_{i,ab}\delta_b$，其中 $a$ 遍历 x、y 两个分量。
+对增量的第 $c$ 项求导，链式法则给出
+\begin{equation}
+\frac{\partial F}{\partial\delta_c}
+=\sum_iw_i\sum_aJ_{i,ac}
+ \left(e_{i,a}+\sum_bJ_{i,ab}\delta_b\right)=0.
+\end{equation}
+把三个偏导等于零的方程合在一起，得到\textbf{法方程}：
+\begin{equation}
+H\delta=-g,\qquad
+H=\sum_iw_iJ_i^\top J_i,\quad g=\sum_iw_iJ_i^\top e_i.
+\end{equation}
+$H$ 为 $3\times3$，$g$ 为三维向量；即使有上千对点，待解的增量仍只有三个数。
+$H$ 收集各变量对残差的影响，$g$ 收集当前残差指向的改进方向。
+解出 $\delta$ 后更新位姿、重新关联、再求解，这就是本章使用的高斯--牛顿迭代。
+
+\subsection{一个可以手算的三元方程}
+取 $p_1=(1,0)$、$p_2=(0,1)$，参考点分别为
+$q_1=(1.2,-.1)$、$q_2=(.2,.9)$。初值 $t=0,\psi=0$，固定这两对对应关系，取 $w_i=1$。
+两点残差都为 $(-.2,.1)$，代入各自的雅可比得到
+\[
+H=\begin{bmatrix}2&0&-1\\0&2&1\\-1&1&2\end{bmatrix},\qquad
+ g=\begin{bmatrix}-.4\\.2\\.3\end{bmatrix}.
+\]
+前两行给出 $\delta_x=.2+.5\delta_\psi$、
+$\delta_y=-.1-.5\delta_\psi$；代入第三行得到 $\delta_\psi=0$。
+因此 $\delta=(.2,-.1,0)$，正好把两点平移到参考位置。
+这个例子用于手算内核；实际扫描还有最少关联点数等配置。
+
+\subsection{代码中的 LDLT 在做什么}
+\code{h.ldlt().solve(g)} 通过消元解线性方程。
+对本例，逐项相乘可以验证
+\[
+H=LDL^\top,\qquad
+L=\begin{bmatrix}1&0&0\\0&1&0\\-.5&.5&1\end{bmatrix},\quad
+D=\begin{bmatrix}2&0&0\\0&2&0\\0&0&1\end{bmatrix}.
+\]
+$L$ 为下三角矩阵，$D$ 为对角矩阵；这种分解把同时求三个未知数，变为逐项代入。
+令 $b=-g$，依次解 $Ly=b$、$Dz=y$、$L^\top\delta=z$。
+第一步从上到下得到 $y=(.4,-.2,0)$，第二步逐项相除得到 $z=(.2,-.1,0)$，
+第三步从下到上得到同样的 $\delta$。Eigen 自动进行分解与代入；调用者直接传入 $H,g$。
+
+\section{用 Huber 权重减轻错误关联的影响}
+平方代价的导数随误差线性增大，因此一个很大的错误对应可能牵动整个位姿。
+Huber 代价在误差较小时保留平方形状，较大时改为线性：
+\begin{equation}
+\rho(s)=
+\begin{cases}\tfrac12s^2,&|s|\le a,\\a|s|-\tfrac12a^2,&|s|>a.\end{cases}
+\end{equation}
+在 $|s|=a$ 处，两边值均为 $a^2/2$，斜率也相等，所以连接平滑。
+对标量残差 $s$ 求导可得
+\[
+\rho'(s)=\begin{cases}s,&|s|\le a,\\a\operatorname{sign}(s),&|s|>a.\end{cases}
+\]
+普通加权平方项 $\tfrac12ws^2$ 对残差的导数为 $ws$。
+让这一轮线性化的导数与 Huber 相同，就取
+\begin{equation}
+w=\frac{\rho'(s)}s=\min(1,a/|s|),
+\end{equation}
+零残差时使用平方分支，$w=1$。每一轮按当前残差重新计算权重，并在该轮求解时固定它们。
+这就是\textbf{迭代重加权最小二乘}。
+点到点残差为向量，令 $s=\|e\|$；链式法则给出
+$\partial\rho(\|e\|)/\partial e=\rho'(s)e/s=we$，所以同样使用这个权重。
+
+默认 $a=.08$ m。残差 .02 m 的权重为 1，残差 .40 m 的权重为 .2；
+其对梯度的贡献幅度从 .40 缩到 .08。
+最近邻距离门限先去掉相距太远的点，Huber 再减弱保留下来的大残差，两者各有作用。
+
+\begin{center}
+\begin{tikzpicture}
+\begin{axis}[width=.75\linewidth,height=5cm,xlabel={$s/a$},ylabel={$\rho(s)/a^2$},
+ xmin=-3,xmax=3,ymin=0,ymax=4.7,grid=major,
+ legend style={font=\small,at={(.5,.98)},anchor=north},samples=100]
+\addplot[navy,dashed,domain=-3:3] {.5*x*x};\addlegendentry{平方代价}
+\addplot[tealblue,thick,domain=-3:3] {abs(x)<=1 ? .5*x*x : abs(x)-.5};
+\addlegendentry{Huber 代价}
+\end{axis}
+\end{tikzpicture}
+\end{center}
 
 \section{点到线：沿墙滑动和穿墙不同}
-参考表面的单位法向量为 $n_i$ 时，
-\begin{equation}
-r_i=n_i^\top(Rp_i+t-q_i),\qquad J_i^{\rm line}=n_i^\top J_i.
-\end{equation}
-它主要惩罚穿过表面的误差，降低沿表面离散采样位置不一致的影响。
-本实现对参考点半径 0.4 m 内的邻域做 PCA；至少 5 点，
-且小特征值小于大特征值的 0.15 倍，才认为局部像一条线。
-法向量正负不影响平方残差；孤立点和不可靠的角点不提供法向约束。
+考虑参考墙 $y=0$，某次关联的参考点 $q=(0,0)$，变换后的当前点 $u+t=(.3,.1)$。
+点到点残差长为 $\sqrt{.3^2+.1^2}\approx.316$ m；但它到墙的垂直距离只有 .1 m。
+墙面被离散采样后，沿墙 .3 m 的偏差可能来自采样位置不同。
+因此可将残差投影到墙的法向，仅使用垂直分量。
 
-\clearpage
-\section{配准失败必须有名字}
-只有一面水平墙时，点到线误差不包含沿墙的 $t_x$，$H$ 秩不足。
-检查最小与最大特征值之比，能识别这类局部退化。
-点到点的错误最近邻、重复房间却可能仍给出满秩矩阵，因此满秩不等于正确定位。
+\begin{center}
+\begin{tikzpicture}[x=1.25cm,y=1.25cm,>=Stealth]
+\draw[thick,navy] (-1,0)--(4.2,0) node[right] {参考墙};
+
+\fill[navy] (0,0) circle (.045) node[below] {$q$};
+\fill[orange] (3,1) circle (.045) node[above] {$Rp+t$};
+\draw[->,orange,thick] (0,0)--(3,1) node[midway,above] {$e$};
+\draw[->,tealblue,thick] (3,0)--(3,1) node[midway,right] {$r=n^\top e$};
+\draw[->,navy] (-.7,0)--(-.7,1) node[above] {$n$};
+\node[below] at (2,-.45) {点到线只保留垂直于表面的误差};
+\end{tikzpicture}
+\end{center}
+
+参考表面单位法向量为 $n_i$ 时，点到线残差和雅可比为
+\begin{equation}
+r_i=n_i^\top(Rp_i+t-q_i),\qquad
+J_i^{\rm line}=\frac{\partial r_i}{\partial\theta}=n_i^\top J_i.
+\end{equation}
+单位长度使点积就是有符号距离。在线性化这一步，参考点和法向量固定，
+因此求导时只需左乘 $n_i^\top$。
+水平墙取 $n=(0,1)$，则 $r=e_y$、$J^{\rm line}=(0,1,u_x)$；
+沿墙平移 $\delta_x$ 对残差没有影响。
+将 $n$ 改为 $-n$ 会同时改变 $r,J$ 的符号，而 $J^\top J$、$J^\top r$ 保持不变，
+故法向量的正反方向不影响本章求解。
+
+\section{从一小片点云求出墙的法向}
+扫描没有直接提供法向量，需要从参考点附近的形状估计。
+对一个参考点，收集半径 .4 m 内的 $M$ 个邻点 $q_k$，求均值
+$\bar q=M^{-1}\sum_kq_k$，再令 $d_k=q_k-\bar q$。
+第六章用协方差描述噪声分散程度，这里用同样形式描述空间点的分散：
+\begin{equation}
+C=\frac1M\sum_kd_kd_k^\top
+=\begin{bmatrix}A&B\\B&D\end{bmatrix},\quad
+A=\frac1M\sum_kd_{k,x}^2,\quad
+B=\frac1M\sum_kd_{k,x}d_{k,y},\quad
+D=\frac1M\sum_kd_{k,y}^2.
+\end{equation}
+取任意单位方向 $n$，各点沿它的投影为 $n^\top d_k$，投影的平均平方为
+\begin{equation}
+V(n)=\frac1M\sum_k(n^\top d_k)^2=n^\top Cn.
+\end{equation}
+墙的切向上点分布较宽，法向上分布较窄，所以我们寻找使 $V(n)$ 最小的单位方向。
+这就是主成分分析（PCA）在这里的几何意义。
+
+\subsection{特征向量从哪里来}
+暂用两个分量写 $n=(n_x,n_y)$，则
+$V=An_x^2+2Bn_xn_y+Dn_y^2$，其梯度为 $2Cn$。
+因为 $n$ 要保持单位长度，微小变化 $dn$ 必须满足 $n^\top dn=0$
+（对 $n^\top n=1$ 求导即可得到）。
+在最小值处，沿任意这种切向变化都应有
+$dV=2(Cn)^\top dn=0$，所以 $Cn$ 必须与 $n$ 平行：
+\begin{equation}
+Cn=\lambda n.
+\end{equation}
+这样的方向叫特征向量，比例 $\lambda$ 叫特征值。
+左乘单位向量 $n^\top$ 得 $V(n)=\lambda$，
+因此较小特征值对应较小投影方差，其方向就是法向。
+
+二维情形可以直接算出两个特征值。把方程展开为
+$(A-\lambda)n_x+Bn_y=0$、$Bn_x+(D-\lambda)n_y=0$。
+消去其中一个分量，要存在非零解，就需
+\[
+(A-\lambda)(D-\lambda)-B^2=0.
+\]
+解这个二次方程得到
+\begin{equation}
+\lambda_{\min,\max}=\frac{A+D\mp\sqrt{(A-D)^2+4B^2}}2.
+\end{equation}
+再代回线性方程求方向并归一化。
+例如五点 $(-.2,0),(-.1,0),(0,0),(.1,0),(.2,0)$ 的均值为零，
+$C=\operatorname{diag}(.02,0)$ $\mathrm{m^2}$。
+特征值为 0 和 .02，较小值的方向是 $(0,1)$，恰好垂直于这条水平线。
+
+\subsection{把推导对应到邻域代码}
+代码先以当前参考点 $q_i$ 为原点，令 $v_k=q_k-q_i$，
+累积 \code{sum}=$\sum_kv_k$ 与 \code{second}=$\sum_kv_kv_k^\top$。
+相对这个原点的均值为 $\mu=M^{-1}\sum_kv_k$。
+展开中心化后的乘积可得
+\begin{align}
+\frac1M\sum_k(v_k-\mu)(v_k-\mu)^\top
+&=\frac1M\sum_kv_kv_k^\top
+ -\mu\mu^\top-\mu\mu^\top+\mu\mu^\top\\
+&=\frac1M\sum_kv_kv_k^\top-\mu\mu^\top.
+\end{align}
+这就是 \code{second / count - mean * mean.transpose()}。
+Eigen 的对称矩阵求解器按特征值从小到大排列，\code{eigenvectors().col(0)} 给出法向。
+至少 5 点，且 $\lambda_{\max}>10^{-8}\ \mathrm{m^2}$、
+$\lambda_{\min}<.15\lambda_{\max}$ 时才保留它。
+前者要求点具有一定空间跨度，后者要求点簇明显扁长；角点或近似圆形点簇常会被这一比例筛掉。
+
+\par\noindent\begin{minipage}{\linewidth}
+\lstinputlisting[language=C++,linerange={icp_residual_begin-icp_residual_end},
+ includerangemarker=false]{../ros2_ws/src/motion2d/src/estimation/scan_matcher.cpp}
+\end{minipage}\par
+
+这段代码把两种残差接到同一个三元法方程。
+点到点分支使用两行 $J$，点到线分支先投影成一行；随后都累积 $wJ^\top J$ 和 $wJ^\top r$。
+\code{squared_error} 单独累积未加权残差平方，便于报告几何误差。
+
+\section{判断几何约束是否足够}
+把水平墙各点的 $J_i=(0,1,u_{i,x})$ 代入法方程，得到
+\begin{equation}
+H=\sum_iw_i\begin{bmatrix}
+0&0&0\\0&1&u_{i,x}\\0&u_{i,x}&u_{i,x}^2
+\end{bmatrix}.
+\end{equation}
+第一行、第一列全为零：任意沿墙平移都不改变残差，扫描没有告诉我们该方向移动了多少。
+这称为\textbf{退化}；从线性方程看，独立约束不足以确定三个增量，也就是矩阵秩不足。
+
+更一般地，对任意增量方向 $d$，
+\begin{equation}
+d^\top Hd=\sum_iw_i\|J_i d\|^2\ge0.
+\end{equation}
+若某个非零 $d$ 使所有 $J_i d=0$，则沿该方向改变位姿几乎不产生代价。
+与上一节的单位方向最小化一样，$H$ 的最小特征值给出最弱方向的局部约束强度。
+代码将最小值与最大值比较；比值太小时报告退化。
+本章位姿参数固定使用米与弧度，并在这一参数尺度下设置比值门限。
+添加一面垂直墙后，沿 x 平移也会改变点到线距离，通常就能补上缺失的约束。
+
+几何约束充足后，还要检查关联是否合理。重复的走廊或错误最近邻可以形成一组
+内部自洽的约束，得到很小的残差；合理初值与连续跟踪能减少这类错误。
+\par\noindent\begin{minipage}{\linewidth}
 \lstinputlisting[language=C++,linerange={icp_solve_begin-icp_solve_end},
   includerangemarker=false]{../ros2_ws/src/motion2d/src/estimation/scan_matcher.cpp}
+\end{minipage}\par
 
-结果分为 converged、too\_few\_pairs、degenerate、iteration\_limit 和 high\_residual。
-只有增量小于容差、重算后的关联数和秩合格、RMSE 不超过门限，才接受位姿。
-返回的加权法方程矩阵只是局部信息指标，不能直接宣称是经过标定的真实协方差。
+\code{ldlt().solve} 解出增量后，代码还用
+$\gamma=\max(1,\|\delta_t\|/.3,|\delta_\psi|/.2)$ 缩放它，令 $\delta\leftarrow\delta/\gamma$。
+因为 $\gamma$ 至少等于两个比值，单次平移与转角分别不超过 .3 m、.2 rad，
+有助于让一阶近似保持在当前位姿附近。然后更新位姿，并按新位姿重算关联与残差。
 
-\begin{enumerate}
-\item \textbf{理解：}为什么增大门限可能让残差下降，却得到错误的位姿？
-\item \textbf{实验：}改变已知变换和初值，比较点到点与点到线；删掉一面墙观察退化。
-\item \textbf{验收：}参考解通过中心差分；刚体点集恢复位姿；空点集、无重叠、
-单墙退化和迭代耗尽均报告失败。两种 RMSE 的含义不同，不能只凭数值大小比较精度。
-\end{enumerate}
+最终报告的几何均方根误差为
+\[
+\mathrm{RMSE}_{\rm point}=\sqrt{\frac1N\sum_i\|e_i\|^2},\qquad
+\mathrm{RMSE}_{\rm line}=\sqrt{\frac1N\sum_ir_i^2}.
+\]
+前者包含两个方向的误差，后者只包含法向误差；都以米计量。
+例如上面的单点例子，两者分别为 .316 m 和 .1 m，比较时应先看清定义。
+
+\begin{center}
+\begin{tabular}{ll}
+\toprule
+状态 & 下一步检查\\\midrule
+\code{converged} & 增量、关联数、约束强度及 RMSE 均满足条件\\
+\code{too_few_pairs} & 查看重叠区域、关联门限与法向是否有效\\
+\code{degenerate} & 查看是否只有单墙等约束不足的几何\\
+\code{iteration_limit} & 查看初值与迭代过程\\
+\code{high_residual} & 增量已小，检查剩余误差和错误对应\\
+\bottomrule
+\end{tabular}
+\end{center}
+结果中的 \code{information} 保存 $H$，可用于观察局部约束强弱。
+估计误差的协方差还与传感器噪声、关联误差和地图误差有关；第九章将单独建立这一模型。
+
+\textbf{动手观察：}改变已知变换与初值，记录增量、RMSE 和恢复的位姿。
+再删去一面墙，对照上面的零列解释退化；恢复双墙后，观察最弱约束如何变化。
+
 配准内核只处理一次点云对齐；下面由激光里程计管理时间历史、参考点云和失败帧。
 
-\clearpage
 \section{把成功扫描留在一个小窗口中}
 每一帧都与上一帧匹配会连续累积误差。我们把最近几个关键帧转换到 odom 系，
 作为局部参考表面。默认最多保留五帧；累计平移达到 0.2 m 或转角达到 0.15 rad 时才插入。
-用边长 0.06 m 的方格做体素降采样，每格保留质心，避免同一面墙被重复点过度加权。
-它仍然是点云窗口，不是第七章的占据栅格。
+用边长 .06 m 的方格做降采样（也称体素降采样），每格只保留点的质心。
+格索引沿用第七章的向下取整，格内质心为 $\bar p=M^{-1}\sum_i p_i$。
+它也是使 $\sum_i\|p_i-c\|^2$ 最小的代表点：对 $c$ 求导得
+$2Mc-2\sum_i p_i=0$，解出 $c=\bar p$。
+这样一面墙上的重复点被压缩成较均匀的参考点；窗口保存的是点坐标，地图的自由证据仍由第七章栅格处理。
+
+若只匹配相邻两帧，得到 $T_{k-1\leftarrow k}$ 后，
+按第二章的复合规则计算 $T_{O\leftarrow k}=T_{O\leftarrow k-1}T_{k-1\leftarrow k}$。
+本实现已把窗口点转换到 odom，因此配准直接求 $T_{O\leftarrow k}$。
+这解释了同一个内核为什么既能做两帧对齐，也能输出当前里程计位姿。
 
 设前两次\emph{成功}估计的时刻为 $t_{k-1},t_k$，下次扫描在 $t$ 到达。
 用割线速度提供局部初值：
@@ -119,48 +368,57 @@ r_i=n_i^\top(Rp_i+t-q_i),\qquad J_i^{\rm line}=n_i^\top J_i.
 \hat\omega_k=\frac{\operatorname{wrap}(\psi_k-\psi_{k-1})}{t_k-t_{k-1}},\quad
 p_{\rm init}=p_k+(t-t_k)\hat v_k.
 \end{equation}
-航向同样外推并 wrap。这里使用 odom 平移速度；匀速只是给 ICP 一个较近的起点，
-不能替代本帧观测。一次配准失败后，分母必须包含跨过的时间，不能仍除以固定扫描周期。
+割线速度就是两次成功位置的变化量除以经过的时间，再把它乘预测时长。
+航向同样外推，并用 $\operatorname{wrap}$ 将角差放回 $[-\pi,\pi)$，选取较短的转角。
+例如从 $179^\circ$ 到 $-179^\circ$，连续运动的角差是 $2^\circ$，直接相减则为 $-358^\circ$。
+
+若 0.1 s 和 0.3 s 的成功位置分别为 .1 m 与 .3 m，中间一帧失败，
+割线速度应为 $(.3-.1)/(.3-.1)=1$ m/s，预测 0.4 s 的位置为 .4 m。
+除以固定的 .1 s 会把速度误算为 2 m/s。
+外推得到的位姿只作为初值，接下来由新扫描修正。
 \textbf{练习 ch08-2} 的代码入口为 constant\_velocity.hpp，检查缺帧和跨越 $\pm\pi$ 的情况。
 
+\par\noindent\begin{minipage}{\linewidth}
 \lstinputlisting[language=C++,linerange={local_odometry_accept_begin-local_odometry_accept_end},
   includerangemarker=false]
 {../ros2_ws/src/motion2d/src/estimation/lidar_odometry.cpp}
+\end{minipage}\par
 
 拒绝帧不更新位姿、速度、成功时刻和局部地图。下一帧仍可尝试恢复；
 连续超过 1 s 没有成功观测则报告 tracking\_lost，等待明确 reset。
-窗口限制了内存和匹配规模，但不能消除长期漂移。重复几何仍可能让错误配准通过局部检查。
+窗口控制参考点云的规模，并复用几帧共同观测到的表面。
+每个关键帧仍带有估计误差，长期运动会逐渐积累漂移；第十章用回环约束修正它。
 
 \section{用估计里程计替换真值入口}
 重新构建并加载工作区后，运行：
 \begin{lstlisting}[language=bash]
 ros2 launch motion2d_bringup ch08.launch.py
-# For automatic reset checks, launch with rviz:=false.
+# Set rviz:=false for a terminal-only experiment.
 # Second terminal, from ros2_ws with the same ROS environment:
 /usr/bin/python3 ../scripts/check_ch08.py
 \end{lstlisting}
-激光节点只订阅 /scan，发布 /odometry/estimated；显式 estimated 适配器将其转为统一
-/odometry，并独占 odom 到 base\_link 的 TF。模拟器仍发布独立真值供评估，
-但 launch 关闭了模拟器运动 TF，也没有运行 truth 适配器。传感器静态外参保持不变。
+激光节点订阅 /scan，发布 /odometry/estimated；estimated 适配器将其接到统一
+/odometry，并发布 odom 到 base\_link 的 TF。
+launch 将第七章的 truth 适配器替换为 estimated 适配器。
+模拟器的独立真值消息用于评估，传感器静态外参继续描述安装位置。
 
 第一帧定义 odom 原点与朝向；现在地图中的起点是 $(0,0)$。
 真实世界起点仍是 $(-8,-8)$，两者不能不经变换直接叠加。RViz 默认只显示观测栅格、
 注册扫描、估计轨迹和机体轴；真值世界与真值机器人显示关闭。map 暂与 odom 重合。
 
 \begin{notebox}
-\textbf{有状态就必须讨论失败}\quad /estimation/status 给出每次配准状态。
-未收敛时不发布该采样时刻的里程计，建图等待其他有精确配对的扫描，再丢弃未配对旧帧。
-不会复制上次位姿并伪造一个新时间戳。恢复不等于全局重定位。
+\textbf{跟踪状态}\quad /estimation/status 给出每次配准状态。
+成功时发布该采样时刻的里程计；失败时保留最后一次成功状态，等待下一帧继续匹配。
+建图节点处理后续能够精确配对的扫描，并丢弃较早的未配对帧。
 \end{notebox}
 
 里程计 twist 是成功扫描间的平均速度，在机体系表达。pose 协方差暂用固定测量尺度：
-平移标准差 0.03 m、航向 0.01 rad；尚未经过统计标定，也不是从配准信息矩阵直接求逆得到。
-第九章会解释如何把这些尺度放进滤波器，以及过度自信的后果。
+平移标准差 .03 m、航向 .01 rad，用来设置后续融合时对激光位姿的信任程度。
+第九章将说明这些尺度怎样影响滤波增益，并通过误差实验调整它们。
 reset 清空首帧原点、关键帧、速度和轨迹。零时刻重新采样；正时间重复帧被忽略。
 
 \textbf{常见错误：}把真值 TF 当初值；把失败帧加入局部地图；拿当前最新位姿变换旧扫描；
-直接比较不同原点的轨迹。主机 RViz 在时间回拨时仍可能发生 TF 缓存异常；
-自动 reset 验收使用无界面模式，恢复运动后重新启动 RViz。图形窗口重启不负责重置算法。
+直接比较不同原点的轨迹。
 
 \section{实验：束数、噪声与被拒绝的帧}
 在仓库根目录加载工作区环境，运行：
@@ -176,7 +434,12 @@ T_k^{\rm ref}=(T_0^{\rm truth})^{-1}T_k^{\rm truth},\qquad
 \operatorname{RMSE}=\sqrt{\frac{1}{|\mathcal A|}\sum_{k\in\mathcal A}
 \|p_k^{\rm est}-p_k^{\rm ref}\|^2}.
 \end{equation}
-$\mathcal A$ 只含成功帧，因此\emph{必须同时报告拒绝数}。
+参考轨迹先减去首帧位置，再用首帧旋转的转置转轴，即
+$p_k^{\rm ref}=R_0^\top(p_k^{\rm truth}-p_0^{\rm truth})$，
+于是参考与估计都从 $(0,0)$ 出发。
+$\mathcal A$ 是成功帧编号集合，$|\mathcal A|$ 为其数量。
+每帧先算欧氏位置误差，再平方、平均、开方，就得到这段轨迹的米制 RMSE。
+同时报告拒绝数，可看出小误差对应的是大多数扫描还是少量容易配准的帧。
 下表直接读取 C++ 实验 CSV。无噪声时也可能因离散扫描、可见性和迭代门限而拒绝某些帧。
 \begin{center}\small
 \pgfplotstabletypeset[col sep=comma,
@@ -195,12 +458,9 @@ every last row/.style={after row=\bottomrule}]{data/ch08_odometry.csv}
 \caption{首帧对齐后的轨迹与位置误差。叉号是拒绝帧，此时画出保持上次估计的误差；圆轨迹保持等比例。}
 \end{figure}
 
-默认 ROS 实验的 0 到 3 s 共 31 次扫描中，30 次成功、1 次拒绝，
-成功帧最大位置误差约 0.00214 m。这是一个固定种子小场景，不能推广为普遍精度承诺。
-教材的六组回放也没有在配准后用真值修正结果。720 束不保证每项指标都优于 360 束：
-法向量、关联和噪声共同影响局部优化。
+比较表格和曲线时，先观察接受与拒绝发生在哪些时刻，再看成功帧的位置误差。
+720 束会提供更密的观测，同时改变降采样后的参考点、法向和最近邻关系，
+所以误差变化还取决于当前场景的几何和噪声。一次只改一个参数，
+记录成功率、误差及状态，才能把这些因素分开理解。
 
-\textbf{本章验收：}核心测试覆盖独立差分、恢复、退化、缺帧和有限窗口；
-实际 ROS 核对输入隔离、采样时刻、点云/地图、暂停与重播。
-继续实验时，一次只改一个参数，记录成功率、误差及失败状态。
-下一章使用原始 IMU 预测和激光校正，在同一时间轴上估计速度与偏置。
+下一章在两次扫描之间用 IMU 预测运动，再由激光校正，把高频运动信息与几何观测结合起来。
