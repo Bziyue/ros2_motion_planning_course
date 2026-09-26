@@ -2,11 +2,15 @@
 
 从二维世界、圆盘机器人和模拟传感器开始，逐步学习定位建图、路径与轨迹规划、跟踪控制。教材、代码和练习按章节对应。
 
-**当前状态：第 01–20 章已完成。** 已有随机世界、四种机器人模型、CPU 激光雷达、六轴白噪声 IMU、统一传感器时间、真值建图、激光/IMU 融合与回环 SLAM。大纲提交为 `5c0c642`；每完成一个可运行、已验证的功能就单独提交，教材和练习同步更新。已接入观测地图上的 A* 和 RViz 目标；已提供距离场与梯度可视化，第13章走廊已接入观测地图，第14章五次轨迹和理想连续执行已完成，第15章 MINCO 内核、软约束优化与观测地图ROS预览已完成，第16章样条、连续认证与执行已完成，第17章前馈PD与ROS跟踪已完成，第18章线性MPC与ROS已完成，第19章已接通A/B/C在线导航、故障制动与九组ROS对照，第20章已完成可选CUDA、ROS后端切换及分阶段计时；正在补齐选学附录。
+**已完成第 01–20 章，以及附录 A–D 的所选实验。** 教材、代码、练习与参考答案同步，每个独立功能均在验证后单独提交。大纲批准记录为 `5c0c642`。
+
+主线已贯通随机世界、圆盘模型、CPU 激光/IMU、真值建图、激光惯性 SLAM、A*、ESDF、安全走廊、二维 MINCO/Spline2D、PD/MPC 和 A/B/C 在线导航；CUDA 后端可选，普通 CPU 构建不依赖 CUDA。
+
+附录包含数学回查、差速运动学、偏置随机游走、传感器 bag 回放、Doxygen 和实验报告。轮力矩/NMPC、逐束畸变、动态障碍、全局重定位与外部 SLAM 对照明确列为选做扩展。第 08 章以后的 ROS 功能已做无界面验收，RViz 配置已提供；本机图形问题尚未完成 GUI 验收，详见验证记录。
 
 [教材 PDF](output/pdf/course.pdf) · [实施进度](docs/PROGRESS.md) · [主机验收记录](docs/VALIDATION.md)
 
-选学附录入口见 [附录说明](chapters/appendices/README.md)，数学回查、差速运动学与偏置随机游走实验已完成。
+选学入口见 [附录说明](chapters/appendices/README.md)；运行 `bash scripts/build_api.sh` 生成 API，实验可复制 [报告模板](docs/EXPERIMENT_REPORT_TEMPLATE.md)。
 
 | 章节 | 内容与运行说明 | 练习 | 启动文件 |
 | --- | --- | --- | --- |
@@ -36,7 +40,7 @@ source /opt/ros/lyrical/setup.bash
 cd /home/zdp/ForCodex/ros2_motion_planning_course/ros2_ws
 colcon build --symlink-install --cmake-args -DCMAKE_BUILD_TYPE=RelWithDebInfo -DPython3_EXECUTABLE=/usr/bin/python3
 source install/setup.bash
-ros2 launch motion2d_bringup ch08.launch.py
+ros2 launch motion2d_bringup ch01.launch.py
 ~~~
 
 上面使用 bash；zsh 对应使用 setup.zsh。启动时加 `rviz:=false` 可仅运行节点。同一时间只启动一个章节，避免多个时钟与 TF 发布者。初次学习请从第 01 章开始。
@@ -53,7 +57,7 @@ ros2 launch motion2d_bringup ch08.launch.py
 
 - [教材详细大纲](docs/COURSE_OUTLINE.md)：20 章、先修关系、代码入口、练习、验收与实施里程碑。
 - [PDF 大纲审阅稿](output/pdf/course_outline.pdf)：章节摘要、模型建议和接口概览。
-- [接口与建模草案](docs/INTERFACES.md)：状态、控制量、传感器、TF、话题、参数与扩展点。
+- [接口与建模约定](docs/INTERFACES.md)：状态、控制量、传感器、TF、话题、参数与扩展点。
 - [AGENTS.md](AGENTS.md)：教学和开发规范；[agent.md](agent.md) 为同一规范的入口。
 - [主机环境记录](docs/HOST_ENVIRONMENT.md)与[参考资料](docs/REFERENCES.md)。
 
@@ -81,7 +85,7 @@ chapters/                      逐章运行说明
 exercises/                     独立练习、提示与参考解
 ```
 
-具体完成范围见实施进度；后续章节的计划不代表已经实现。package.xml 暂用 Proprietary 表示尚未授予对外开放许可，不影响本地学习。
+具体实现与选做扩展边界见实施进度。package.xml 暂用 Proprietary 表示尚未授予对外开放许可，不影响本地学习。
 
 ## 重新编译教材 PDF
 

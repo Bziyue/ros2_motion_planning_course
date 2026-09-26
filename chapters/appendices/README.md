@@ -3,7 +3,7 @@
 - A：数学回查、SE(2)/协方差/最小二乘/凸集/强凸QP，与中央差分练习；`exercises/appA`。
 - B：无滑移差速模型，左右轮速与精确圆弧积分；`exercises/appB`。
 - C：偏置随机游走独立实验，延迟/逐束畸变/复杂障碍/重定位扩展边界；`exercises/appC`。
-- D：传感器rosbag录制、关闭模拟器后SLAM回放与外部对照协议；`exercises/appD`。API文档随后补齐。
+- D：传感器rosbag录制、关闭模拟器后SLAM回放、外部对照协议、Doxygen和实验报告；`exercises/appD`。
 
 附录用于主线之外的扩展，不改变第01–20章编号或默认全向受力模型。
 
@@ -41,3 +41,11 @@ ros2 bag play tmp/my_replay/sensors --clock 200 --rate 0.5
 ```
 停止所有其他模拟器/时钟；bag只含/scan和/imu/data_raw，启动文件提供本课程重合的静态外参。
 主机验证为无界面，不宣称新的RViz画面已验收。外部SLAM对照为设计练习，必须记录其实际输入/版本/预算。
+
+## D API与报告
+
+仓库根目录运行 `bash scripts/build_api.sh`，打开`tmp/doxygen/html/index.html`。
+系统Doxygen优先；当前主机自动使用已有局部1.15.0工具，其他机器应先安装Doxygen和LaTeX。
+Doxyfile保留在版本控制中，生成HTML在ignored tmp中；文档语法告警会使生成失败。
+[实验报告模板](../../docs/EXPERIMENT_REPORT_TEMPLATE.md)单列复现条件、输入隔离、指标和全部失败；
+[验收记录](../../docs/VALIDATION.md)是本课程已实测的数据，模板不代表实测。

@@ -1,12 +1,12 @@
-# 接口与建模草案
+# 接口与建模约定
 
-状态：v0.1，随批准大纲进入实施。这里规定课程将使用的语义，实际已实现范围见 [PROGRESS.md](PROGRESS.md)。优先标准消息；实际需要第二种实现或跨节点传输时才增加抽象。
+状态：第01–20章与所选附录实验已实施。这里记录实际接口及明确标注的扩展语义，范围见 [PROGRESS.md](PROGRESS.md)。优先标准消息；实际需要第二种实现或跨节点传输时才增加抽象。
 
 第 04 章落地约定：simulator 独占时钟，发布 /sim/pose、/sim/velocity、/sim/acceleration 真值调试消息。此章 map 与 odom 重合，真值 TF 暂由 simulator 发布；第 07 章已拆出 truth_odometry 适配器。理想到点在下一 tick 执行，失败扫掠冻结上一个有效状态和时间，/sim/status=collision_predicted，必须 reset 开新试验。不把这个调试入口供给后续 SLAM。
 
 已实现三个互斥模型 ideal/velocity/inertial，只订阅对应命令。速度支持 odom/base_link，力仅支持 odom。有限二维输入、命令 frame/时间、物理参数均在边界校验。速度限模长；力每轴独立限幅。保持输入在模拟时间中超时，速度模式切零速度，惯性模式撤力并继续积分。惯性核心用线性阻尼系统的零阶保持解析离散，碰撞增加曲线与弦的偏差上界；质量与阻尼配置可直接供后续 MPC 使用。
 
-另外已实现 reference 模式，自动采样解析圆轨迹，不订阅外部命令。sampleCircle(initial,radius,omega,time) 返回同一 State2D 中一致的 p/v/a 与 yaw；初始速度明确非零。参考轨迹半径与机器人半径分开，力可行性不在理想模式保证范围内。未来多项式轨迹可以提供相同的采样结果，当前没有引入抽象工厂或提前设计自定义消息。
+另外已实现 reference 模式，自动采样解析圆轨迹，不订阅外部命令。sampleCircle(initial,radius,omega,time) 返回同一 State2D 中一致的 p/v/a 与 yaw；初始速度明确非零。参考轨迹半径与机器人半径分开，力可行性不在理想模式保证范围内。第14章trajectory模式提供同一p/v/a采样语义，使用Trajectory2D消息；具体接入见文末。
 
 ## 1. 模块与数据边界
 
@@ -19,7 +19,7 @@
 
 几何真值由仿真与独立评估持有。SLAM 和默认规划器不接收世界障碍物列表。显式 `oracle_map` 演示使用完整地图时，在 launch 名称、RViz2 标题和实验记录中注明。
 
-计划中的 C++ 值类型：`Pose2D`、`State2D`、`World2D`、`Scan2D`、`Grid2D`、`Esdf2D`、`Corridor2D`、`PolynomialTrajectory2D`。不建立全系统的抽象基类树；雷达 CPU/CUDA 只共享一个清楚的输入/输出约定。
+已实现的 C++ 值类型包括 `Pose2D`、`State2D`、`World2D`、`PlanningGrid`、`Esdf2D`、`ConvexRegion`、`TimedTrajectory`，以include中的实际定义为准。不建立全系统的抽象基类树；雷达 CPU/CUDA 只共享一个清楚的输入/输出约定。
 
 ## 2. 状态、外形和控制输入
 
@@ -29,7 +29,7 @@
 - **理想到点**：目标位姿只用于几何规划演示，检查两位置之间的扫掠圆盘；不是任意穿障碍的瞬移。IMU 停用，不能与融合 SLAM 组合。
 - **理想连续执行**：输入含时间的参考 `p/v/a`，从轨迹解析求导得到 IMU 的运动真值；位置、速度与加速度来自同一个参考，不对跳变位置做差分。
 - **速度模式**：输入 `TwistStamped`，帧明确为 `odom` 或 `base_link` 并转换。瞬时速度跳变不适合 IMU 教学；传感器融合实验使用光滑参考或惯性模式。
-- **惯性模式**：输入 `WrenchStamped`，平面力在连续的 `odom` 系表达，由仿真适配器转入内部世界系；`torque.z` 为偏航力矩。仿真已知的坐标变换只用于 plant，不反馈给估计器。
+- **惯性模式**：输入 `WrenchStamped`，平面力以 `odom` 标记，当前实现要求odom轴与物理世界轴平行；`torque.z` 为偏航力矩。A/B显式真值对齐，C强制初始yaw=0；非零初始朝向的力坐标适配未实现，不能只改frame名称。
 
 惯性方程：
 
@@ -64,7 +64,7 @@ omega_dot = (tau_z - c_omega omega) / I_z
 - 量程内没有命中记 `+inf`；近于 `range_min` 的真实命中或噪声后越界的读数记 `NaN` 并跳过建图，避免把近障碍或异常回波当自由空间。
 - 不使用强度模型时 `intensities` 为空。
 - **基础 snapshot 模式**：同一仿真时刻发出全部束，`time_increment=0`，`scan_time=1/rate`，首束时间也是整帧时刻。
-- **进阶 rolling 模式**：逐束采样，`time_increment=scan_time/N`，header 为首束采集时刻，整帧采完再发布。每束使用自己的 pose，去畸变方法与扫描模型同时启用。
+- **进阶 rolling 设计（未实现）**：逐束采样，`time_increment=scan_time/N`，header 为首束采集时刻，整帧采完再发布。每束使用自己的 pose，去畸变方法与扫描模型同时启用。
 - CPU/CUDA 输入一致；确定性对比先关噪声。加噪对比使用同一组事先生成的样本，不能把不同随机序列误认成几何误差。
 
 第 05 章已落地 CPU snapshot：/scan 使用 SensorDataQoS，所有束共享同一采样位姿与时间。第 06 章已将整数 tick 基线扩展为按采样序号调度，频率范围 [0.1, 1/dt] Hz，支持 7 Hz 等非对齐频率。暂停/碰撞冻结不重采样，reset 在 t=0 发布新试验的首帧。光束 Marker 以 odom 表达采样时刻的实测射线，不随当前机器人移动；这些显示辅助量不供 SLAM 使用。CPU 单帧束数范围为 2-100000，参数改动后重启。
@@ -75,7 +75,7 @@ omega_dot = (tau_z - c_omega omega) / I_z
 
 ## 5. IMU 契约
 
-第 06 章已落地：imu.hpp/imu.cpp 为纯 C++ 核心，imu_messages.cpp 转成 /imu/data_raw（SensorDataQoS）。仅 reference/inertial 允许启用 IMU；旧章节默认关闭。六轴每采样白噪声、独立种子与 reset 重放已实现。无姿态估计，orientation=单位四元数只是占位，orientation_covariance[0]=-1；协方差对角填 sigma²。全部 sigma=0 的无噪声实验会产生全零测量协方差，按 ROS 约定表示未知，后续估计器必须显式配置处理。显示 Marker 不供 SLAM 使用。
+第 06 章已落地：imu.hpp/imu.cpp 为纯 C++ 核心，imu_messages.cpp 转成 /imu/data_raw（SensorDataQoS）。第06章允许 reference/inertial 启用 IMU，第14章增加连续trajectory支持；旧章节默认关闭。六轴每采样白噪声、独立种子与 reset 重放已实现。无姿态估计，orientation=单位四元数只是占位，orientation_covariance[0]=-1；协方差对角填 sigma²。全部 sigma=0 的无噪声实验会产生全零测量协方差，按 ROS 约定表示未知，后续估计器必须显式配置处理。显示 Marker 不供 SLAM 使用。
 
 `sensor_msgs/Imu`，frame 为 `imu_link`，水平面 yaw-only 姿态，roll/pitch 固定为零。真实姿态只在模拟器内部用于生成传感器读数。
 
@@ -106,17 +106,17 @@ g_world = [0, 0, -9.81] m/s²
 
 `Odometry.pose` 在 `header.frame_id`；`twist` 在 `child_frame_id`，由内部世界速度显式旋转到机体系。所有传感器使用采样时间，禁止用回调到达时间替代。
 
-唯一 `/clock` 来自模拟器，所有课程节点 `use_sim_time=true`。默认仿真 200 Hz，IMU 200 Hz，激光 10 Hz，控制 50 Hz（控制器尚待实施）。SensorScheduler 使用 t_k=round(k*1e9/rate) 纳秒，不重复累加已舍入周期。模拟器接受一个运动区间后，按时间合并派发两类到期样本，最多落后采样时刻一个模拟 tick；这个界限不包含墙钟执行/DDS 时延。低负载以外不承诺墙钟实时性。
+在线运行的唯一 `/clock` 来自模拟器，传感器bag回放时由播放器接管；所有相关课程节点 `use_sim_time=true`。默认仿真200Hz、IMU200Hz、激光10Hz、PD/MPC控制50Hz。SensorScheduler 使用 t_k=round(k*1e9/rate) 纳秒，不重复累加已舍入周期。模拟器接受一个运动区间后，按时间合并派发两类到期样本，最多落后采样时刻一个模拟 tick；这个界限不包含墙钟执行/DDS 时延。低负载以外不承诺墙钟实时性。
 
 reference 按绝对时刻求解析轨迹，inertial/velocity 在最近接受区间内用当时保持的输入进行解析分步。ideal 仅在 tick 末端跳变，不插值瞬移且禁止 IMU。恰好落在 tick 末端的 IMU 采用刚结束区间的加速度（左极限）；新命令不改写已发布样本。t=0 是新试验的初始状态，发力命令在之后的区间生效。
 
-模拟器在每个采样时刻发布原子的 /ground_truth/odometry，并补发 tick 末端状态；同一时刻两传感器共享一次真值发布。第 07 章由 truth_odometry 适配器负责 /odometry、map→odom 和 odom→base_link；launch 强制 publish_truth_tf=false。第 04–06 章默认仍由模拟器直接广播这两条 TF。暂停时只重复真值/时钟/TF 心跳，不重新抽取噪声；单步只释放本步到期样本；碰撞拒绝整个区间，时间与采样序号都冻结。这些 TF 只属于显式 truth 教学模式；后续估计入口将替换真值适配器。原始真值使用可靠、transient-local、深度 100 的队列，选源 /odometry 使用可靠、volatile、深度 100；重复的暂停心跳不算新观测。
+模拟器在每个采样时刻发布原子的 /ground_truth/odometry，并补发 tick 末端状态；同一时刻两传感器共享一次真值发布。第 07 章由 truth_odometry 适配器负责 /odometry、map→odom 和 odom→base_link；launch 强制 publish_truth_tf=false。第 04–06 章默认仍由模拟器直接广播这两条 TF。暂停时只重复真值/时钟/TF 心跳，不重新抽取噪声；单步只释放本步到期样本；碰撞拒绝整个区间，时间与采样序号都冻结。这些 TF 只属于显式 truth 教学模式；第08章起的估计入口使用estimated_odometry替换真值适配器。原始真值使用可靠、transient-local、深度 100 的队列，选源 /odometry 使用可靠、volatile、深度 100；重复的暂停心跳不算新观测。
 
 传感器使用与订阅端匹配的 SensorDataQoS；控制/轨迹采用小队列和明确可靠性；静态/低频地图使用适合晚加入 RViz2 的 transient-local 配置。具体值在第 02 章验证，不复制未经检验的 QoS 模板。
 
-第 07 章 mapping 已接入 /scan 和 /odometry 的整数纳秒精确配对。输出 /cloud/scan（laser）与 /cloud/registered（odom），均为当前帧有限回波，snapshot、圆心单位外参、XYZ float32、z=0。不订阅 TF 或真值调试话题；当前 registered 仅指位姿变换，不含扫描匹配。/map/cloud 留给后续关键帧重建。
+第 07 章 mapping 已接入 /scan 和 /odometry 的整数纳秒精确配对。输出 /cloud/scan（laser）与 /cloud/registered（odom），均为当前帧有限回波，snapshot、圆心单位外参、XYZ float32、z=0。不订阅 TF 或真值调试话题；当前 registered 仅指位姿变换，不含扫描匹配。第10章SLAM另提供/map/cloud关键帧重建。
 
-## 7. 话题草案
+## 7. 话题概览
 
 | 话题 | 消息 | frame / 语义 |
 | --- | --- | --- |
@@ -132,13 +132,13 @@ reference 按绝对时刻求解析轨迹，inertial/velocity 在最近接受区�
 | `/map` | `nav_msgs/OccupancyGrid` | map；未知/自由/占据 |
 | `/goal_pose` | `geometry_msgs/PoseStamped` | map；RViz2 点击的目标 |
 | `/plan/path` | `nav_msgs/Path` | map；几何参考路径 |
-| `/plan/trajectory` | 必要时自定义 `Trajectory2D` | odom；执行起点时间、分段时长、系数 |
+| `/plan/trajectory` | `motion2d_interfaces/Trajectory2D` | odom；执行起点时间、分段时长、系数 |
 | `/command/pose` | `geometry_msgs/PoseStamped` | odom；仅理想到点模式 |
 | `/command/velocity` | `geometry_msgs/TwistStamped` | 声明的 odom/base_link；仅运动学模式 |
 | `/command/wrench` | `geometry_msgs/WrenchStamped` | odom；力和偏航力矩 |
 | `/visualization/*` | `visualization_msgs/MarkerArray` | 对应帧；机器人、走廊、ESDF、轨迹 |
 
-`Trajectory2D` 计划固定二维五次表示：Header 与执行起始时刻、每段正 duration、x/y 各 6 个系数；系数按升幂，时间变量为每段起点开始的局部秒。yaw 参考单独明确，不从平移轨迹默默推断。第14章已定义 motion2d_interfaces/Trajectory2D 与 QuinticPiece2D；具体约定见文末。
+`Trajectory2D` 采用二维五次表示：Header 与执行起始时刻、每段正 duration、x/y 各 6 个系数；系数按升幂，时间变量为每段起点开始的局部秒。yaw 参考单独明确，不从平移轨迹默默推断。第14章已定义 motion2d_interfaces/Trajectory2D 与 QuinticPiece2D；具体约定见文末。
 
 栅格原点/分辨率和 ESDF 符号属于数据契约。ESDF 初版作为普通值对象传给规划器并用 Marker 可视化；确实跨节点共享时再引入包含 Header、origin、resolution、width/height、有效性掩码和距离数组的消息。不使用 OccupancyGrid 的 0-100 值域偷装米制距离。
 
@@ -154,7 +154,7 @@ SLAM 输出连续 odom、全局地图和 `map → odom`；关键帧位置图只�
 
 地图读取使用一个版本的快照。默认 unknown 为阻塞，几何路径位于 map；优化在固定地图/走廊上完成，再在发布时转换到连续 odom。控制器执行 odom 中的参考，回环只触发重规划与平滑衔接，不能把一条执行中的轨迹随 TF 突然跳变。
 
-全局目标未被观测时，基础演示先使用已观测自由域内目标；第 19 章可加入简单可达前沿局部目标，逐步扩展观测。没有可达前沿或目标不可达时明确停止，不承诺任意环境下的完备探索。
+全局目标未被观测时，基础演示先使用已观测自由域内目标；第 19 章已加入简单可达前沿局部目标，逐步扩展观测。没有可达前沿或目标不可达时明确停止，不承诺任意环境下的完备探索。
 
 ESDF 与走廊采用一致的配置空间语义。以原始障碍 ESDF 计算净空时扣除圆盘半径/安全裕量；用已膨胀图生成走廊时不再重复扣一次半径。栅格单元有面积，误差余量需计入分辨率与插值误差。
 
@@ -248,7 +248,7 @@ planner内同一次搜索生成走廊，直接复用PlanningGrid和原始A*路�
 QuinticPiece包含正duration和2×6秒制升幂系数；列k单位m/s^k。
 PolynomialTrajectory验证非空/有限/C²连接，evaluate/sample只接收[0,total]，内部连接点取右段。
 TranslationState给p/v/a，yaw独立。stopAtWaypoints每路点零v/a，nominal_speed是平均速度参数。
-CSV包含段时长与全部系数；ROS时刻与执行策略在后续接入中定义，不以Path伪装有时间的轨迹。
+CSV包含段时长与全部系数；ROS时刻与执行策略见下一节，不以Path伪装有时间的轨迹。
 
 
 ## 第14章ROS执行契约
@@ -331,3 +331,8 @@ C默认初始yaw=0，估计odom的轴与仿真物理输入轴一致、原点在�
 
 `lidar.backend=cpu|cuda` 启动时选择；CPU-only构建请求cuda抛出清晰错误。CUDA理想扫描返回共同float数组编码，随后仍由CPU共享噪声函数处理；timestamp仍来自SensorScheduler，不由GPU墙钟替代。
 `lidar.profile=false`默认；true时发布`/sim/lidar_timing` LidarTiming。header是采集stamp/laser；scan/noise/message/publish/total以墙钟秒计，CUDA另列kernel事件时间/download，CPU两个字段NaN。total至publish返回，不含DDS接收、RViz、调试Marker或诊断自身；不可称为完整传输延迟。静态几何/输出/事件复用，reset不重新上传。
+
+## 附录扩展边界
+
+差速stepDifferential与偏置stepBiasWalk为独立可选核心工具，不新增默认模拟器模式或噪声参数。附录B的轮动力学/NMPC、C的滚动扫描/复杂障碍/重定位为设计练习。
+replay_slam只消费传感器bag，播放器为唯一时钟；启动文件仅提供本课程重合的静态外参。Doxygen和报告模板见附录D。

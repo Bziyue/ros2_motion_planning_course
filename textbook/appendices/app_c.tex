@@ -47,7 +47,7 @@ appC-1 补全步长缩放；先检查同一单位噪声下 $\Delta t$ 增为四�
 
 \section{进一步扩展时，先写验收边界}
 以下是选做方向，不代表基础模拟器已经具备这些功能：
-\begin{description}[style=nextline,leftmargin=0pt]
+\begin{description}[style=nextline,leftmargin=0pt,labelwidth=0pt,labelsep=0pt]
  \item[延迟与丢包] 保留采集时间，单独安排到达时间；测试乱序、缺测、历史缓存到期。
  滤波器对延迟校正已有处理，但模拟器尚未自动注入网络延迟。
  \item[逐束扫描畸变] 每束有 $t_i$，统一到参考时刻的点为

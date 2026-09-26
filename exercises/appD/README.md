@@ -14,3 +14,7 @@ PYTHONPATH=exercises/appD/starter /usr/bin/python3 exercises/appD/check_topics.p
 理解：回放时停止模拟器。若两个算法都发布map→odom，应串行比较或使用完整的独立命名空间/TF树。
 先固定同一传感器记录、输入里程计来源、版本、参数及ATE对齐规则，再比较结果。
 现有SLAM外部对照作为接入练习，本机验收对象是课程自身SLAM回放，未声称其他系统已实测。
+
+API练习：运行 `bash scripts/build_api.sh`，从函数文档找出坐标系/单位/前提/失败方式。
+报告练习：复制`docs/EXPERIMENT_REPORT_TEMPLATE.md`，填写附录C的两频率实验；只改密度重跑，先预测方差的缩放。
+逐项记录版本/命令/原始数据、失败次数及PDF本次新增页的检查结果，不用模板空项冒充结果。

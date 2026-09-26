@@ -1,6 +1,6 @@
 # 主机环境记录
 
-检查日期：2026-09-26。只做检测，没有安装依赖、修改系统配置或启动课程节点。
+首次检查日期：2026-09-26。下表为初始化时的只读检测；实施后新增的局部工具链与运行验收在文末及VALIDATION.md记录。
 
 | 项目 | 本次检测结果 | 对课程的意义 |
 | --- | --- | --- |
@@ -27,3 +27,7 @@
 
 主机原先无nvcc；现以scripts/setup_cuda_local.py在ignored tmp/cuda-13.2.1/toolkit准备官方CUDA13.2.1最小编译组件（nvcc13.2.78、cudart13.2.75），各archive SHA256锁定，许可证同目录保留；没有修改驱动、系统头、系统编译器或全局PATH。
 RTX5060 compute capability12.0、driver595.91.07、GCC15.2，最小sm_120 GPU核与课程CUDA测试均成功。13.0.2在本机glibc2.43发生rsqrt noexcept头冲突，未用绕过标志；更换官方13.2.1解决。
+
+## 附录工具
+
+主机rosbag2 0.33.3已完成实际传感器录制/回放。Doxygen 1.15.0通过Ubuntu软件包下载并解包到ignored tmp/doxygen_local/root，依赖libxapian同目录；未做系统安装。scripts/build_api.sh优先系统工具，找不到时使用本机局部副本。52个头文件生成HTML、9个公式生成PNG，加载amsmath修复operatorname编译；语法告警为零。其他主机可正常安装Doxygen，不需复制本机临时二进制。

@@ -1,0 +1,23 @@
+# Run from the repository root. Generated API pages are local build artifacts.
+PROJECT_NAME           = "Motion2D learning course"
+PROJECT_BRIEF          = "Chapter-linked 2D robotics algorithms and explicit units"
+OUTPUT_DIRECTORY       = tmp/doxygen
+INPUT                  = ros2_ws/src/motion2d/include
+RECURSIVE              = YES
+FILE_PATTERNS          = *.hpp
+INPUT_ENCODING         = UTF-8
+OPTIMIZE_OUTPUT_FOR_C  = NO
+EXTRACT_ALL            = YES
+EXTRACT_PRIVATE        = NO
+GENERATE_HTML          = YES
+GENERATE_LATEX         = NO
+HAVE_DOT               = NO
+QUIET                  = YES
+WARNINGS               = YES
+WARN_IF_UNDOCUMENTED   = NO
+WARN_IF_INCOMPLETE_DOC = NO
+WARN_IF_DOC_ERROR      = YES
+WARN_AS_ERROR          = YES
+WARN_LOGFILE           = tmp/doxygen-warnings.log
+USE_MATHJAX            = NO
+EXTRA_PACKAGES         = amsmath

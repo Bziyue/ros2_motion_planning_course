@@ -663,3 +663,10 @@ PDF153页，SHA-256 `98aeba46d619e329bc55f34c78f37c7b81ba81b5e4c52df932a5ccfeab3
 复用已构建的三包，domain84、rosbag2 0.33.3实际录制reference模型6s，停止模拟器后以0.5倍率/200Hz时钟回放。记录59帧720束激光和1180帧IMU，存储0.105–6.000s，存储/采集时刻最大差.005s。逐字段规范化散列一致；末里程计6s，累计点云537点、已观测栅格12556。输入隔离、无残留真值发布者、唯一播放器时钟和估计TF通过。原始bag/log在tmp/appD_replay2，汇总在textbook/data/appD_replay.json；早期订阅/时钟就绪前的样本未入bag。
 第一轮检查把重新序列化的CDR填充字节误当消息差异（IMU字节25–27），改为解码后比较全部字段值；使用Lyrical read_next_ext明确接收/发送时间而非已弃用接口。再次完整录制与回放通过。退出进程组的SIGINT/launch终止日志不作为运行时故障。练习solutions PASS、starter FAIL；GUI与外部slam_toolbox未验收。
 PDF155页，SHA-256 `3865f6650844a01a4055d0ea87f25acd75ce043d8a4f398802db852dcb427f18`；新增物理154–155及目录8页按阅读大小复核，命令/参数/正文/页脚无溢出重叠，其余旧章节不重查。
+
+## 附录D：API文档、报告与课程收尾
+
+bash scripts/build_api.sh使用局部Doxygen1.15.0生成52个头文件的HTML文档和9个公式图片，语法告警0；确认命名空间函数文档包含单位/参数，查看时间调度公式图片。首轮operatorname缺少amsmath使生成失败，补EXTRA_PACKAGES修复；EXTRACT_ALL确保未单独注释的namespace下公共函数也可检索，不以此宣称注释覆盖率100%。二进制/HTML均留在ignored tmp，不修改系统安装。
+最终CUDA构建219项、独立CPU构建216项测试0失败；附录C之后无算法更改。核对84个Markdown文件、95个相对链接、01–20章的教材/说明/练习/launch映射与所有真实源码摘录路径，全部存在；git diff --check通过。进度与接口状态同步，特别明确C路线非零初始yaw的力坐标适配仍未实现，选做内容不冒充主线功能。
+PDF156页（8页前置+148页正文），SHA-256 `076601f2434a296143fe38f2aad5d4397b654b26184ee7b8655532a29cec5db9`。新增/修改范围为封面1、目录8、附录D154–156和C列表153，按阅读大小复核。修正C列表负labelwidth配置警告，最后重建PNG与上一轮已审阅图像逐页散列一致，并再次打开153/156确认。代码、表格、公式和页脚无重叠裁切；不重查未改旧章。无Overfull/Missing character，已有CJK斜体替代及旧段落Underfull提示不代表新的视觉失败。
+所有主线章节与所选附录实验完成；RViz第08章起依旧仅提供配置/无界面验证，未伪称GUI验收。NMPC、逐束畸变、复杂动态场景和外部SLAM对照等作为明确选做扩展保留。
