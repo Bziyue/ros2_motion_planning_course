@@ -75,6 +75,8 @@ omega_dot = (tau_z - c_omega omega) / I_z
 
 ## 5. IMU 契约
 
+第 06 章已落地：imu.hpp/imu.cpp 为纯 C++ 核心，imu_messages.cpp 转成 /imu/data_raw（SensorDataQoS）。仅 reference/inertial 允许启用 IMU；旧章节默认关闭。六轴每采样白噪声、独立种子与 reset 重放已实现。无姿态估计，orientation=单位四元数只是占位，orientation_covariance[0]=-1；协方差对角填 sigma²。全部 sigma=0 的无噪声实验会产生全零测量协方差，按 ROS 约定表示未知，后续估计器必须显式配置处理。显示 Marker 不供 SLAM 使用。
+
 `sensor_msgs/Imu`，frame 为 `imu_link`，水平面 yaw-only 姿态，roll/pitch 固定为零。真实姿态只在模拟器内部用于生成传感器读数。
 
 ```text
@@ -170,9 +172,10 @@ ESDF 与走廊采用一致的配置空间语义。以原始障碍 ESDF 计算净
 | `lidar.scan_model` | snapshot | rolling 为进阶 |
 | `lidar.backend` | cpu | cuda 独立选学 |
 | `imu.rate` | 200 | Hz |
-| `imu.accel_stddev` | 0.05 | m/s²；每轴每采样 |
-| `imu.gyro_stddev` | 0.005 | rad/s；每轴每采样 |
-| `imu.bias` | 0 | 基础不注入偏置 |
+| `imu.accel_stddev` | [0.04,0.05,0.06] | m/s²；x/y/z 每采样 |
+| `imu.gyro_stddev` | [0.002,0.003,0.004] | rad/s；x/y/z 每采样 |
+| `imu.noise_seed` / `imu.gravity` | 6060 / 9.81 | 独立随机种子 / 重力大小 m/s² |
+| IMU 偏置（无参数） | 0 | 基础不注入；随机游走为可选练习 |
 | `sim.dt` | 0.005 | s |
 | `mapping.resolution` | 0.05 | m/格 |
 | `planning.safety_margin` | 0.05 | m；与半径分开 |

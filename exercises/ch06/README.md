@@ -13,3 +13,15 @@ g++ -std=c++17 -I/usr/include/eigen3 -Iexercises/ch06/starter \
 ~~~
 
 评分：静止重力符号、正负 90 度与 180 度变换均正确；能解释速度与加速度的区别。练习独立于演示构建，未完成的 starter 会明确失败。提示在 [hints.md](hints.md)。
+
+4. 理解：若陀螺仪 sigma=0.004 rad/s，协方差单位和值是什么？为什么 orientation_covariance[0]=-1 与全零测量协方差不是一回事？
+5. 代码 ch06-2：补全 covariance.hpp，以行主序写入三轴方差，非对角元素为零。
+6. 实验：运行 imu_noise_demo 和 --drift。记录种子、采样间隔、试验时长、次数和 RMS；比较 sigma 翻倍前后，解释为何零均值不等于积分后零误差。
+
+~~~bash
+g++ -std=c++17 -Iexercises/ch06/starter \
+  exercises/ch06/check_covariance.cpp -o /tmp/ch06_covariance
+/tmp/ch06_covariance
+~~~
+
+评分：协方差九项及零噪声情形正确；区分“未提供姿态”和“未知协方差”；配对漂移实验 RMS 比值为 2。可选进阶题：额外注入恒定加速度偏置，推导位置误差 b*T²/2，并与白噪声比较。随机游走偏置若以后实现，应是有状态模型，不能每帧重新抽一个“偏置”。

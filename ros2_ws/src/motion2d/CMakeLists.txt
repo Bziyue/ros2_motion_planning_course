@@ -46,6 +46,9 @@ install(TARGETS lidar_benchmark DESTINATION lib/motion2d)
 add_executable(imu_demo src/examples/imu_demo.cpp)
 target_link_libraries(imu_demo PRIVATE motion2d_core)
 install(TARGETS imu_demo DESTINATION lib/motion2d)
+add_executable(imu_noise_demo src/examples/imu_noise_demo.cpp)
+target_link_libraries(imu_noise_demo PRIVATE motion2d_core)
+install(TARGETS imu_noise_demo DESTINATION lib/motion2d)
 ament_export_targets(motion2d_core_targets HAS_LIBRARY_TARGET)
 ament_export_dependencies(Eigen3)
 
@@ -75,7 +78,8 @@ target_link_libraries(world_scene_node PRIVATE motion2d_core rclcpp::rclcpp
   visualization_msgs::visualization_msgs__rosidl_typesupport_cpp)
 install(TARGETS world_scene_node DESTINATION lib/motion2d)
 
-add_executable(simulator_node src/nodes/simulator_node.cpp src/ros/lidar_messages.cpp)
+add_executable(simulator_node src/nodes/simulator_node.cpp src/ros/lidar_messages.cpp
+  src/ros/imu_messages.cpp)
 target_compile_features(simulator_node PRIVATE cxx_std_20)
 target_compile_options(simulator_node PRIVATE -Wall -Wextra -Wpedantic)
 target_link_libraries(simulator_node PRIVATE motion2d_core rclcpp::rclcpp tf2_ros::tf2_ros

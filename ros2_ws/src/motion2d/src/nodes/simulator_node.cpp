@@ -23,6 +23,7 @@
 #include <visualization_msgs/msg/marker_array.hpp>
 #include "motion2d/ros/world_parameters.hpp"
 #include "motion2d/ros/lidar_messages.hpp"
+#include "motion2d/ros/imu_messages.hpp"
 #include "motion2d/sim/robot_model.hpp"
 #include "motion2d/sim/sim_clock.hpp"
 
@@ -75,6 +76,7 @@ public:
     status_pub_ = create_publisher<std_msgs::msg::String>("/sim/status", retained);
     marker_pub_ = create_publisher<visualization_msgs::msg::MarkerArray>("/visualization/robot", retained);
     if (declare_parameter("lidar.enabled", false)) {readLidar();}
+    if (declare_parameter("imu.enabled", false)) {readImu();}
     if (model_ == "ideal") {
       pose_sub_ = create_subscription<geometry_msgs::msg::PoseStamped>(
         "/command/pose", rclcpp::QoS(1),
@@ -96,17 +98,68 @@ public:
         if (!clock_.paused()) {advanceTick(false);}
         publishState();  // Frozen timestamps also serve late subscribers when paused.
         publishLidarIfDue();
+        publishImuIfDue();
       });
     static_timer_ = create_wall_timer(std::chrono::seconds(1), [this]() {publishStaticFrames();});
     marker_timer_ = create_wall_timer(std::chrono::milliseconds(50), [this]() {publishMarkers();});
     publishState();
     publishLidarIfDue();
+    publishImuIfDue();
     publishMarkers();
     RCLCPP_INFO(get_logger(), "model=%s, radius=%.3f m; /sim/* is simulation truth",
       model_.c_str(), radius_);
   }
 
 private:
+  void readImu()
+  {
+    if (model_ != "reference" && model_ != "inertial") {
+      throw std::invalid_argument("IMU requires model=reference or inertial; jumps have no physical IMU");
+    }
+    gravity_ = declare_parameter("imu.gravity", 9.81);
+    if (!std::isfinite(gravity_) || gravity_ <= 0) {
+      throw std::invalid_argument("imu.gravity must be finite and positive (m/s^2)");
+    }
+    const auto read_axes = [this](const std::string & name, Eigen::Vector3d & values) {
+        const auto input = declare_parameter<std::vector<double>>(
+          name, {values.x(), values.y(), values.z()});
+        if (input.size() != 3) {throw std::invalid_argument(name + " needs [x,y,z]");}
+        values = {input[0], input[1], input[2]};
+      };
+    read_axes("imu.gyro_stddev", imu_noise_.gyro_stddev);
+    read_axes("imu.accel_stddev", imu_noise_.accel_stddev);
+    validateImuNoise(imu_noise_);
+    const auto seed = declare_parameter<std::int64_t>("imu.noise_seed", 6060);
+    if (seed < 0 || seed > std::numeric_limits<std::uint32_t>::max()) {
+      throw std::invalid_argument("IMU noise_seed must fit an unsigned 32-bit integer");
+    }
+    imu_seed_ = static_cast<std::uint32_t>(seed);
+    imu_random_.seed(imu_seed_);
+    const double rate = declare_parameter("imu.rate", 200.0);
+    imu_period_ns_ = lidarPeriodTicks(rate, dt()) * clock_.stepDuration().count();
+    imu_pub_ = create_publisher<sensor_msgs::msg::Imu>("/imu/data_raw", rclcpp::SensorDataQoS());
+    if (declare_parameter("imu.visualize", true)) {
+      imu_marker_pub_ = create_publisher<visualization_msgs::msg::MarkerArray>(
+        "/visualization/imu", rclcpp::QoS(1).reliable().transient_local());
+    }
+    RCLCPP_INFO(get_logger(), "Raw IMU: %.3f Hz, seed=%u, gravity=%.3f; no orientation",
+      rate, imu_seed_, gravity_);
+  }
+
+  void publishImuIfDue()
+  {
+    const auto now = clock_.nanoseconds();
+    if (!imu_pub_ || now == last_imu_ns_ || now % imu_period_ns_ != 0) {return;}
+    const auto sample = addImuNoise(idealImu(state_, gravity_), imu_noise_, imu_random_);
+    const auto message = toImuMessage(sample, imu_noise_, rclcpp::Time(now, RCL_ROS_TIME));
+    imu_pub_->publish(message);
+    if (imu_marker_pub_ && (last_imu_marker_ns_ < 0 || now - last_imu_marker_ns_ >= 50000000)) {
+      imu_marker_pub_->publish(imuMarkers(message, state_.pose));
+      last_imu_marker_ns_ = now;
+    }
+    last_imu_ns_ = now;
+  }
+
   void readLidar()
   {
     lidar_config_.beams = declare_parameter("lidar.beams", lidar_config_.beams);
@@ -319,6 +372,7 @@ private:
         response->message = response->success ? "advanced one tick" : "pause first; reset if blocked";
         publishState();
         publishLidarIfDue();
+        publishImuIfDue();
         publishMarkers();
       });
     reset_service_ = create_service<std_srvs::srv::Trigger>("/sim/reset",
@@ -338,7 +392,10 @@ private:
         publishState();
         last_scan_ns_ = -1;
         lidar_random_.seed(lidar_seed_);
+        last_imu_ns_ = last_imu_marker_ns_ = -1;
+        imu_random_.seed(imu_seed_);
         publishLidarIfDue();
+        publishImuIfDue();
         publishMarkers();
         response->success = true;
         response->message = "new paused trial; state, command and trail cleared";
@@ -454,6 +511,11 @@ private:
   Wrench2D wrench_command_;
   InertialParameters inertia_;
   LidarConfig lidar_config_;
+  ImuNoise imu_noise_;
+  double gravity_ = 9.81;
+  std::uint32_t imu_seed_ = 6060;
+  std::mt19937 imu_random_;
+  std::int64_t imu_period_ns_ = 1, last_imu_ns_ = -1, last_imu_marker_ns_ = -1;
   std::uint32_t lidar_seed_ = 4242;
   std::mt19937 lidar_random_;
   std::int64_t lidar_period_ns_ = 1, last_scan_ns_ = -1;
@@ -472,6 +534,8 @@ private:
   rclcpp::Publisher<std_msgs::msg::String>::SharedPtr status_pub_;
   rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr marker_pub_;
   rclcpp::Publisher<sensor_msgs::msg::LaserScan>::SharedPtr scan_pub_;
+  rclcpp::Publisher<sensor_msgs::msg::Imu>::SharedPtr imu_pub_;
+  rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr imu_marker_pub_;
   rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr beam_pub_;
   rclcpp::Subscription<geometry_msgs::msg::PoseStamped>::SharedPtr pose_sub_;
   rclcpp::Subscription<geometry_msgs::msg::TwistStamped>::SharedPtr velocity_sub_;

@@ -60,3 +60,76 @@ TEST(Imu, InertialAccelerationIncludesDragAndMass)
   EXPECT_NEAR(sample.specific_force.x(), 0, 1e-12);
   EXPECT_NEAR(sample.specific_force.y(), -.5 * std::exp(-.1), 1e-12);
 }
+
+TEST(Imu, NoiseValidationAtConfigurationBoundary)
+{
+  ImuNoise noise;
+  EXPECT_NO_THROW(validateImuNoise(noise));
+  noise.accel_stddev.x() = -.1;
+  EXPECT_THROW(validateImuNoise(noise), std::invalid_argument);
+  noise.accel_stddev.x() = std::numeric_limits<double>::quiet_NaN();
+  EXPECT_THROW(validateImuNoise(noise), std::invalid_argument);
+  noise.accel_stddev.x() = 1e200;
+  EXPECT_THROW(validateImuNoise(noise), std::invalid_argument);
+}
+
+TEST(Imu, ZeroNoiseConsumesNoRandomnessAndKeepsSample)
+{
+  ImuNoise noise;
+  noise.gyro_stddev.setZero();
+  noise.accel_stddev.setZero();
+  std::mt19937 random(6060), untouched(6060);
+  const auto ideal = idealImu(sampleCircle({}, 1, .4, .3));
+  const auto measured = addImuNoise(ideal, noise, random);
+  EXPECT_TRUE(measured.angular_velocity.isApprox(ideal.angular_velocity));
+  EXPECT_TRUE(measured.specific_force.isApprox(ideal.specific_force));
+  EXPECT_EQ(random, untouched);
+}
+
+TEST(Imu, ReseedingReplaysWholeSequenceIncludingPartialZeroAxes)
+{
+  ImuNoise noise;
+  noise.gyro_stddev.y() = 0;
+  std::mt19937 a(6060), b(6060), lidar(4242);
+  for (int i = 0; i < 100; ++i) {
+    (void)lidar();  // Independent sensor activity must not affect the IMU stream.
+    const auto first = addImuNoise({}, noise, a);
+    const auto replay = addImuNoise({}, noise, b);
+    EXPECT_TRUE(first.angular_velocity == replay.angular_velocity);
+    EXPECT_TRUE(first.specific_force == replay.specific_force);
+    EXPECT_EQ(first.angular_velocity.y(), 0);
+  }
+  a.seed(6060);
+  b.seed(6060);
+  EXPECT_TRUE(addImuNoise({}, noise, a).specific_force ==
+    addImuNoise({}, noise, b).specific_force);
+}
+
+TEST(Imu, SixAxisNoiseHasExpectedMeanVarianceAndNoStrongCorrelation)
+{
+  const ImuNoise noise;
+  std::mt19937 random(6060);
+  constexpr int count = 60000;
+  using Vector6 = Eigen::Matrix<double, 6, 1>;
+  using Matrix6 = Eigen::Matrix<double, 6, 6>;
+  Vector6 sum = Vector6::Zero(), previous = Vector6::Zero(), lag = Vector6::Zero();
+  Matrix6 outer = Matrix6::Zero();
+  for (int k = 0; k < count; ++k) {
+    const auto error = addImuNoise({}, noise, random);
+    Vector6 normalized;
+    normalized << error.angular_velocity.cwiseQuotient(noise.gyro_stddev),
+      error.specific_force.cwiseQuotient(noise.accel_stddev);
+    sum += normalized;
+    outer += normalized * normalized.transpose();
+    lag += normalized.cwiseProduct(previous);
+    previous = normalized;
+  }
+  const Vector6 mean = sum / count;
+  const Matrix6 covariance = outer / count - mean * mean.transpose();
+  for (int i = 0; i < 6; ++i) {
+    EXPECT_LT(std::abs(mean[i]), 5.0 / std::sqrt(count));
+    EXPECT_NEAR(std::sqrt(covariance(i, i)), 1, .02);
+    EXPECT_LT(std::abs(lag[i] / (count - 1)), .025);
+    for (int j = 0; j < i; ++j) {EXPECT_LT(std::abs(covariance(i, j)), .025);}
+  }
+}

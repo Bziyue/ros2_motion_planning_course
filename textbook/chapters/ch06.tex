@@ -103,3 +103,150 @@ $\omega$ 翻倍，预测和记录陀螺仪、加速度计的变化。验收包�
 
 \textbf{常见错误。}直接把世界加速度写入机体系消息；把 $g_z$ 符号写反；
 将陀螺仪单位写成度每秒；认为“运动很快”就意味着加速度很大。
+
+\clearpage
+\section{让每个采样点带上一点白噪声}
+最小测量模型将理想值与独立的高斯误差相加：
+\begin{equation}
+\omega_m=\omega+b_g+n_g,\qquad f_m=f+b_a+n_a,\qquad b_g=b_a=0.
+\end{equation}
+每个轴的每次采样独立，$n_i\sim\mathcal N(0,\sigma_i^2)$。
+本章先不模拟偏置、温漂或随机游走，也不把噪声裁剪到几个标准差内。
+同一采样的六个误差各抽一次；不能为整段运动只抽一个常数误差。
+
+\lstinputlisting[language=C++,linerange={imu_noise_begin-imu_noise_end},
+  includerangemarker=false]{../ros2_ws/src/motion2d/src/sim/imu.cpp}
+
+默认陀螺仪三轴标准差为 $(.002,.003,.004)$ rad/s，加速度计为
+$(.04,.05,.06)\ \mathrm{m/s^2}$。这些是\textbf{每采样标准差}，不同轴可以不同。
+世界、雷达、IMU 各自拥有随机引擎；改变雷达束数不会推进 IMU 随机流。
+\code{reset} 重新设置 IMU 种子 6060，没有跨帧保留的高斯分布缓存。
+同配置、同轨迹、同采样顺序和同一标准库下可逐值重放，不承诺跨标准库字节一致。
+
+\begin{notebox}
+\textbf{标准差不等于噪声密度。}必须先说明频谱约定、滤波带宽与采样方式才能换算。
+若连续白噪声强度为 q，且每个读数是长度 $\Delta t$ 的独立区间均值，
+则 $\operatorname{Var}(n_k)=q/\Delta t$。这只是一个明确假设下的关系；
+本章直接配置每采样 $\sigma$，改频率时不会自动改变它。
+\end{notebox}
+
+\clearpage
+\section{原始消息不提供航向答案}
+话题 \code{/imu/data_raw} 使用 \code{sensor_msgs/Imu}，帧为 \code{imu_link}。
+\code{linear_acceleration} 字段装比力，不能仅凭字段名认为它已经去重力。
+姿态四元数用单位值占位，协方差首项 -1 明确表示没有姿态估计。
+这遵循主机定义及\href{https://github.com/ros2/common_interfaces/blob/rolling/sensor_msgs/msg/Imu.msg}{官方 Imu 消息约定}。
+
+\lstinputlisting[language=C++,linerange={imu_message_begin-imu_message_end},
+  includerangemarker=false]{../ros2_ws/src/motion2d/src/ros/imu_messages.cpp}
+
+独立噪声使 $C=\operatorname{diag}(\sigma_x^2,\sigma_y^2,\sigma_z^2)$；
+行主序对角位置是 0、4、8，单位也是原测量单位的平方。
+六个标准差均设为零可做理想实验；但全零测量协方差在 ROS 协议中表示\textbf{未知}，
+后续滤波器需要明确配置噪声模型，不能理解成无限置信度。
+
+\textbf{代码练习 ch06-2：}补全 \path{starter/covariance.hpp}，检验三轴方差和非对角项。
+例如 $\sigma_z=.004$ rad/s 对应方差 $1.6\times10^{-5}\ (\mathrm{rad/s})^2$。
+
+\clearpage
+\section{用统计量验收噪声}
+先在 ros2\_ws 运行独立实验：
+\begin{lstlisting}[language=bash,numbers=none]
+ros2 run motion2d imu_noise_demo
+ros2 run motion2d imu_noise_demo \
+  > ../textbook/data/ch06_noise.csv
+\end{lstlisting}
+使用 seed=6060、每轴 $N=60000$ 个误差样本。均值和总体标准差分别为
+\begin{equation}
+\bar n=\frac1N\sum_k n_k,\qquad
+s=\sqrt{\frac1N\sum_k(n_k-\bar n)^2}.
+\end{equation}
+下面直接读取演示生成的 CSV；g 行单位为 rad/s，a 行为 $\mathrm{m/s^2}$。
+\begin{center}
+\pgfplotstabletypeset[
+  col sep=comma,columns={axis,sigma,mean,measured_stddev},
+  columns/axis/.style={string type,column name=轴},
+  columns/sigma/.style={column name=配置标准差,fixed,precision=3},
+  columns/mean/.style={column name=实测均值,fixed,fixed zerofill,precision=6},
+  columns/measured_stddev/.style={column name=实测标准差,fixed,fixed zerofill,precision=6},
+  every head row/.style={before row=\toprule,after row=\midrule},
+  every last row/.style={after row=\bottomrule}
+]{data/ch06_noise.csv}
+\end{center}
+零均值指分布的期望，不要求有限样本均值恰好为零。均值的标准误为 $\sigma/\sqrt N$，
+因此测试使用 $|\bar n|<5\sigma/\sqrt N$，标准差相对误差小于 2\%。
+单元测试还检查六轴间和相邻时刻的相关量，防止不小心复用随机误差。
+
+\textbf{真实 ROS 消息实验。}启动默认第 06 章场景后运行 \code{check_ch06.py}。
+它收集 200 Hz、$t=0$ 到 10 s 的 2001 条圆参考消息。先减掉理想值
+$(0,0,.4)$ 和 $(0,.16,9.81)$，再检验残差；不要对包含运动的原始值直接求“噪声均值”。
+因样本较少，标准差容差为 8\%，均值仍用五个标准误。
+脚本也检查无缺帧、协方差、QoS、暂停和 41 帧 reset 重放；缺帧会明确失败。
+
+\clearpage
+\section{零均值误差也会积成漂移}
+暂时假设姿态已知且固定，只研究一个水平加速度轴和 yaw 角速度的噪声。
+这排除了姿态误差与重力耦合，便于手算，不是惯性定位算法。
+把每个噪声样本看作一个时长 $h$ 内的常值：
+\begin{equation}
+\delta\psi_{k+1}=\delta\psi_k+n_{g,k}h,\quad
+\delta p_{k+1}=\delta p_k+\delta v_k h+\tfrac12 n_{a,k}h^2,\quad
+\delta v_{k+1}=\delta v_k+n_{a,k}h.
+\end{equation}
+独立噪声的方差相加。经历 $N$ 个区间后，
+\begin{align}
+\operatorname{Var}(\delta\psi_N)&=\sigma_g^2Nh^2,\\
+\operatorname{Var}(\delta p_N)&=\sigma_a^2h^4
+ \sum_{j=0}^{N-1}(j+\tfrac12)^2
+ =\sigma_a^2h^4\frac{N(4N^2-1)}{12}.
+\end{align}
+当 $T=Nh$ 固定且 N 较大，位置方差近似 $\sigma_a^2hT^3/3$。
+固定每采样 sigma 与固定连续白噪声强度，是两个不同的频率对比实验。
+
+\lstinputlisting[language=C++,linerange={drift_integration_begin-drift_integration_end},
+  includerangemarker=false]{../ros2_ws/src/motion2d/src/examples/imu_noise_demo.cpp}
+
+\begin{lstlisting}[language=bash,numbers=none]
+ros2 run motion2d imu_noise_demo --drift
+\end{lstlisting}
+实验固定 $h=.005$ s、$T=10$ s、1000 次试验、seed=6060。两组复用同一随机序列，
+只把 sigma 倍率从 1 改为 2。表中为位置误差 RMS 与解析标准差，单位 m：
+\begin{center}
+\pgfplotstabletypeset[
+ col sep=comma,columns={sigma_scale,position_rms,position_theory},
+ columns/sigma_scale/.style={column name=$\sigma$ 倍率,fixed,precision=0},
+ columns/position_rms/.style={column name=实测位置 RMS,fixed,precision=6},
+ columns/position_theory/.style={column name=解析位置标准差,fixed,precision=6},
+ every head row/.style={before row=\toprule,after row=\midrule},
+ every last row/.style={after row=\bottomrule}
+]{data/ch06_drift.csv}
+\end{center}
+\textbf{练习与验收：}解释配对实验为何恰好翻倍；改变试验时长验证增长趋势。
+统计上的 RMS 增长不意味着单次误差的绝对值每步都增大。
+
+\clearpage
+\section{在 RViz 中同时观察激光与 IMU}
+从 ros2\_ws 构建、加载 install 后运行，默认选择连续的圆参考：
+\begin{lstlisting}[language=bash,numbers=none]
+ros2 launch motion2d_bringup ch06.launch.py
+# Another terminal, same ROS environment
+/usr/bin/python3 ../scripts/check_ch06.py
+\end{lstlisting}
+参数在 \path{motion2d_bringup/config/ch06.yaml}，改后重启。
+\code{imu.rate} 默认 200 Hz，\code{imu.noise_seed} 为 6060；
+\code{imu.gyro_stddev}、\code{imu.accel_stddev} 均为长度 3 的数组。
+当前比力依赖连续运动，因此启用 IMU 时只接受 reference 或 inertial。
+要做静止实验，可选 inertial 且不发力；不可切换到瞬移模型生成伪 IMU。
+
+\begin{center}
+\includegraphics[width=.96\linewidth]{figures/ch06_imu_rviz.png}
+\end{center}
+紫色箭头显示实测水平比力，长度按 $1\ \mathrm{m/s^2}\mapsto3$ m 放大；
+标签显示竖直比力和 z 角速度。噪声会让箭头轻微抖动。
+Marker 最多 20 Hz，原始 IMU 默认 200 Hz，两者频率不同。
+这些 Marker 使用真值采样姿态定位，只能辅助显示，不能交给 SLAM。
+
+\textbf{常见问题：}只收到激光而无 IMU，先检查本章配置及模型；
+暂停后新订阅者收不到旧 IMU 属于 Volatile QoS 行为，恢复运行再观察。
+检查程序会 reset 并最终暂停。重置会让时间回退，已有 TF 缓存需要进入新试验；
+必要时恢复运行或重新启动 RViz，不把旧缓存警告当作新运动数据。
