@@ -55,4 +55,20 @@ sensor_msgs::msg::PointCloud2 toPointCloud(
   }
   return cloud;
 }
+nav_msgs::msg::OccupancyGrid toOccupancyGrid(const OccupancyGrid2D & grid,
+  const builtin_interfaces::msg::Time & stamp, const builtin_interfaces::msg::Time & loaded)
+{
+  nav_msgs::msg::OccupancyGrid message;
+  message.header.frame_id = "map";
+  message.header.stamp = stamp;
+  message.info.map_load_time = loaded;
+  message.info.resolution = static_cast<float>(grid.config().resolution);
+  message.info.width = grid.config().width;
+  message.info.height = grid.config().height;
+  message.info.origin.position.x = grid.config().origin.x();
+  message.info.origin.position.y = grid.config().origin.y();
+  message.info.origin.orientation.w = 1.0;
+  message.data = grid.occupancy();
+  return message;
+}
 }  // namespace motion2d

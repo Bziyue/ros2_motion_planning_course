@@ -144,6 +144,8 @@ reference 按绝对时刻求解析轨迹，inertial/velocity 在最近接受区�
 
 运行状态以少量明确状态表示：就绪、运行、到达、不可达、估计失效、求解失败、碰撞；不得把空轨迹解释为成功。reset/暂停/单步接口先用标准 service，可表达不了的输入再自定义。
 
+第 07 章已发布观测 /map：mapping 独立配置固定范围，map=odom 的显式 truth 基线。DDA 清理射线，有限端点占据，+inf 仅清理量程内，NaN 无更新；每帧每格一次、命中优先。未知 -1，已观测为 0–100 概率取整；默认 log-odds 增量 logit(.7)/logit(.4)、截断 ±4。/map 使用可靠 transient-local 深度 1，header 保留最后插入扫描时间。时间回退清图，先等待暂停状态下的首帧再恢复。
+
 ## 8. SLAM、规划、轨迹与控制的连接
 
 SLAM 输出连续 odom、全局地图和 `map → odom`；关键帧位置图只在静态小场景内实现。局部配准失败要影响状态与地图更新；不静默插入未经验证的扫描。
@@ -183,7 +185,7 @@ ESDF 与走廊采用一致的配置空间语义。以原始障碍 ESDF 计算净
 | `imu.noise_seed` / `imu.gravity` | 6060 / 9.81 | 独立随机种子 / 重力大小 m/s² |
 | IMU 偏置（无参数） | 0 | 基础不注入；随机游走为可选练习 |
 | `sim.dt` | 0.005 | s |
-| `mapping.resolution` | 0.05 | m/格 |
+| `mapping.resolution` | 0.10 | m/格 |
 | `planning.safety_margin` | 0.05 | m；与半径分开 |
 | `control.rate` | 50 | Hz |
 

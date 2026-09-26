@@ -1,8 +1,10 @@
 #pragma once
 #include <nav_msgs/msg/odometry.hpp>
+#include <nav_msgs/msg/occupancy_grid.hpp>
 #include <sensor_msgs/msg/laser_scan.hpp>
 #include <sensor_msgs/msg/point_cloud2.hpp>
 #include "motion2d/mapping/scan_projection.hpp"
+#include "motion2d/mapping/occupancy_grid.hpp"
 
 namespace motion2d
 {
@@ -22,4 +24,11 @@ Pose2D poseFromOdometry(const nav_msgs::msg::Odometry & message);
  */
 sensor_msgs::msg::PointCloud2 toPointCloud(
   const std::vector<Eigen::Vector2d> & points, const std_msgs::msg::Header & header);
+
+/** @brief Serialize observed probabilities (-1 unknown, 0..100 observed), in map.
+ * @param stamp Last integrated scan's acquisition time.
+ * @param loaded First integrated scan's acquisition time since clear/reset.
+ */
+nav_msgs::msg::OccupancyGrid toOccupancyGrid(const OccupancyGrid2D & grid,
+  const builtin_interfaces::msg::Time & stamp, const builtin_interfaces::msg::Time & loaded);
 }  // namespace motion2d

@@ -60,6 +60,9 @@ def main():
         pose(1, 3); scan(1)
         pose(0, 0); scan(0)  # reset, odometry first
         assert stamp(clouds[-1]) == 0 and xyz(clouds[-1]) == [(1.0, 0.0, 0.0)]
+        count = len(clouds)
+        scan(0)  # Repeated reset while already paused at zero must refresh outputs.
+        assert len(clouds) == count + 1 and stamp(clouds[-1]) == 0
         print("PASS exact-time join: both arrival orders, stale pose rejected, duplicates and paused reset")
     finally:
         node.destroy_node()

@@ -54,3 +54,13 @@ simulator:
     imu.accel_stddev: [0.04, 0.05, 0.06]   # m/s^2 per sample, x/y/z
     imu.noise_seed: 6060        # independent from the world and lidar streams
     imu.visualize: false        # display helpers only; no orientation estimate
+mapping:
+  ros__parameters:
+    mapping.resolution: 0.10  # m/cell; map extent is independent of world geometry
+    mapping.width_cells: 220
+    mapping.height_cells: 220
+    mapping.origin_x: -11.0  # lower-left corner, not centre of cell zero
+    mapping.origin_y: -11.0
+    mapping.hit_probability: 0.7
+    mapping.miss_probability: 0.4
+    mapping.logodds_limit: 4.0

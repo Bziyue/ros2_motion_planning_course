@@ -144,7 +144,8 @@ mapping 使用两个小缓存，按\textbf{整数纳秒完全相等}匹配扫描
 
 队列最多保留 1000 个不同时间的位姿、20 帧待处理扫描，缺少匹配时等待；
 扫描队列满后告警并丢弃最旧帧。不能用最近一次位姿伪装匹配成功。
-重复扫描时间不重复处理；暂停心跳只刷新位姿，不产生新点云。
+正时间的重复扫描不重复处理；t=0 扫描是本模拟器的启动/重置标记，
+即使已暂停在零时刻，也重新建立首帧。暂停心跳只刷新位姿，不产生新点云。
 未来接入更低频的估计里程计时，应输出同一帧扫描的估计位姿，或明确加入插值。
 
 \begin{lstlisting}[language=bash,numbers=none]
@@ -167,3 +168,171 @@ $3\times10^{-6}$ m，容纳消息 float32 舍入。
 RViz 的 \texttt{Registered scan} 显示 \code{/cloud/registered}，橙色点应落在
 可见障碍表面附近。世界几何只是显示对照，可在 Displays 中关闭；
 mapping 的订阅中没有世界列表、真值调试话题或 TF。
+
+\clearpage
+\section{格子有面积，未知也是一种状态}
+地图将连续空间切成边长 $\rho$ 的正方形，$\rho$ 的单位是 m/格。
+origin 是左下角格子的\textbf{左下角}，不是格心。
+对于地图内的位置 $p=(x,y)$，
+\begin{equation}
+ i_x=\left\lfloor\frac{x-o_x}{\rho}\right\rfloor,\quad
+ i_y=\left\lfloor\frac{y-o_y}{\rho}\right\rfloor,\quad
+ j=i_yW+i_x.
+\end{equation}
+$W,H$ 是格数，x 索引变化最快。索引 $j$ 的格心是
+$o+\rho(i_x+\tfrac12,i_y+\tfrac12)$。
+边界采用半开区间 $[o_x,o_x+W\rho)\times[o_y,o_y+H\rho)$；
+先检查边界，再取 floor，避免负数直接转整数时错误地朝零截断。
+
+\begin{center}
+\begin{tikzpicture}[x=12mm,y=12mm,>=Stealth]
+\foreach \x in {0,1,2,3,4}
+  \foreach \y in {0,1,2}{
+    \pgfmathtruncatemacro{\idx}{5*\y+\x}
+    \draw[tealblue,fill=pale] (\x,\y) rectangle ++(1,1);
+    \node at (\x+.5,\y+.5) {\idx};
+  }
+\draw[->,thick] (0,0)--(6,0) node[right] {$x$};
+\draw[->,thick] (0,0)--(0,3.7) node[above] {$y$};
+\fill[orange] (0,0) circle (2pt);
+\node[below left] at (0,0) {origin};
+\node[below] at (2.5,-.5) {$W=5$：存储索引不是米制坐标};
+\end{tikzpicture}
+\end{center}
+
+默认地图是独立配置的 $220\times220$ 格、$\rho=0.1$ m、origin=(-11,-11) m。
+已知地图存储范围不等于已知障碍物；初始所有格子都未知。
+参数使用 \code{mapping.width_cells}、\code{height_cells}、
+\code{resolution} 与 \code{origin_x/y}。改变分辨率时若要保持物理范围，
+必须同时调整格数。
+
+\begin{notebox}
+\textbf{三种含义}\quad
+unknown：还没有射线信息；free：多次观测支持空闲；occupied：回波支持占据。
+一片没有点云的区域，可能空旷，也可能被墙遮挡，不能把它全部刷白。
+\end{notebox}
+本章使用独立的 observed 掩码：尚未观察时输出 -1；已观察但概率恰为 0.5 时输出 50。
+二者不相等。地图固定大小；雷达中心在地图外时拒绝本帧地图更新并告警，不静默扩图。
+
+\clearpage
+\section{DDA：沿射线依次走过哪些格子}
+将线段写成 $p(t)=s+t(e-s)$，$0\le t\le1$。
+记 $\Delta=e-s$。下一条竖格线和横格线的参数分别为 $t_x,t_y$；
+穿过一格后，增量为
+\begin{equation}
+ \delta t_x=\frac{\rho}{|\Delta_x|},\qquad
+ \delta t_y=\frac{\rho}{|\Delta_y|}.
+\end{equation}
+比较两个下一次穿线时刻，较小的一侧先前进一步；轴向差为零时对应值取 $+\infty$。
+两者恰相等表示经过角点，本章同时推进两轴，不计只触到角点的旁边格子。
+这是观测射线遍历，不能拿来证明圆盘机器人无碰撞。
+
+\lstinputlisting[language=C++,linerange={grid_dda_begin-grid_dda_end},
+ includerangemarker=false]{../ros2_ws/src/motion2d/src/mapping/occupancy_grid.cpp}
+
+起点必须在地图内，终点可以在外部。先将线段裁到地图范围，
+再遍历起点格到裁剪后的终点格。外部回波只提供图内的自由信息；
+裁剪边界\textbf{不是测到的表面}，不能在那里标占据。
+负方向终点恰好在格线上时，其所属格子由半开规则决定；已经到达的轴不再前进。
+
+\textbf{练习 ch07-3：}补完 \path{starter/grid_traversal.hpp} 的循环。
+练习已准备好下一格线的参数，只考虑单位格长、原点为零、两个端点在图内；
+工程核心另外包含边界裁剪。使用 \path{check_traversal.cpp} 验证水平、竖直、
+正反对角线、同格和格线终点。先画格子手算访问次序，再运行参考解。
+
+\clearpage
+\section{把射线变成概率证据}
+设某格占据概率为 $p$，对数几率为
+\begin{equation}
+ L=\log\frac{p}{1-p},\qquad p=\frac1{1+\exp(-L)}.
+\end{equation}
+先验 $p_0=0.5$，所以 $L_0=0$。使用简化的逆传感器模型：
+命中格给 $p_{\rm hit}=0.7$，穿过格给 $p_{\rm miss}=0.4$。
+在独立观测近似下，将贝叶斯乘法改写为加法：
+\begin{equation}
+ L_k=\operatorname{clip}\left(L_{k-1}+
+ \log\frac{p_{\rm evidence}}{1-p_{\rm evidence}}-L_0,\ -4,\ 4\right).
+\end{equation}
+命中增加约 0.847，穿过减少约 0.405。截断避免旧证据无限累积，
+也让后续矛盾观测有机会改变地图；默认输出概率约在 2\% 到 98\% 之间。
+
+\lstinputlisting[language=C++,linerange={grid_logodds_begin-grid_logodds_end},
+ includerangemarker=false]{../ros2_ws/src/motion2d/src/mapping/occupancy_grid.cpp}
+
+evidence 的两个标志分别表示本帧有射线穿过、有回波落入。
+\textbf{同一帧同一格最多更新一次，命中优先}。
+否则几百束激光共享的起点格会在一帧内被推到极限，
+细障碍的回波格也可能被相邻射线反复“清掉”。
+相邻束与相邻帧实际相关，因此这些数值是教学用置信度模型，
+不应声称得到了严格校准的独立贝叶斯后验。
+
+\begin{center}
+\begin{tabular}{lll}
+\toprule
+消息取值 & 本课程含义 & 本章评估阈值\\\midrule
+-1 & 尚未观测 & unknown\\
+0--100 & 占据概率 $\times100$ 取整 & $\le35$ free；$\ge65$ occupied\\
+36--64 & 已观测但证据不足 & uncertain\\
+\bottomrule
+\end{tabular}
+\end{center}
+这些数值与阈值是课程约定，不是 ROS 强制的占据概率模型。
+未来规划默认把 unknown 与 uncertain 当作阻塞；占据概率也不是 ESDF 的米制距离。
+第一次穿过仅得到 40，第二次约为 31；不要要求单帧就将空闲格写成零。
+
+\clearpage
+\section{有限回波、无回波和无效读数}
+\begin{center}
+\begin{tikzpicture}[x=9mm,y=9mm,>=Stealth]
+\foreach \x in {0,1,2,3} \draw[fill=pale] (\x,0) rectangle ++(1,1);
+\draw[fill=tealblue] (4,0) rectangle ++(1,1);
+\foreach \x in {5,6,7} \draw[fill=gray!30] (\x,0) rectangle ++(1,1);
+\draw[->,orange,very thick] (.2,.5)--(4.5,.5);
+\node[below] at (2,-.2) {穿过：自由证据};
+\node[above,text=tealblue] at (4.5,1.1) {回波：占据证据};
+\node[below] at (6.5,-.2) {遮挡后：未知};
+\end{tikzpicture}
+\end{center}
+
+\lstinputlisting[language=C++,linerange={grid_rays_begin-grid_rays_end},
+ includerangemarker=false]{../ros2_ws/src/motion2d/src/mapping/occupancy_grid.cpp}
+
+有效有限距离：终点格为占据，之前的格子为空闲证据，不越过回波继续更新。
+$+\infty$：沿方向清到 range\_max 所在格，\textbf{不产生占据端点}。
+NaN、负无穷或量程外有限值：整条射线跳过，不清自由区。
+这保留了第五章近距遮挡与噪声越界的约定。
+清空从圆心开始，适用于本课程“过近命中记 NaN”的模拟器；
+真实设备的盲区与异常编码需由适配层重新确认。
+
+一条射线只约束它穿过的格子；噪声也可能让端点前后摆动，所以障碍边界会变厚。
+unknown 不能被完整世界几何“补全”。教学演示中的完整世界只供可选对照显示与独立评估。
+
+\code{/map} 在每帧成功更新后发布，使用 map 帧、扫描采样时间、可靠且
+transient-local 的深度 1 队列。晚打开 RViz 也能读到暂停时的最后地图。
+reset 的首帧先清空概率与 observed 掩码，再插入 t=0 观测；
+map\_load\_time 记录本轮首次插入的扫描时间。
+
+\clearpage
+\section{在 RViz 中检查“看见了什么”}
+\begin{lstlisting}[language=bash,numbers=none]
+ros2 launch motion2d_bringup ch07.launch.py
+# For automated resets, launch with rviz:=false instead.
+/usr/bin/python3 ../scripts/check_ch07_map.py
+\end{lstlisting}
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=.98\linewidth]{figures/ch07_observed_map.png}
+\caption{本机 RViz2 实测。完整世界显示关闭；浅色是已观测自由域，
+深色轮廓是占据证据，灰色是未知。橙色点为当前回波，箭头为显式真值里程计。}
+\end{figure}
+
+一米半径的圆参考只覆盖起点附近视野，不是全图探索。
+右上方目标周围仍未知；这正是观测地图与完整真值世界的区别。
+打开 Simulation world 可对照形状，但该显示开关不影响 mapping 的输入。
+
+\textbf{本增量验收：}82 个 GoogleTest 用例通过；DDA 另用 1000 条固定种子线段，
+与逐格线段--方格求交独立比对。ROS 默认场景 t=0 到 1 s，
+已观测格数从 9579 增至 10154；晚加入接收、暂停、首帧重播和连续零时刻 reset 均通过。
+扫描配对与真值适配器检查也已回归。
+本机 RViz 的既有 reset/退出问题仍未修复；截图在自动检查后重新运行 GUI 获取。

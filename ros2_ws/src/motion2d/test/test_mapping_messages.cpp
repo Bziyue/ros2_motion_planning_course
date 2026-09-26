@@ -46,3 +46,27 @@ TEST(MappingMessages, RejectsUnsupportedFramesAndNonplanarPose)
   odom.pose.pose.orientation.x = .1;
   EXPECT_THROW(motion2d::poseFromOdometry(odom), std::invalid_argument);
 }
+
+TEST(MappingMessages, OccupancyMetadataOriginAndRowMajorData)
+{
+  motion2d::GridConfig config;
+  config.resolution = 1;
+  config.width = config.height = 5;
+  config.origin = {-2, -3};
+  motion2d::OccupancyGrid2D grid(config);
+  grid.insertScan({0, .1, .05, 10, {2}}, {{-1.5, -2.5}, 0});
+  builtin_interfaces::msg::Time stamp, loaded;
+  stamp.sec = 7; loaded.sec = 2;
+  const auto message = motion2d::toOccupancyGrid(grid, stamp, loaded);
+  EXPECT_EQ(message.header.frame_id, "map");
+  EXPECT_EQ(message.header.stamp, stamp);
+  EXPECT_EQ(message.info.map_load_time, loaded);
+  EXPECT_FLOAT_EQ(message.info.resolution, 1);
+  EXPECT_EQ(message.info.width, 5u);
+  EXPECT_EQ(message.info.height, 5u);
+  EXPECT_EQ(message.info.origin.position.x, -2);
+  EXPECT_EQ(message.info.origin.position.y, -3);
+  EXPECT_EQ(message.info.origin.orientation.w, 1);
+  EXPECT_EQ(message.data[2], 70);
+  EXPECT_EQ(message.data[5], -1);
+}
