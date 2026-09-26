@@ -1,186 +1,457 @@
 \chapter{让路点之间更平顺：二维 MINCO}
 \begin{notebox}
-\textbf{目标}\quad 给定路点和时长求最小 jerk 曲线，把系数代价传回路点与时长。\\
-\textbf{先修}\quad 第 14 章；矩阵方程、链式法则，本章补充必要的最优化条件。
+\textbf{目标}\quad 从最小 jerk 积分求出分段曲线，再把力、避障等代价的梯度传回路点和时长。\\
+\textbf{先修}\quad 第14章的多项式求导与分段时间；本章从分部积分和链式法则推导优化所需公式。
 \end{notebox}
 
-\section{相同路点、相同时长的比较}
+\section{把内部速度和加速度交给整条曲线决定}
+上一章在每个路点停下。若让机器人连续经过这些位置，中间速度和加速度应该怎样选？
+先运行同一路点、同一时长的比较：
 \begin{lstlisting}[language=bash]
 ros2 run motion2d minco_demo tmp/ch15_minco
 /usr/bin/python3 scripts/plot_ch15_minco.py
 \end{lstlisting}
-上一章在每个路点停下，易于构造，但未选择合适的中间速度和加速度。
-本章固定路点 $q_i$ 与分段时长 $T_i>0$，保留两端的 p/v/a，求解整个区间的
+记第 $i$ 段位置为 $p_i(t)\in\mathbb R^2$，局部时间为 $0\le t\le T_i$，共有 $N$ 段。
+固定内部路点 $q_i$、正时长 $T_i$ 以及整条轨迹首尾的位置、速度、加速度，要求连接处 p/v/a 连续，最小化
 \begin{equation}
-\min J=\sum_{i=1}^{N}\int_0^{T_i}\|p_i'''(t)\|^2\,dt.
+ J=\sum_{i=1}^{N}\int_0^{T_i}\|p_i'''(t)\|^2\,dt.
+ \label{eq:minco-jerk}
 \end{equation}
-jerk 是加速度的变化率。$J$ 常被称为控制能量，这里单位是 $\mathrm{m^2/s^5}$，不是物理焦耳。
-MINCO 是一种利用路点和时长确定最小控制代价轨迹的表示；课程根据
-\href{https://arxiv.org/html/2103.00190v4}{作者论文}中的最优性思想，独立实现固定二维、五次、最小 jerk 子问题。
+jerk 是加速度的变化率，单位 $\mathrm{m/s^3}$；其平方积分 $J$ 的单位为 $\mathrm{m^2/s^5}$，用于衡量加速度变化的剧烈程度。
+MINCO 利用路点和时长表示最小控制代价曲线；本章研究其中的二维最小 jerk 情形。\footnote{原始方法见
+\href{https://arxiv.org/html/2103.00190v4}{Geometrically Constrained Trajectory Optimization for Multicopters}。}
 
 \begin{figure}[!ht]
 \centering\includegraphics[width=\linewidth]{figures/ch15_minco.pdf}
-\caption{四段均为 1.5 s。圆点是固定路点，虚竖线是连接时刻。
-最小 jerk 解允许内部点有非零速度，连接处 jerk 连续；此图没有施加避障约束。}
+\caption{四段均为1.5 s。圆点为固定路点，竖虚线为连接时刻。MINCO 允许非零的内部速度，把加减速分布到相邻段。}
 \end{figure}
+后面分两层求解：\textbf{内层}固定 $q,T$，直接求最小 jerk 曲线；\textbf{外层}调整 $q,T$，兼顾时间、避障和执行器能力。
+先弄清内层，就能理解外层为何只需优化少量路点和时长。
 
-\section{能量是系数的二次型}
-将单段系数按升幂排成 $C\in\mathbb R^{6\times2}$，则 $J_i=\operatorname{tr}(C^TQ(T_i)C)$。
-$Q$ 只有第 3 到 5 次项对应的部分非零；对 $k,l\geq3$，
+\section{先把积分写成系数的二次式}
+\subsection{逐项求导、相乘、积分}
+一维多项式写成 $p(t)=\sum_{k=0}^5c_kt^k$。令 $\alpha_k=k(k-1)(k-2)$，则
+\[
+ p'''(t)=\sum_{k=3}^5\alpha_kc_kt^{k-3},\qquad
+ (p'''(t))^2=\sum_{k=3}^5\sum_{l=3}^5\alpha_k\alpha_lc_kc_lt^{k+l-6}.
+\]
+积分每个幂次得到 $J=c^TQ(T)c$，其中行列下标从0开始：
 \begin{equation}
-Q_{kl}(T)=\frac{k(k-1)(k-2)\,l(l-1)(l-2)}{k+l-5}T^{k+l-5}.
+ Q_{kl}(T)=\frac{\alpha_k\alpha_l}{k+l-5}T^{k+l-5}\quad(k,l\ge3),
+ \qquad Q_{kl}=0\quad(k<3\text{ 或 }l<3).
 \end{equation}
-这只是先求导、相乘再积分；代码 jerkGram 没有数值积分误差。
-练习 ch15-1 用单段 $J=720\|p_1-p_0\|^2/T^5$ 检查因子与幂次。
+非零的 $3\times3$ 子块可直接手算：
+\[
+ Q_{3:5,3:5}=\begin{bmatrix}
+ 36T&72T^2&120T^3\\72T^2&192T^3&360T^4\\120T^3&360T^4&720T^5
+ \end{bmatrix}.
+\]
+例如 $Q_{34}=6\times24\int_0^Tt\,dt=72T^2$。交叉项在 $c^TQc$ 中出现两次，正好对应平方展开的 $2ab$。
+二维时，把 $x,y$ 系数作为 $C\in\mathbb R^{6\times2}$ 的两列，两个坐标的积分相加：
+\[
+ J_i=\sum_{r=0}^5\sum_{d=1}^2 C_{rd}(QC)_{rd}
+     =\operatorname{tr}(C^TQC).
+\]
+$\operatorname{tr}$ 表示方阵对角线元素之和。代码 \code{jerkGram} 构造 $Q$，
+\code{energyPartials} 中的逐项乘积求和就是上式。
+注意本章系数矩阵每行为一个幂次；返回第14章采样对象时，代码转置为 $2\times6$。
 
-\section{为什么最优解还要连续 jerk 与 snap}
-只要求 p/v/a 连续时，内部速度和加速度仍可调整。
-让曲线发生一个小变化 $\delta p$，对 $\delta J=2\int p'''\cdot\delta p'''dt$ 做三次分部积分，得到
-\begin{equation}
-\frac{\delta J}{2}=\left[p'''\cdot\delta p''-p''''\cdot\delta p'
-+p'''''\cdot\delta p\right]_0^T-\int_0^T p^{(6)}\cdot\delta p\,dt.
-\end{equation}
-每段内部变化任意，故最优解满足 $p^{(6)}=0$，即至多五次。
-在固定位置的内部路点处 $\delta p=0$，而两侧共享的 $\delta v,\delta a$ 可以自由变化。
-相邻段端点项的符号相反，因此它们的系数必须抵消：jerk 与 snap 分别连续。
-合上原有 p/v/a 连续，便得到 $C^4$；第五阶导数仍可跳变。
+\subsection{用上一章的单段曲线核对}
+静止到静止的曲线为 $p(t)=p_0+\Delta p\,h(t/T)$，$h(s)=10s^3-15s^4+6s^5$。
+由 $h'''=60(1-6s+6s^2)$ 和 $dt=T\,ds$ 得
+\begin{align}
+ J&=\frac{\|\Delta p\|^2}{T^5}\int_0^1(h'''(s))^2\,ds,\\
+ \int_0^1(h''')^2ds
+ &=3600\int_0^1(1-12s+48s^2-72s^3+36s^4)ds\\
+ &=3600\left(1-6+16-18+\frac{36}{5}\right)=720.
+\end{align}
+所以 $J=720\|\Delta p\|^2/T^5$。位移翻倍使 $J$ 增大4倍；时间翻倍使它缩小32倍。
+这个简单结果也说明：只追求小 jerk 会倾向于走得越来越慢，外层还要计入总时间。
 
-\section{将最优性写成一组线性方程}
-每段六个系数，每个坐标共 $6N$ 个未知数。方程数量恰好也是 $6N$：
-\begin{itemize}
-\item 首尾各三个 p/v/a 条件，共 6 行。
-\item 每个内部连接：jerk、snap 连续各一行，左段终点固定位置一行，p/v/a 连续三行，共 6 行。
-\end{itemize}
-把二维系数堆为 $C\in\mathbb R^{6N\times2}$，一次求解两个右端项：
+\clearpage
+\section{为什么最优曲线是五次，而且连接到四阶}
+\subsection{用一条很小的曲线扰动它}
+先看一维。将候选曲线改为 $p+\varepsilon\eta$，其中 $\eta$ 是允许的变化形状，$\varepsilon$ 是小数。
+固定的边界条件要求整条曲线首尾 $\eta=\eta'=\eta''=0$；内部固定路点要求 $\eta=0$，
+相邻段仍共享 $\eta',\eta''$。展开平方后，对 $\varepsilon$ 在0处求导：
+\[
+ \left.\frac{dJ[p+\varepsilon\eta]}{d\varepsilon}\right|_0
+ =2\sum_i\int_0^{T_i}p_i'''\eta_i'''\,dt.
+\]
+最小值处，这个导数对每一种允许的 $\eta$ 都等于0。单段积分逐次分部积分：
+\begin{align}
+ \int p'''\eta'''dt
+ &= [p'''\eta'']-\int p''''\eta''dt\\
+ &= [p'''\eta''-p''''\eta']+\int p'''''\eta'dt\\
+ &= [p'''\eta''-p''''\eta'+p'''''\eta]-\int p^{(6)}\eta\,dt.
+ \label{eq:minco-parts}
+\end{align}
+方括号均取该段右端减左端。若只在某一段内部改变曲线，所有端点项为0。
+此时 $\int p^{(6)}\eta\,dt=0$ 对任意小范围的变化成立，故 $p^{(6)}=0$：
+若某处 $p^{(6)}>0$，在附近取正的 $\eta$ 就会使积分为正；负的情形同理。
+连续积分六次，便得到至多五次的多项式。
+
+\subsection{连接处为什么多出两个连续条件}
+在一个内部路点，左段右端的方括号为正，右段左端为负。位置固定使 $\eta=0$，剩下
+\[
+ (p'''_{\rm left}-p'''_{\rm right})\eta''
+ -(p''''_{\rm left}-p''''_{\rm right})\eta'=0.
+\]
+内部速度和加速度可以各自改变，因此 $\eta'$ 与 $\eta''$ 可以独立取值，两个系数必须分别为0。
+于是 jerk 和 snap 连续。连同原来的 p/v/a，曲线从位置到四阶导数都连续，称为 $C^4$ 连续。
+内部位置固定已使 $\eta$ 项消失，因而第五阶导数可以跳变。
+二维的 $x,y$ 分别应用相同推导即可。
+
+这些条件还能说明所得曲线是唯一的最小值。对任何保持约束的变化 $\eta$，平方展开给出
+\[
+ J[p+\eta]=J[p]+2\sum_i\int p_i'''\cdot\eta_i'''dt
+                   +\sum_i\int\|\eta_i'''\|^2dt.
+\]
+中间项由上述条件等于0，最后一项非负。
+若两条曲线代价相同，必须每段 $\eta'''=0$，即每段变化都是二次式。
+p/v/a 连续让相邻二次式接成同一个二次式，而起点的三个零条件使它恒为0。
+
+\subsection{两段曲线的手算例子}
+取一维路点 $0\to1\to2$ m，每段1 s，整条轨迹首尾静止且加速度为0。
+全程曲线 $p(t)=2h(t/2)$ 恰好在 $t=1$ 经过1 m；将它拆成两个局部多项式：
+\begin{align*}
+ p_1(t)&=2.5t^3-1.875t^4+0.375t^5,\quad 0\le t\le1,\\
+ p_2(u)&=1+1.875u-1.25u^3+0.375u^5,\quad 0\le u\le1.
+\end{align*}
+第二段局部时间 $u$ 从0开始。连接处两侧均有
+$(p,v,a,j,\mathrm{snap})=(1,1.875,0,-7.5,0)$，单位按导数阶数递增。
+它满足刚才的条件，因此是这组路点和时长的最优解。
+全程 $J=720\times2^2/2^5=90$；若在1 m处停下，两段各有 $J=720$，总和为1440。
+保持通过速度，能大幅减少重新启动带来的加速度变化。
+
+\section{把这些条件写入带状方程}
+将每段的 $6\times2$ 系数按段堆叠，得到 $C\in\mathbb R^{6N\times2}$。
+令 $\beta_r(t)$ 为第 $r$ 阶导数的\textbf{行}基函数，则 $p^{(r)}(t)=(\beta_r(t)C_i)^T$。
+例如 $\beta_3(t)=[0,0,0,6,24t,60t^2]$。
+每个约束都是系数的线性组合，可写为
 \begin{equation}
-A(T)C=B(q).
+ A(T)C=B(q).
+ \label{eq:minco-system}
 \end{equation}
-每一行只涉及相邻两段，所以按代码顺序排列后，上下带宽均为 6。
+首尾各写三行 p/v/a，共6行；每个内部连接写六行：
+\begin{center}\small
+\begin{tabular}{lll}\toprule
+代码行号（$i$ 从0开始）& 左端表达式 & 右端\\\midrule
+$6i+3$ & $p_i'''(T_i)-p_{i+1}'''(0)$ & 0\\
+$6i+4$ & $p_i''''(T_i)-p_{i+1}''''(0)$ & 0\\
+$6i+5$ & $p_i(T_i)$ & $q_i$\\
+$6i+6$ & $p_i(T_i)-p_{i+1}(0)$ & 0\\
+$6i+7$ & $p_i'(T_i)-p_{i+1}'(0)$ & 0\\
+$6i+8$ & $p_i''(T_i)-p_{i+1}''(0)$ & 0\\\bottomrule
+\end{tabular}
+\end{center}
+表内路点也改用从0开始的代码编号。每行在对应的段系数前放入 $\beta_r$；右段前的负号来自两侧相减。
+共 $6+6(N-1)=6N$ 行。上一节的唯一性保证这些条件确定唯一系数。
+\par\noindent
+\begin{minipage}{\linewidth}
 \lstinputlisting[language=C++,linerange={minco_conditions_begin-minco_conditions_end},
   includerangemarker=false]{../ros2_ws/src/motion2d/src/trajectory/minco2d.cpp}
-insert 将对应阶导数的基函数系数放入矩阵；例如零时刻 jerk 对 $c_3$ 的系数是 6。
-矩阵约束已经包含最优性，求解阶段无需再迭代下降能量。trajectory() 返回上一章的统一采样对象。
+\end{minipage}
+\par
+\code{insert} 把一行基函数放入指定段的六列；\code{rhs} 的两列分别对应 $x,y$。
+这些行已经包含最优性条件，所以内层只需解一次线性方程。
 
-\clearpage
-\section{系数随路点和时长一起变化}
-以后添加避障或速度代价，先计算它们对系数、时长的\textbf{直接偏导}。
-记 $G=\partial K/\partial C$、$g_T=\partial K/\partial T$；固定系数时，jerk 代价有
-\begin{equation}
-G_i=2Q(T_i)C_i,\qquad (g_T)_i=\|p_i'''(T_i)\|^2.
-\end{equation}
-但是改变 $T_i$ 后，保持边界条件需要重新求系数；只保留这个非负上限项，会丢掉关键变化。
-例如单段静止到静止的完整导数为 $dJ/dT=-3600\|\Delta p\|^2/T^6$，反而是负值。
-
-对 $AC=B$ 求微分，得到 $A\,dC=dB-(dA)C$。
-为了避免对每个路点单独求一次 $dC$，先求一个\textbf{伴随方程}：
-\begin{equation}
-A^T\Lambda=G,\qquad
- dK=\langle\Lambda,dB-(dA)C\rangle+g_T^T dT.
-\end{equation}
-$\langle X,Y\rangle=\sum_{ij}X_{ij}Y_{ij}$ 表示逐项乘积求和。
-一个路点只改变 $B$ 对应的一行；故直接取该行 $\Lambda$。
-某一时长只改变其所在段的右端导数值；再对时间求导，阶数增加一阶。
-\lstinputlisting[language=C++,linerange={minco_adjoint_begin-minco_adjoint_end},
-  includerangemarker=false]{../ros2_ws/src/motion2d/src/trajectory/minco2d.cpp}
-中间连接对应的导数阶数为 $[4,5,1,1,2,3]$，与上一页六行方程逐一对应；
-最后一段仅有末端 p/v/a，使用 $[1,2,3]$。
-energyPartials 给出直接偏导；propagate 输出总路点/时长梯度，也能处理未来其他可微代价。
-
-\section{为什么不用显式矩阵求逆}
-代码先将 $A$ 分解为 $LU$，正向求解先解 $Ly=B$、再解 $UC=y$。
-伴随复用同一组因子，先解 $U^Ty=G$、再解 $L^T\Lambda=y$。
-固定带宽下，每行只读写常数个邻居，储存、分解和每次求解都随段数线性增长。
-这指算法复杂度；实际速度对照在第十六章测量。
-
-\clearpage
-\section{带状实现和数值尺度}
+\subsection{带状 LU 在做什么}
+每行只关联当前段和相邻段。按代码的行列顺序，非零元素距主对角线最多6格，称为上下带宽均为6。
+因此每行保存13个数就足够。
+高斯消元把第 $k$ 列下方消成0：令 $\ell_{ik}=a_{ik}/a_{kk}$，再更新
+$a_{ij}\leftarrow a_{ij}-\ell_{ik}a_{kj}$。
+保存这些倍数得到下三角矩阵 $L$，消元后的矩阵为上三角 $U$，于是 $A=LU$。
+例如
+\[
+ \begin{bmatrix}2&1\\4&3\end{bmatrix}
+ =\begin{bmatrix}1&0\\2&1\end{bmatrix}
+  \begin{bmatrix}2&1\\0&1\end{bmatrix}.
+\]
+解 $Ax=(1,3)^T$，先由 $Ly=(1,3)^T$ 得 $y=(1,1)^T$，再由 $Ux=y$ 得 $x=(0,1)^T$。
+二维轨迹只是同时处理两个右端列。
+\par\noindent
+\begin{minipage}{\linewidth}
 \lstinputlisting[language=C++,linerange={band_factor_begin-band_factor_end},
   includerangemarker=false]{../ros2_ws/src/motion2d/src/trajectory/banded_lu.cpp}
-BandedLu 只保存每行附近 13 个元素。教学实现使用本章特定顺序的无主元 LU，
-不是任意矩阵的通用稳定求解器。若主元非有限或绝对值小于 $10^{-14}$，明确报告数值失败。
-正时长保证数学问题可解，不保证任意悬殊尺度下的浮点计算稳定；优先使用秒、米和适中的分段时长。
+\end{minipage}
+\par
+\code{last} 限制每次只更新带内元素，\code{at(i,k)} 保存倍数。
+本实现保持固定行序；主元过小会放大除法误差，代码在主元非有限或绝对值小于 $10^{-14}$ 时返回失败。
+使用米、秒及适中的分段时长，有助于控制 $T,T^2,\ldots,T^5$ 的数值尺度。
+固定带宽下，每行的工作量有固定上限，所以存储、分解和求解的开销都随段数线性增长。
 
-\section{独立检查比看图更可靠}
-测试另建一个密集等式约束二次型：只约束位置和 p/v/a 连接，不加入 jerk/snap 连续条件。
-jerk 平方积分用三点 Gauss--Legendre 求积计算，它对该四次被积式精确。
-将能量的驻点条件与等式约束联立为密集线性系统（KKT），求解后与带状结果比较，
-避免用同一组最优性方程自证。
-1--6 段、seed=1515 的小问题，系数相对误差门限为 $2\times10^{-9}$，连接到四阶检查门限为 $10^{-8}$。
+\section{改变时长时，系数也会改变}
+外层代价记为 $K(C,T)$，可包含 jerk、时间和避障项。
+先暂时把系数 $C$ 与时长 $T$ 当作独立变量，计算直接偏导
+$G=\partial K/\partial C$、$g_T=\partial K/\partial T$。
+对 jerk 积分，由二次式求导和微积分基本定理得
+\begin{equation}
+ G_i=2Q(T_i)C_i,\qquad (g_T)_i=\|p_i'''(T_i)\|^2.
+\end{equation}
+第二式固定了 $C_i$，只延长积分区间；而实际调整时长时，还要重解边界条件。
+例如位移1 m、时长2 s的静止到静止曲线，直接偏导为 $56.25$，
+但完整导数由 $J=720/T^5$ 得 $dJ/dT=-3600/T^6=-56.25$。
+重新调整系数贡献了 $-112.5$，使整体变得更平缓。
 
-对路点和时长采用步长 $10^{-5}$ 的中心差分，检查完整伴随梯度；
-测试还增加系数平方与显式时长平方项，避免只验证 jerk 这个特殊目标。
-允许误差为 $2\times10^{-6}\max(1,|g_{\mathrm{FD}}|)$，不是用差分替代实现中的解析梯度。
+\subsection{从标量链式法则理解伴随}
+先将线性方程简化成 $Tc=q$，代价取 $K=c^2$。
+直接算得 $c=q/T$，所以 $dK/dq=2q/T^2$，$dK/dT=-2q^2/T^3$。
+也可以对方程求微分：$T\,dc=dq-c\,dT$，再把 $dK=2c\,dc$ 中的 $dc$ 消掉。
+定义 $\lambda=2c/T$，便有 $dK=\lambda\,dq-\lambda c\,dT$。
+这里求 $T\lambda=2c$ 的作用，就是把对系数的变化率转换到输入上。
 
+矩阵情形完全沿用这个步骤。对式\eqref{eq:minco-system}求微分：
+\[
+ A\,dC=dB-(dA)C,\qquad dK=\langle G,dC\rangle+g_T^TdT,
+\]
+其中 $\langle X,Y\rangle=\sum_{r,d}X_{rd}Y_{rd}$ 是逐项乘积求和。
+求解\textbf{伴随方程} $A^T\Lambda=G$ 后，矩阵乘法按下标展开可得
+$\langle A^T\Lambda,dC\rangle=\langle\Lambda,A\,dC\rangle$，因此
+\begin{equation}
+ dK=\langle\Lambda,dB-(dA)C\rangle+g_T^TdT.
+ \label{eq:minco-adjoint}
+\end{equation}
+一次伴随求解便可同时求所有路点和时长的梯度。
+因 $A=LU$，转置后 $A^T=U^TL^T$，可复用原来的因子，先解 $U^Ty=G$，再解 $L^T\Lambda=y$。
+
+\clearpage
+\subsection{对应到两类优化变量}
+一个路点只改变 $B$ 的一行，因此 $\partial K/\partial q_i$ 就是 $\Lambda$ 的对应行。
+一个时长只改变该段右端的基函数；对 $\beta_r(T)C_i$ 求 $T$ 导数，得到 $\beta_{r+1}(T)C_i$。
+按前面的六行约束，它们的阶数从 $[3,4,0,0,1,2]$ 变成 $[4,5,1,1,2,3]$。
+将各行点积相加并取负号，就是式\eqref{eq:minco-adjoint}中 $-(dA)C$ 的贡献。
+\par\noindent
+\begin{minipage}{\linewidth}
+\lstinputlisting[language=C++,linerange={minco_adjoint_begin-minco_adjoint_end},
+  includerangemarker=false]{../ros2_ws/src/motion2d/src/trajectory/minco2d.cpp}
+\end{minipage}
+\par
+\code{direct} 是已有的直接时长偏导；\code{propagate} 在其上加上系数变化的影响。
+最后一段只有终点 p/v/a 三行，因此使用导数阶数 $[1,2,3]$。
+
+\section{把约束违反量变成可求导的代价}
+约束写成 $h\le0$。令 $[h]_+=\max(0,h)$，用
+\[
+ P(h)=w[h]_+^3=\begin{cases}0,&h\le0,\\wh^3,&h>0\end{cases}
+\]
+计入代价，其中 $w>0$。
+在允许范围内，代价及其导数均为0；超出后，$P'=3wh^2$、$P''=6wh$。
+两者在 $h\to0^+$ 时也趋于0，因此过渡到允许区时一、二阶导数连续。
+常用违反量及其状态梯度如下：
+\begin{center}\small
+\begin{tabular}{lll}\toprule
+约束 & $h$ & $\partial h/\partial\text{状态}$\\\midrule
+速度 & $\|v\|^2-v_*^2$ & $2v$\\
+加速度 & $\|a\|^2-a_*^2$ & $2a$\\
+走廊 & $n^Tp-b+\epsilon$ & $n$（对 $p$）\\
+距离 & $d_*-d(p)$ & $-\nabla d(p)$（对 $p$）\\\bottomrule
+\end{tabular}
+\end{center}
+前三行分别由平方展开和线性式求导；最后一行来自第12章的双线性距离插值。
+例如速度代价对 $v$ 的偏导为 $3w[h_v]_+^2(2v)$。
+走廊已在圆盘配置空间内检查，$\epsilon$ 是额外余量；距离目标 $d_*$ 使用中心距离的单位 m。
+各项残差单位不同，选择权重时应一并考虑它们的尺度。
+总目标写成
+\begin{equation}
+ K=w_JJ+w_T\sum_i T_i+\sum_i\int_0^{T_i}P(p,v,a,j)\,dt,
+ \label{eq:minco-outer}
+\end{equation}
+其中 $P$ 汇总启用的软惩罚。下面加入力约束，再统一计算积分和梯度。
+
+\clearpage
+\section{由微分平坦映射约束实际力}\label{sec:flatcost}
+第\ref{sec:flatness}节的全向惯性模型满足
+\[
+ F=ma+c_vv,\qquad \dot F=mj+c_va.
+\]
+质量 $m$ 单位 kg，阻尼 $c_v$ 单位 kg/s，力变化率 $\dot F$ 单位 N/s。
+相同加速度下，质量较大的机器人需要更大的力。因此将实际受力纳入目标：
+\begin{equation}
+ h_F=\frac{\|F\|^2}{F_*^2}-1,\qquad
+ h_R=\frac{\|\dot F\|^2}{R_*^2}-1,\qquad
+ P_F=w_F[h_F]_+^3+w_R[h_R]_+^3.
+\end{equation}
+$F_*,R_*$ 分别为力和力变化率的软目标，两种残差均无量纲。
+由平方范数求导得
+\[
+ g_F=\frac{\partial P_F}{\partial F}=\frac{6w_F[h_F]_+^2}{F_*^2}F,
+ \qquad
+ g_R=\frac{\partial P_F}{\partial\dot F}=\frac{6w_R[h_R]_+^2}{R_*^2}\dot F.
+\]
+再展开 $dP_F=g_F^TdF+g_R^Td\dot F$，代入
+$dF=m\,da+c_v\,dv$、$d\dot F=m\,dj+c_v\,da$，按 $dv,da,dj$ 收集：
+\begin{equation}
+ g_v=c_vg_F,\qquad g_a=mg_F+c_vg_R,\qquad g_j=mg_R.
+ \label{eq:force-backward}
+\end{equation}
+这就是平坦映射的反向传播：把代价对物理量的敏感程度，变成对轨迹导数的敏感程度。
+若同时有速度等其他惩罚，把各自的 $g_v,g_a,g_j$ 相加即可。
+\lstinputlisting[language=C++,linerange={flat_penalty_begin-flat_penalty_end},
+ includerangemarker=false]{../ros2_ws/src/motion2d/src/trajectory/trajectory_cost.cpp}
+\code{omniForward} 计算 $F,\dot F$，\code{omniBackward} 实现式\eqref{eq:force-backward}。
+MINCO 与下一章的 Spline2D 共用这段代价代码，因为相同的 $v,a,j$ 对应相同的物理量。
+本章优化二维位置，yaw 取常数；偏航控制在跟踪章节处理。
+规划计算的是执行器限幅前的期望力，力界应为后续反馈校正留出余量。
+
+\section{积分节点移动时，梯度怎样计算}
+\subsection{梯形积分的权重从哪里来}
+将每段分成 $K_s$ 个等长小区间，在 $\alpha_l=l/K_s$ 处采样，局部时间 $t_l=\alpha_lT$。
+每个小区间面积近似为 $\tfrac{T}{2K_s}(P_l+P_{l+1})$。
+相加后，内部点出现两次，首尾点各一次：
+\[
+ \int_0^T P(t)dt\ \approx\ \frac{T}{K_s}\sum_{l=0}^{K_s}\omega_lP(\alpha_lT),
+ \qquad \omega_0=\omega_{K_s}=\tfrac12,\quad\omega_l=1\ (0<l<K_s).
+\]
+$K_s$ 是积分区间数，区别于总代价 $K$；配置 \code{quadrature_steps} 表示 $K_s$。
+
+\subsection{先固定系数，对积分时长求偏导}
+记 $g_p,g_v,g_a,g_j$ 为一个节点上 $P$ 对四种状态的偏导。
+改变 $T$ 时，积分权重 $T/K_s$ 和节点时间 $\alpha_lT$ 都改变。
+由乘积法则、链式法则以及 $dp/dt=v,dv/dt=a,da/dt=j,dj/dt=s_4$，单个节点贡献为
+\begin{equation}
+ \left.\frac{\partial K}{\partial T}\right|_C\mathrel{+}=
+ \omega_l\left[\frac{P}{K_s}+\frac{T}{K_s}\alpha_l
+ (g_p^Tv+g_v^Ta+g_a^Tj+g_j^Ts_4)\right],
+ \label{eq:moving-node}
+\end{equation}
+其中 $s_4=p''''$ 为 snap。力变化率依赖 jerk，所以它的时间梯度自然会用到 snap。
+
+用一个标量小例子检查：取 $p(t)=t^4/4$，则 $j=6t$；只积分 $P=j^2$，并取 $K_s=1$。
+梯形近似为 $T(0+36T^2)/2=18T^3$，导数为 $54T^2$。
+式\eqref{eq:moving-node}中的权重变化贡献 $18T^2$，移动节点贡献 $36T^2$，两者相加正好一致。
+这里梯形近似与精确积分 $12T^3$ 存在误差；优化梯度必须对应实际使用的积分近似，增加积分区间数可减小求积误差。
+
+\subsection{再求系数偏导，接上伴随}
+$p=(\beta_0C)^T$，所以 $p_d$ 对 $C_{kd}$ 的导数为 $(\beta_0)_k$。
+把所有阶数的贡献按链式法则相加：
+\begin{equation}
+ G_i\mathrel{+}=\omega_l\frac{T}{K_s}
+ (\beta_0^Tg_p^T+\beta_1^Tg_v^T+\beta_2^Tg_a^T+\beta_3^Tg_j^T).
+\end{equation}
+每个 $\beta_r^T$ 是 $6\times1$ 列，$g^T$ 是 $1\times2$ 行，乘积正好是系数矩阵所需的 $6\times2$。
+\lstinputlisting[language=C++,linerange={trajectory_quadrature_begin-trajectory_quadrature_end},
+ includerangemarker=false]{../ros2_ws/src/motion2d/src/trajectory/trajectory_cost.cpp}
+代码中的 \code{dt} 是 $T/K_s$，\code{weight} 是端点或内部点权重，\code{s} 是 $\alpha_l$。
+算完直接偏导后，再调用 \code{propagate}，得到系数随 $q,T$ 变化的贡献。
+下面的图把这几步放到同一条计算链上；下排箭头从最终代价向输入返回。
+\begin{figure}[!ht]
+\centering
+\begin{tikzpicture}[>=stealth,box/.style={draw=tealblue,rounded corners,fill=pale,minimum height=.9cm,align=center,font=\small}]
+\node[box] (a) at (0,0) {$q,T$};
+\node[box] (b) at (3,0) {$AC=B$\\系数 $C$};
+\node[box] (c) at (6,0) {$p,v,a,j$\\物理量 $F,\dot F$};
+\node[box] (d) at (9.2,0) {积分与总目标\\$K$};
+\draw[->,thick] (a)--(b);\draw[->,thick] (b)--(c);\draw[->,thick] (c)--(d);
+\node[font=\small,align=center] (ga) at (0,-1.65) {$g_q,g_T^{\rm total}$};
+\node[font=\small,align=center] (gb) at (3,-1.65) {$G,g_T^{\rm direct}$};
+\node[font=\small,align=center] (gc) at (6,-1.65) {$g_p,g_v,g_a,g_j$};
+\draw[->,tealblue,thick] (d.south)--(9.2,-1.65)--(gc.east);
+\draw[->,tealblue,thick] (gc)--node[above,font=\scriptsize]{多项式与积分}(gb);
+\draw[->,tealblue,thick] (gb)--node[above,font=\scriptsize]{伴随}(ga);
+\end{tikzpicture}
+\caption{正向计算曲线与代价，反向逐层应用链式法则。直接时长偏导在伴随阶段与系数变化的贡献相加。}
+\end{figure}
+
+\section{外层怎样选择路点和正时长}
+\subsection{正时长变量}
+令 $T_i=T_{\min}+e^{\tau_i}$，其中 $T_{\min}>0$ 是最短段时长，代码中的时间数值以秒计。
+任意实数 $\tau_i$ 都给出 $T_i>T_{\min}$。
+初始化取 $\tau_i=\log(T_i-T_{\min})$；由 $dT_i/d\tau_i=e^{\tau_i}$ 得
+\[
+ \frac{dK}{d\tau_i}=\frac{dK}{dT_i}(T_i-T_{\min}).
+\]
+\par\noindent
+\begin{minipage}{\linewidth}
+\lstinputlisting[language=C++,linerange={positive_time_begin-positive_time_end},
+ includerangemarker=false]{../ros2_ws/src/motion2d/src/trajectory/trajectory_optimizer.cpp}
+\end{minipage}
+\par
+外层变量向量 $x$ 依次存内部路点的两个坐标和各段 $\tau_i$；全部启用时维数为 $2(N-1)+N=3N-2$。
+也可固定路点只调时间，或固定时间只调路点，以观察每一类变量的作用。
+
+\subsection{从二次近似到 BFGS}
+在当前 $x$ 附近，二阶 Taylor 近似为
+$K(x+d)\approx K(x)+g^Td+\tfrac12d^TBd$，其中 $g$ 是梯度，$B$ 是二阶导数矩阵。
+对 $d$ 求导并令其为0，得到 $Bd=-g$。
+BFGS 保存 $B^{-1}$ 的近似 $H$，用 $d=-Hg$ 作为搜索方向，从 $H=I$ 开始。
+沿此方向试探步长 $\alpha$，要求
+\[
+ K(x+\alpha d)\le K(x)+c\alpha g^Td,\qquad c=10^{-4}.
+\]
+当 $g^Td<0$ 时，右边比当前代价小，要求下降达到一阶预测的一小部分。
+代码从 $\alpha=1$ 开始，不满足就减半；数值求解失败或距离查询越域时，也缩小本次试探步。
+这就是 Armijo 回溯。
+
+接受新点后，令 $s=x_{\rm new}-x$、$y=g_{\rm new}-g$。
+由梯度的一阶变化 $y\approx Bs$，希望新近似满足 $H_{\rm new}y=s$。
+当 $y^Ts>0$，定义 $\rho=1/(y^Ts)$、$V=I-\rho sy^T$，更新
+\begin{equation}
+ H_{\rm new}=VHV^T+\rho ss^T.
+\end{equation}
+为什么它满足所需条件？因为 $V^Ty=y-\rho y(s^Ty)=0$，第一项乘 $y$ 为0，第二项乘 $y$ 为 $s$。
+此外，对任意向量 $z$，$z^TH_{\rm new}z=(V^Tz)^TH(V^Tz)+\rho(s^Tz)^2$；
+在 $H$ 正定且 $y^Ts>0$ 时，更新继续提供合适的下降方向。
+代码在曲率太小时跳过更新；若当前方向失去下降性，则把 $H$ 重置为单位阵，退回负梯度方向。
+\par\noindent
+\begin{minipage}{\linewidth}
+\lstinputlisting[language=C++,linerange={bfgs_update_begin-bfgs_update_end},
+ includerangemarker=false]{../ros2_ws/src/motion2d/src/optimization/bfgs.cpp}
+\end{minipage}
+\par
+\code{curvature} 是 $y^Ts$，\code{H} 为密集矩阵，存储量随外层变量数的平方增长。
+这与内层 MINCO 的线性存储是两部分开销。
+\code{converged} 表示梯度达到阈值（或没有可调变量）；其他退出状态分别表示迭代次数、回溯或时间预算用尽。
+
+\section{通过手算、差分和实验理解结果}
+\subsection{完整梯度的差分检查}
+选择一个输入 $x_k$，计算
+\[
+ g_{\rm FD}=\frac{K(x+\varepsilon e_k)-K(x-\varepsilon e_k)}{2\varepsilon}.
+\]
+$e_k$ 只有第 $k$ 个分量为1。每次扰动都要重新生成曲线、积分并计算总代价，才能与传回输入的梯度比较。
+Taylor 展开中偶数次项相减抵消，除以 $2\varepsilon$ 后的主要截断误差为 $O(\varepsilon^2)$；
+过小的 $\varepsilon$ 又会放大两个相近浮点数相减的误差。
+可依次试 $10^{-4},10^{-5},10^{-6}$，观察解析值与差分值是否在一段步长范围内一致。
+
+若只考虑单段静止到静止的 jerk 与时间代价，
+$K(T)=720w_J\|\Delta p\|^2/T^5+w_TT$。
+求导得 $K'(T)=-3600w_J\|\Delta p\|^2/T^6+w_T$，由此
+\[
+ T^*=\left(\frac{3600w_J\|\Delta p\|^2}{w_T}\right)^{1/6}.
+\]
+其二阶导数为 $21600w_J\|\Delta p\|^2/T^7>0$，所以当 $w_J,w_T>0$、位移非零时，这是唯一最小值。
+有最小时长时，还需比较 $T^*$ 与 $T_{\min}$。
+
+\subsection{固定路点与时长的平顺性比较}
+演示两端为 $(0,0),(4,0)$ m，中间为 $(1,1),(2,-0.2),(3,0.8)$ m，首尾静止。
+四段各1.5 s；jerk 积分由系数解析计算，速度、加速度峰值取自3001个采样点。
 \begin{center}\small
 \pgfplotstabletypeset[col sep=comma,
 columns={mode,energy,peak_speed,peak_acceleration},
 columns/mode/.style={column name=模式,string type,string replace*={0}{逐点停靠},string replace*={1}{MINCO}},
-columns/energy/.style={column name=jerk 积分, fixed,precision=3},
-columns/peak_speed/.style={column name=速度峰值, fixed,precision=3},
-columns/peak_acceleration/.style={column name=加速度峰值, fixed,precision=3},
+columns/energy/.style={column name={$J$/(m$^2$/s$^5$)}, fixed,precision=3},
+columns/peak_speed/.style={column name={$v_{\max}$/(m/s)}, fixed,precision=3},
+columns/peak_acceleration/.style={column name={$a_{\max}$/(m/s$^2$)}, fixed,precision=3},
 every head row/.style={before row=\toprule,after row=\midrule},
 every last row/.style={after row=\bottomrule}]{data/ch15_minco.csv}
 \end{center}
-演示两端为 $(0,0),(4,0)$ m，中间为 $(1,1),(2,-0.2),(3,0.8)$ m，首尾静止。
-四段各 1.5 s；能量是解析积分，速度/加速度峰值来自 3001 个采样点。
-本次能量降低，曲线也偏离折线；\textbf{没有施加障碍、走廊或动力学约束}。
+MINCO 降低了 jerk 积分，也使曲线偏离原折线。环境存在障碍物时，要将这种偏离计入避障优化。
 
-\begin{enumerate}
-\item \textbf{推导：}为什么只固定内部位置，最优解仍有连续 jerk 与 snap？
-\item \textbf{代码 ch15-1：}完成 jerkGram 的一个条目，检查低次项为零、积分指数和因子。
-\item \textbf{实验：}固定相同边界、路点和时长，对比能量；改变一段时长检查解析梯度的符号与数值。
-\end{enumerate}
-
-
-\clearpage
-\section{把约束违反量变成软代价}
-令 $[h]_+=\max(0,h)$，用 $w[h]_+^3$ 惩罚违反；它的一阶导数是 $3w[h]_+^2$。
-速度和加速度使用平方范数残差，走廊使用单位法向量残差，ESDF 使用原始中心距离：
-\begin{equation}
- h_v=\|v\|^2-v_*^2,\quad h_a=\|a\|^2-a_*^2,\quad
- h_c=n^Tp-b+\epsilon,\quad h_d=d_*-d(p).
-\end{equation}
-走廊已经在圆盘配置空间检查过；$\epsilon$ 是额外优化余量，不再加一遍半径。
-$d(p)$ 用于可微软惩罚；独立检查仍使用第十二章的净空下界。
-各项单位不同，权重负责尺度换算。总目标为 $w_JJ+w_T\sum T_i+\int\sum w[h]_+^3dt$。
-
-每段在 $s_j=j/K$ 处求梯形积分，局部时间 $t_j=s_jT$。
-改变 $T$ 时，积分权重 $T/K$ 和采样位置都变化。
-下列代码里的 gp/gv/ga/gj 是惩罚对 p/v/a/jerk 的偏导，weight 在两端取 $1/2$；
-本章补充的力变化率代价会用到 gj：
-\lstinputlisting[language=C++,linerange={trajectory_quadrature_begin-trajectory_quadrature_end},
- includerangemarker=false]{../ros2_ws/src/motion2d/src/trajectory/trajectory_cost.cpp}
-先求直接偏导，再经 MINCO 的 propagate 传回路点和时长，不能只改变采样间隔。
-测试固定系数、分别扰动十二个系数和时长，检查全部软项；差分步长 $10^{-6}$。
-
-\section{始终保持时长为正}
-令 $T_i=T_{\min}+e^{\tau_i}$，优化无约束变量 $\tau_i$。
-链式法则给出 $dK/d\tau_i=(dK/dT_i)(T_i-T_{\min})$：
-\lstinputlisting[language=C++,linerange={positive_time_begin-positive_time_end},
- includerangemarker=false]{../ros2_ws/src/motion2d/src/trajectory/trajectory_optimizer.cpp}
-不把越界时间硬裁剪后假装梯度不变。指数溢出、线性求解失败、ESDF 越出有效域都使该试探步无效。
-BFGS 用 Armijo 回溯寻找有限且下降的步；逆 Hessian 更新使用实际变量差和梯度差。
-内层 MINCO 随段数线性增长，\textbf{外层教学版密集 BFGS 使用二次内存}，两者不要混淆。
-状态分别报告 converged、max\_iterations、line\_search\_failed 和 time\_limit；
-时间预算在迭代和试探步之间检查，不是硬实时保证。
-
-\clearpage
-\section{收敛之后仍要检查}
+\subsection{权重怎样影响可行性}
 \begin{lstlisting}[language=bash]
 ros2 run motion2d corridor_demo tmp/ch13_corridor
 ros2 run motion2d trajectory_optimization_demo tmp/ch15_optimization
 /usr/bin/python3 scripts/plot_ch15_optimization.py
 \end{lstlisting}
-这是提供栅格的算法实验，非未知环境导航。沿用第十三章墙体、0.1 m 栅格、0.15 m 圆盘和三段走廊，
-初始时长为对应折线长度除以 0.6 m/s；两端静止。速度/加速度软目标均为 0.8，独立上限均为 1（SI）；
-ESDF 目标 0.4 m，净空检查要求严格大于 0.15 m。每段积分 24 格，独立检查 200 格。
-
+沿用第13章的墙体地图、0.1 m栅格、0.15 m圆盘和三段走廊。
+初始时长为折线段长除以0.6 m/s，两端静止；速度和加速度软目标分别为0.8 m/s、0.8 m/s$^2$，
+检查上限分别为1 m/s、1 m/s$^2$。ESDF 目标为0.4 m，净空下界要求大于0.15 m。
+每段用24个区间积分，另用200个区间采样检查。
 \begin{figure}[!ht]
 \centering\includegraphics[width=\linewidth]{figures/ch15_optimization.pdf}
-\caption{相同初值下分别锁定全部变量、只优化内部位置、联合优化位置与时间。浅色多边形为走廊。
-联合优化缩短时间并降低目标，但局部穿出走廊，不能直接作为安全命令。}
+\caption{浅色多边形为走廊。优化位置与时间会同时改变曲线形状和运动快慢；部分曲线为了降低其他代价而穿出走廊。}
 \end{figure}
-
 \begin{center}\small
 \begin{tabular}{lrrrr}\toprule
 模式 & 总代价 & 时长/s & 走廊最大残差/m & 净空下界/m\\\midrule
@@ -189,112 +460,49 @@ ESDF 目标 0.4 m，净空检查要求严格大于 0.15 m。每段积分 24 格�
 位置与时间 & 11.4043 & 10.7129 & 0.0233 & 0.1322\\\bottomrule
 \end{tabular}
 \end{center}
-三个问题都返回 converged，只有初始曲线通过本次采样检查。
-优化变量为零时，converged 仅表示没有可调变量。小代价、驻点和可行性是不同问题。
-即使 samples\_feasible 为真，也仅是有限采样；下一章用 Bézier 凸包给出整段的充分条件。
-本功能只输出诊断，未向机器人发送未经认证的优化轨迹。
+联合优化后的总目标更小，但走廊残差为正，净空下界也低于0.15 m。
+有限权重允许优化器用少量违反换取其他项下降；梯度很小只表示附近的一阶下降方向很弱。
+因此先读求解状态，再读各项约束残差。若需要对采样间的整段曲线作检查，下一章将使用 Bézier 凸包。
 
-\begin{enumerate}
-\item \textbf{推导：}只有单段 jerk 与时间代价时，证明最优时长为
-$T^*=(3600w_J\|\Delta p\|^2/w_T)^{1/6}$，并用实验核对。
-\item \textbf{代码 ch15-2：}补全正时长变量的链式梯度。改变 $T_{\min}$ 后仍应通过差分。
-\item \textbf{实验：}逐次加大走廊权重，记录残差、迭代数、终止状态；解释为什么权重很大仍不构成连续证明。
-\end{enumerate}
-
-\clearpage
-\section{在观测地图上预览优化结果}
+\section{在观测地图上预览，在力约束实验中比较时长}
+\subsection{ROS 预览}
 \begin{lstlisting}[language=bash]
 ros2 launch motion2d_bringup ch15.launch.py rviz:=true
 # A second terminal, same ROS_DOMAIN_ID:
 /usr/bin/python3 scripts/check_ch15.py
 \end{lstlisting}
-从 RViz 的 Goal Pose 工具设置目标后，planner 在同一份观测地图上依次生成 A*、走廊、ESDF 与优化曲线。
-未知空间继续阻塞；没有读取模拟器障碍物。输入仍为 /map、/odometry、/goal\_pose 和坐标变换。
-起终点取静止 p/v/a，初始分段时间为连接点距离除以 0.5 m/s，至少 0.5 s。
-这是静止机器人上的单次预览；移动边界和在线衔接留到第十九章。
-
+在 RViz 的 Goal Pose 工具设置目标后，planner 使用同一份观测栅格依次生成 A*、走廊、ESDF 和优化曲线。
+未知格按阻塞处理；输入为 /map、/odometry、/goal\_pose 和坐标变换。
+本章采用静止起终边界；初始段时长为连接点距离除以0.5 m/s，且至少0.5 s。
+RViz 中青色折线和走廊旁会出现紫色优化预览。移动边界与在线接续将在第19章加入。
 \begin{center}\small
 \begin{tabularx}{\linewidth}{lX}\toprule
-接口 & 含义\\\midrule
-/plan/optimized\_preview & map 系几何 Path，约 0.05 s 采样；没有绝对执行时间\\
-/plan/optimization\_status & 求解状态、独立采样状态和 preview\_only 标签\\
-optimization.enabled & 第十五章默认 true，旧章节默认 false\\
-optimization.max\_iterations & 默认 200；终止于迭代上限仍保留诊断\\
-optimization.max\_wall\_seconds & 默认 0.2 s；步间检查预算，不是实时截止保证\\\bottomrule
+接口或配置 & 含义\\\midrule
+/plan/optimized\_preview & map 系几何 Path，约每0.05 s采样，用于显示曲线形状\\
+/plan/optimization\_status & 求解状态、采样残差状态和 preview\_only 标记\\
+optimization.enabled & 本章设为 true，启用外层优化\\
+optimization.max\_iterations & 默认200，控制最多迭代次数\\
+optimization.max\_wall\_seconds & 默认0.2 s，在迭代和试探步之间检查预算\\\bottomrule
 \end{tabularx}
 \end{center}
-走廊和距离场由同一回调中的栅格构造，避免把旧走廊与新地图混用。
-非法目标、规划失败或时间回退清空预览；数值失败显示原因。
-预览不发布 /plan/trajectory，也不向理想到点接口发命令。
-
-RViz 预期：观察地图上出现紫色曲线，青色折线与走廊边框继续可见。
-实际主机已检查 ROS 消息、端点、清理与输入隔离；当前桌面限制下未验收 GUI 画面。
-若没有曲线，先读状态：未知目标没有可行路径，ESDF 查询越域和求解失败也不能显示为成功。
-若出现曲线但报告 sampled\_violation，可调整权重和初值，再核对实际残差。
-
-\begin{enumerate}
-\item \textbf{理解：}为什么两个订阅回调中分别缓存走廊和距离场，可能使一次检查失去意义？
-\item \textbf{代码阅读：}在 planner\_node.cpp 找到 publish 中同一地图快照的使用顺序，列出所有输出清空路径。
-\item \textbf{验收：}默认起点 $(-8,-8)$ m、目标 $(-7.5,-8)$ m，检查曲线端点、preview\_only 标签；
-步进仿真确认机器人未移动，随后发送非法坐标系目标，确认旧曲线消失。
-\end{enumerate}
+预览节点只发布几何结果，机器人保持当前状态。非法目标、规划失败或时间回退会清空旧预览。
+若没有曲线，先查看状态中的无路径、距离查询越域或数值求解原因；
+若出现 \code{sampled_violation}，查看是哪一项残差超限，再调整相应权重或初值。
 
 \clearpage
-\section{补充：以微分平坦映射约束实际力}\label{sec:flatcost}
-第\ref{sec:flatness}节已把轨迹导数变成真实执行器量。现在将质量和阻尼带进优化器，
-而不只给加速度一个与质量无关的上限。正向得到
-$F=m a+c_vv$、$\dot F=mj+c_va$，再用无量纲残差
-\begin{equation}
-h_F=\frac{\|F\|^2}{F_*^2}-1,\qquad
-h_{\dot F}=\frac{\|\dot F\|^2}{R_*^2}-1,\qquad
-P=w_F[h_F]_+^3+w_R[h_{\dot F}]_+^3.
-\end{equation}
-$F_*$ 单位 N，$R_*$ 单位 N/s。平方范数在零力处也可微，不用除以力的模。
-先求物理量偏导，再调用第04章的反向映射：
-\lstinputlisting[language=C++,linerange={flat_penalty_begin-flat_penalty_end},
- includerangemarker=false]{../ros2_ws/src/motion2d/src/trajectory/trajectory_cost.cpp}
-没有启用 dynamics 时，旧章节仍采用原来的几何代价。启用后，MINCO 与 Spline2D
-共享这一个代价函数和解析偏导；内层如何消去系数，并不改变平坦映射。
-
-\textbf{完整反传路线：}
-物理量代价 $\to(\bar F,\overline{\dot F})\to(\bar v,\bar a,\bar j)
-\to(\bar C,\bar T)\to(\bar q,\bar T)\to(\bar q,\bar\tau)$。
-前两步是平坦映射反传，中间是多项式与积分链式法则，随后才是 MINCO/Spline 伴随。
-这正是参考 GCOPTER 的分工，具体二维公式与代码由本课程独立实现。
-
-\begin{notebox}
-规划约束检查未饱和的期望力。仿真执行仍受力限幅；两者不能互相替代。
-当前只优化二维位置，yaw 保持常数，所以没有声称优化偏航力矩或无人机倾角。
-\end{notebox}
-
-\clearpage
-\section{时长梯度：不能漏掉 snap}
-一段内 $p=C^T\beta_0(t)$，$v=C^T\beta_1(t)$，依次到 jerk $j$ 和 snap $s_4$。
-对归一化积分节点 $\alpha\in[0,1]$，局部采样时刻 $t=\alpha T$：
-\begin{align}
-\bar C&\mathrel{+}=w\frac{T}{K}
- (\beta_0\bar p^T+\beta_1\bar v^T+\beta_2\bar a^T+\beta_3\bar j^T),\\
-\bar T&\mathrel{+}=w\left[\frac{P}{K}+\frac{T}{K}\alpha
- (\bar p^Tv+\bar v^Ta+\bar a^Tj+\bar j^Ts_4)\right].
-\end{align}
-这里是\textbf{固定系数的直接时长偏导}；系数本身随段时长改变的部分，随后由伴随求出。
-漏掉最后一项时，力变化率惩罚仍有正常的数值，优化方向却是错的。
-测试分别扰动全部系数、时长、内部路点，再用 MINCO 和 Spline2D 重做，不能只测最终代价下降。
-
-\textbf{可复现实验。}在加载工作空间后运行：
+\subsection{质量、力界和段时长}
 \begin{lstlisting}[language=bash,numbers=none]
 ros2 run motion2d force_planning_demo
-# Exercise from repository root:
-g++ -std=c++17 -Iexercises/ch15/starter \
-  exercises/ch15/check_flat_time.cpp -o /tmp/ch15_flat_time
-/tmp/ch15_flat_time
 \end{lstlisting}
-两端静止，从 $(0,0)$ 到 $(2,0.3)$ m，阻尼 0.3 kg/s，质量分别 1、3 kg。
-初始时长均 2 s；只调时长，软目标是独立上限的 85\%，独立力上限 1 N、力变化率上限 2 N/s。
-程序输出两种后端的时长、连续力界和求解状态；任一项未通过便非零退出。
-软目标与验证限值分开，使优化器为软约束残差留有空间。
+两端静止，从 $(0,0)$ 到 $(2,0.3)$ m；阻尼为0.3 kg/s，质量分别取1、3 kg。
+初始时长均为2 s，只调时间。独立检查的力上限为1 N、力变化率上限为2 N/s，优化软目标取各上限的85\%。
+程序输出两种后端的时长、连续力界和状态；连续界的计算见下一章。
+加长时间会按 $1/T,1/T^2,1/T^3$ 分别降低相同归一化曲线的速度、加速度和 jerk，因而降低力需求。
+对照两种质量的结果，可观察优化器如何用时间满足执行器能力。
 
-\textbf{配置入口。}planner 与 navigation 都读取以下可选项；规划质量、阻尼必须与模拟器相同：
+\par\noindent
+\begin{minipage}{\linewidth}
+planner 与 navigation 使用以下可选配置，质量与阻尼应与仿真模型一致：
 \begin{lstlisting}[language={},numbers=none]
 planning.dynamics.enabled: true
 planning.dynamics.mass: 1.0
@@ -302,9 +510,21 @@ planning.dynamics.linear_drag: 0.15
 planning.dynamics.force_max: 1.5
 planning.dynamics.force_rate_max: 4.0
 \end{lstlisting}
-这里 force\_max 是\textbf{向量范数}上限。模拟器的原始 force\_max 是每轴上限；
-将范数上限设为不大于每轴上限是保守且一致的选择。反馈控制还需要保留执行器余量。
+\end{minipage}
+\par
+这里的 \code{force_max} 限制力向量范数。仿真底层按每轴限幅；由于每轴绝对值都不大于向量范数，
+把规划范数上限设为不超过底层每轴上限，可使前馈力满足各轴限制。
 
-\textbf{练习 ch15-3：}补全移动采样时刻的直接偏导；解释质量翻倍但时长固定时，
-旧加速度约束为什么不能保证同样的力界。观察更大质量对应的时长变化，先看 certified 与 status，
-再比较代价；不要拿不可行解宣称规划更快。
+\section{练习：沿计算链逐步核对}
+\begin{enumerate}
+\item 手算 $Q_{35}$、$Q_{44}$，再用 $p(t)=t^3+2t^4$、$T=1$ 对照直接积分与 $c^TQc$。
+\item 用两段 $0\to1\to2$ m 的例子核对五个连接量；解释内部速度固定为0后，上一节的自由扰动条件如何改变。
+\item \textbf{代码 ch15-1：}补全 \code{jerkGram} 的一个条目，检查求导因子与积分幂次。
+\item 对 $Tc=q$、$K=c^2$，取 $q=3,T=2$，分别用直接代入和伴随求两个梯度。
+\item \textbf{代码 ch15-2：}补全正时长变量梯度。改变 $T_{\min}$，重新用完整目标做中心差分。
+\item \textbf{代码 ch15-3：}补全移动节点时长偏导；用 $p=t^4/4$ 的例子分开记录权重项和 snap 项。
+\item 在一维力例子中取 $m=2,c_v=0.5,v=1,a=0.75,j=0.2$，只启用 $F_*=1,w_F=1$ 的力惩罚，求 $F,h_F,g_v,g_a,g_j$。
+\item 在二维外层变量空间取 $s=(1,0)^T,y=(2,0)^T,H=I$，手算 BFGS 更新，检查 $H_{\rm new}y=s$。
+\item 固定同一初值，逐次增大走廊权重，记录代价、时长、最大残差和迭代数；结合残差解释曲线变化。
+\end{enumerate}
+练习程序的编译与运行入口见 \code{exercises/ch15/README.md}。
