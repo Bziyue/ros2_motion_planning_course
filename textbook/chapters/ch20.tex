@@ -1,14 +1,29 @@
 \chapter{选学：CUDA 激光雷达加速}
 \begin{notebox}
-\textbf{目标}\quad 保留 CPU 基线，逐束验证 GPU 结果，并分清计算、传输和完整消息成本。\\
-\textbf{先修}\quad 第 05 章、C++ 数组；不要求为前面章节安装 CUDA。
+\textbf{目标}\quad 将第 05 章逐束扫描搬到 GPU，理解线程索引、内存复用与完整扫描的加速条件。\\
+\textbf{先修}\quad 第 05 章、C++ 数组。无 GPU 时也可完成几何、索引与计时分析练习。
 \end{notebox}
-\section{先建立可复现的工具链}
-默认 CPU 构建不查找 CUDA。本机使用 RTX 5060、驱动 595.91.07、GCC 15.2 和 CUDA 13.2.1。
-主机原先缺少 nvcc；脚本将官方组件按锁定 SHA-256 下载到 tmp，保留许可证，不修改驱动。
-13.0.2 与本机 glibc 2.43 的头文件冲突，故选用已实测的 nvcc 13.2.78。
-\begin{lstlisting}[language=bash]
-# Repository root; optional Linux x86_64 toolchain
+\section{哪些计算可以同时进行}
+一次瞬时扫描使用同一位姿和同一静态世界。第 $i$ 束的方向为
+\[
+ \theta_i=\psi+\theta_{\min}+i\Delta\theta,\qquad d_i=(\cos\theta_i,\sin\theta_i).
+\]
+它只需要找自己与障碍物的最近非负交点，与相邻光束的结果无关。
+CPU 逐束循环时，一个束算完才进入下一束；GPU 可以把许多束交给不同线程，同时执行同一求交函数。
+\textbf{线程}在这里就是负责一个束索引的执行实例；\textbf{内核}是这些线程共同执行的 GPU 函数。
+CPU 负责准备数据、启动内核和取得结果，GPU 负责批量求交。
+
+设扫描有 $B$ 束、$C$ 个圆和 $E$ 条线段。每束分别检查 $C+E$ 个对象，
+总求交次数为 $B(C+E)$，因此总工作量随两者乘积增长，记为 $O(B(C+E))$。
+本实现保持每束内部的遍历顺序，只把束之间的工作并行化。
+增加障碍数会增加每个线程的工作，增加束数则会增加可分配的线程数。
+
+\section{准备可选 CUDA 构建}
+先完成第 01 章的 CPU 构建。下面的附加构建需要 NVIDIA GPU、兼容驱动与 CUDA 编译器 nvcc。
+仓库脚本可在 Linux x86\_64 上下载锁定版本的编译组件到 tmp，校验 SHA-256，保留许可证。
+示例工具链为 CUDA 13.2.1；主机与驱动检查命令见 \code{docs/HOST_ENVIRONMENT.md}。
+\begin{lstlisting}[language=bash,numbers=none]
+# Repository root
 python3 scripts/setup_cuda_local.py
 source /opt/ros/lyrical/setup.bash
 cd ros2_ws
@@ -19,69 +34,166 @@ colcon build --packages-select motion2d --symlink-install \
   --cmake-args -DMOTION2D_ENABLE_CUDA=ON \
   -DCMAKE_CUDA_COMPILER="$PWD/../tmp/cuda-13.2.1/toolkit/bin/nvcc" \
   -DCMAKE_CUDA_HOST_COMPILER=/usr/bin/g++ \
-  -DCMAKE_CUDA_ARCHITECTURES=120
+  -DCMAKE_CUDA_ARCHITECTURES=native
 source install/setup.bash
 ros2 run motion2d lidar_cuda_benchmark > ../tmp/ch20_cuda.csv
+cd ..
 \end{lstlisting}
-120 是本机 GPU 的计算能力，不适用于所有显卡。现代 CMake 可使用 native 探测本机；
-跨机器运行时需按目标选择架构。
-禁用时将上述 CUDA 开关显式设为 OFF；CMake 会记住旧设置，只删掉命令中的 ON 不能将它关闭。
+\code{native} 为当前可见 GPU 选择编译架构；跨机器部署时，应改成目标 GPU 的架构编号。
+例如本章数据所用 RTX 5060 的编号为 120。切回纯 CPU 构建时显式传入
+\code{-DMOTION2D_ENABLE_CUDA=OFF}，因为 CMake 会保存上一次配置。
+CUDA 的主机/设备与线程块概念可对照
+\href{https://docs.nvidia.com/cuda/cuda-programming-guide/01-introduction/programming-model.html}{NVIDIA 编程模型文档}。
 
-\section{同一接口，不改变测量含义}
-CudaLidar 构造时接收静态世界及最大束数，scan 接收位姿和相同 LidarConfig，返回相同 float 数组。
-扫描仍是圆心处的瞬时均匀扫描；完整一周用 $2\pi/N$，部分视场包含两端。
-近于最小量程为 NaN，超出最大量程为 $+\infty$，不能把二者都解释为自由空间。
+\section{从线程块位置得到光束编号}
+线程按块组织。设每块 $K$ 个线程，块编号 $b$、块内编号 $j$ 都从零开始，
+前面 $b$ 个块已经覆盖 $bK$ 个索引，因此全局索引是
+\[
+ i=bK+j,\qquad 0\le j<K.
+\]
+覆盖 $B$ 束需要最小整数块数 $G$ 满足 $GK\ge B$，即
+\[
+ G=\left\lceil B/K\right\rceil
+  =\left\lfloor(B+K-1)/K\right\rfloor.
+\]
+最后一种形式适合正整数除法。代码取 $K=128$；$B=720$ 时启动 6 块、768 个线程，
+索引 0--719 计算，720--767 直接返回。每个有效线程只写 \code{ranges[i]}，彼此没有写冲突。
 
-设备几何使用 double，输出才转为 float；本实验关闭 FMA 融合，没有 fast-math。
-这些选择便于与 CPU 对照，但不是最高性能方案。
-相同误差 $e_i$ 在两个无噪声输出上分别调用 perturbRange；不能仅凭“两个独立生成器种子相同”
-就认定样本相同，因为不同后端的生成顺序或特殊值跳过方式可能不同。
+\begin{center}\begin{minipage}{\linewidth}\makeatletter\def\@captype{figure}\makeatother
+\centering
+\begin{tikzpicture}[x=.52cm,y=.65cm,font=\small]
+\foreach \b in {0,1,2}{
+  \node[anchor=east] at (-.4,-\b*1.4) {块 \b};
+  \foreach \j in {0,...,7}{
+    \pgfmathtruncatemacro{\idx}{8*\b+\j}
+    \ifnum\idx<18
+      \draw[fill=pale,draw=tealblue] (\j,-\b*1.4-.42) rectangle +(1,.84);
+    \else
+      \draw[fill=gray!15,draw=muted] (\j,-\b*1.4-.42) rectangle +(1,.84);
+    \fi
+    \node at (\j+.5,-\b*1.4) {\idx};
+  }
+}
+\node[anchor=west] at (8.5,0) {$i=8b+j$};
+\node[anchor=west] at (8.5,-1.4) {有效束 0--17};
+\node[anchor=west] at (8.5,-2.8) {18--23 返回};
+\end{tikzpicture}
+\caption{用每块 8 个线程画出的 $B=18$ 小例子。实际代码每块 128 个线程，索引算法完全相同。}
+\end{minipage}\end{center}
 
-\clearpage
-\section{一束一个线程}
-第 $i$ 束仍计算
-\begin{equation}
- \theta_i=\psi+\theta_{\min}+i\Delta\theta,\qquad
- d_i=\min\{d_{i,\rm circles},d_{i,\rm edges},d_{i,\rm walls}\}.
-\end{equation}
-一束对应一个线程；线程内部遍历所有圆和边，顺序求最小命中。
-本章没有再做障碍物并行归约，也没有 BVH；先保持与 CPU 公式逐行可比。
-B 束、C 个圆、E 条边的总工作量仍为 $O(B(C+E))$，并行只改变执行安排。
 \lstinputlisting[language=C++,linerange={cuda_rays_begin-cuda_rays_end},includerangemarker=false]{../ros2_ws/src/motion2d/src/sim/lidar_cuda.cu}
+\code{blockIdx.x}、\code{blockDim.x} 和 \code{threadIdx.x} 分别给出 $b,K,j$。
+越界检查放在读写数组前。\code{nearest} 初值为正无穷；每次用新交点与已有最小值比较，
+所有对象遍历完成后，就得到该束最近命中。
 
-每块 128 个线程，总块数为 $\lceil B/128\rceil$；末块多出的线程通过边界判断返回。
-几何打包成一个连续的结构分量数组：圆的 cx、cy、r，然后是边的 ax、ay、bx、by。
-外框也作为四条边加入；所有线程复用这些静态数据。
-相邻线程读取相同障碍物参数，有利于缓存复用，但不能仅凭采用 SoA 就声称已经更快。
+\subsection{圆求交仍使用第 05 章的几何}
+令圆心相对射线起点的向量为 $q=c-o$，单位方向为 $d$，
+沿束投影 $h=q\cdot d$，垂直分量 $\ell=d_xq_y-d_yq_x$。
+把 $\|td-q\|^2=r^2$ 分解为平行和垂直两个分量，得到
+\[
+ (t-h)^2+\ell^2=r^2,\qquad t_\pm=h\pm\sqrt{r^2-\ell^2}.
+\]
+判别式负则未相交；否则先试较小根 $t_-$，它非负时就是入口；较小根在身后时再试较大根。
+例如 $o=(0,0),d=(1,0),c=(3,0),r=1$，两根为 2、4 m，取 2 m；
+从圆心发射时两根为 $-1,1$ m，取出口 1 m。
+练习 ch20-1 正是把这段根选择写成普通 C++，再与内核中的 \code{circleHit} 对照。
 
-\paragraph{内存与生命周期}
-构造时分配设备几何、输出数组和计时事件，上传一次；后续扫描重复使用。
-位姿和角度等少量标量作为内核参数传入，输出仍须回传 CPU，供噪声和 ROS 消息使用。
-此版本使用默认流、同步返回，暂不引入多流、双缓冲和跨帧异步调度。
-CudaLidar 是一个小类，其内部 CUDA 资源只存在于可选实现中，CPU 头文件不依赖 CUDA Runtime。
+\section{把静态几何放在设备上重复使用}
+CPU 内存和 GPU 设备内存各自保存数据。构造 \code{CudaLidar} 时，把世界中的圆和多边形边展开，
+外框也作为四条边加入。设备数组依次存放
+\[
+ [c_x\ (C),\ c_y\ (C),\ r\ (C),\ a_x\ (E),\ a_y\ (E),\ b_x\ (E),\ b_y\ (E)],
+\]
+括号内是元素个数。将同一字段连续存放称为结构分量数组（SoA）。
+例如 $a_x$ 起始偏移为 $3C$，$a_y$ 为 $3C+E$；内核中的指针加法正是在计算这些偏移。
+总元素数为 $3C+4E$，每个 double 占 8 字节，因此几何占 $8(3C+4E)$ 字节。
+$C=8$、8 个四边形加外框给出 $E=36$，共 1344 字节；720 个 float 输出另占 2880 字节。
 
-\paragraph{先检查正确性}
-GPU 测试覆盖 40 个自由随机位姿、圆相切、共线边、部分视场、NaN 与无回波，
-逐束分别比较特殊值类别和有限距离，容差为 $2\times10^{-5}$ m。
-再施加同一批噪声样本并重复检查。启用 CUDA 却没有可用 GPU 时测试应失败，
-不能静默切到 CPU 后仍报告“GPU 验收通过”。
+\begin{center}\begin{minipage}{\linewidth}\makeatletter\def\@captype{figure}\makeatother
+\centering
+\begin{tikzpicture}[>=stealth,font=\small,
+ box/.style={draw=tealblue,fill=pale,rounded corners,minimum width=2.5cm,minimum height=.8cm,align=center}]
+\node[box] (world) at (0,0) {CPU 世界几何};
+\node[box] (geom) at (7,0) {GPU 几何数组};
+\draw[->] (world)--node[above]{构造时上传一次}(geom);
+\node[box] (pose) at (0,-1.8) {本帧位姿与参数};
+\node[box] (kernel) at (7,-1.8) {逐束求交内核};
+\draw[->] (pose)--node[above]{每帧启动}(kernel);
+\draw[->] (geom)--(kernel);
+\node[box] (out) at (7,-3.6) {GPU 距离数组};
+\node[box] (ros) at (0,-3.6) {CPU 噪声与消息};
+\draw[->] (kernel)--(out);
+\draw[->] (out)--node[above]{每帧回传}(ros);
+\end{tikzpicture}
+\caption{扫描的数据流。几何与设备输出缓存跨帧复用，每帧传入位姿并取回本帧距离。}
+\end{minipage}\end{center}
 
-\clearpage
-\section{完整扫描收益取决于规模}
-\begin{lstlisting}[language=bash]
-# Copy benchmark CSV to textbook/data only when recording a new run.
-python3 scripts/plot_ch20_cuda.py
-\end{lstlisting}
-每组预热 20 次，再运行 60 次，分别记录 P50/P95；CPU 与 GPU 使用相同位姿和几何。
-0/16/128/512 个障碍物、90/720/4096/16384 束共 16 组，圆与四边形各占一半，
-外框另计四条边。计时场景为独立合成夹具，不把随机生成器的连通性筛选时间计入扫描。
+相邻线程遍历相同的障碍参数，可复用缓存中的几何；输出则按相邻束索引连续写入。
+本实现用默认流同步返回：调用方拿到距离数组时，设备计算和回传已完成。
+分配设备数组、上传和创建计时事件发生在构造阶段，扫描过程中复用它们，析构时释放。
+这些资源集中在可选 CUDA 实现中，CPU 使用者仍通过普通 C++ 接口调用。
 
-\begin{figure}[!ht]
+\section{先对齐数值，再比较速度}
+两后端使用同一个 \code{LidarConfig}。全周间隔为 $2\pi/B$；部分视场包含两端。
+瞬时位姿、圆心安装、近于最小量程的 NaN 和超出最大量程的 $+\infty$ 都保持第 05 章含义。
+例如 NaN 表示这一束测量无效，$+\infty$ 表示量程内没有回波，建图时处理方式不同。
+
+设备几何用 double，输出转为 float。本章构建关闭 FMA 融合和 fast-math，
+便于用同一运算过程检查数值误差。先逐束比较特殊值类别，再对有限量程计算
+\[
+ e_{\max}=\max_{i\in\mathcal F}|r_i^{\rm CPU}-r_i^{\rm GPU}|,
+\]
+$\mathcal F$ 是两者都有限的索引集合。比较阈值取 $2\times10^{-5}$ m。
+圆相切、圆内发射、共线边、部分视场以及随机自由位姿分别检查求交的不同分支。
+
+有噪声比较采用同一份按束编号排列的误差 $e_i$，分别调用两次 \code{perturbRange}：
+\[
+ \tilde r_i^{\rm CPU}=g(r_i^{\rm CPU},e_i),\qquad
+ \tilde r_i^{\rm GPU}=g(r_i^{\rm GPU},e_i).
+\]
+这样距离差反映计算后端的差异。若两边独立采样，且暂不考虑量程裁剪，
+即使理想距离相同，也有
+$\operatorname{Var}[(r+n_1)-(r+n_2)]=\sigma^2+\sigma^2=2\sigma^2$，
+差值标准差为 $\sqrt2\sigma$。$\sigma=0.01$ m 时约为 1.41 cm，远大于数值比较阈值。
+固定种子还能帮助重放，但必须连同抽样次数、顺序及特殊值分支一起固定。
+
+\section{加速收益为何随规模变化}
+将一次驻留扫描分成启动与同步、求交内核、距离回传三部分。用简化模型理解交点：
+设 $M=C+E$，CPU 每次求交平均成本为 $a$，GPU 单线程每次求交平均成本为 $g$，
+有效同时工作的线程数为 $P$，固定开销为 $L$，每束回传成本为 $d$，则
+\[
+ T_{\rm CPU}\approx aBM,\qquad
+ T_{\rm GPU}\approx L+gM\left\lceil B/P\right\rceil+dB.
+\]
+$P$ 表示特定内核、设备和规模下的有效并行度，可通过测量估计。
+当 $B\gg P$ 时，用 $B/P$ 近似取整项，GPU 更快的条件变为
+\[
+ B\,[aM-gM/P-d]>L.
+\]
+若方括号为正，束数超过 $L/(aM-gM/P-d)$ 后才可能抵消固定开销；
+若 $B$ 很少，只增加障碍物仍只启动少量线程。
+这个模型解释趋势，具体交点还受缓存、分支和设备算术吞吐影响，应按实际扫描规模测量。
+
+\subsection{如何读计时结果}
+内核启动通常先返回 CPU，随后 GPU 才完成计算。
+\code{CudaLidar::scan} 用两个 CUDA 事件包住内核并等待结束，以测设备执行时间；
+用单调墙钟测量同步后的回传和整次调用。扫描计时包括启动、同步与回传。
+关于事件与传输计时可参照
+\href{https://docs.nvidia.com/cuda/cuda-c-best-practices-guide/index.html}{NVIDIA 性能测量指南}。
+
+每组先预热 20 次，再测 60 次。预热使设备初始化与常用路径进入稳定工作状态。
+把时长排序为 $t_{(0)}\le\cdots\le t_{(n-1)}$，基准程序采用
+\[
+ P_q=t_{(\lfloor q(n-1)\rfloor)}.
+\]
+因此 60 次测量的 P50 取索引 29，P95 取索引 56。P50 描述常见耗时，P95 帮助观察较慢样本。
+本组设备为 RTX 5060，CUDA 13.2.1；圆与四边形各占障碍数的一半，外框另有四条边。
+同组 CPU/GPU 使用相同位姿与几何，扫描时间从已生成的世界开始计算。
+
+\begin{center}\begin{minipage}{\linewidth}\makeatletter\def\@captype{figure}\makeatother
 \centering\includegraphics[width=\linewidth]{figures/ch20_cuda.pdf}
-\caption{RTX 5060 主机实测，两个坐标轴都用对数。
-驻留 GPU 扫描包含内核启动、同步和结果回传；虚线只表示内核，不能替代整条曲线。}
-\end{figure}
-
+\caption{预热后的 P50 耗时，两轴均采用对数刻度。实线比较 CPU 与含回传的 GPU 扫描，虚线给出 GPU 内核部分。}
+\end{minipage}\end{center}
 \begin{center}\small
 \begin{tabular}{rrrrr}\toprule
 障碍/束 & CPU/ms & 内核/ms & 驻留扫描/ms & CPU/扫描\\\midrule
@@ -92,39 +204,36 @@ python3 scripts/plot_ch20_cuda.py
 512/16384 & 57.913 & 6.766 & 6.784 & 8.54\\\bottomrule
 \end{tabular}
 \end{center}
-表中均为预热后的 P50。少量束时 GPU 明显更慢：并行度不足、启动固定成本和 double 算术代价
-可能超过并行收益。720 束、16 障碍只有约 1.32 倍驻留扫描收益，不能写成数量级加速。
+16 障碍、90 束的比值为 $0.0116/0.0638\approx0.18$，GPU 更慢；
+16384 束时为 $1.923/0.267\approx7.20$，更多束使并行计算收益超过固定开销。
+表中比值采用原始精度计算，显示值已四舍五入。
 
-一次 setup 包括主机打包、分配、上传和事件创建；首组约 61 ms，还可能包含上下文初始化。
-之后的 setup 约 0.029--0.110 ms；单独上传约 0.002--0.012 ms，不应每帧重复支付。
-回传约 0.005--0.013 ms，已包含在驻留扫描里；不能把三个独立分位数相加当作总时长分位数。
-CUDA 事件测内核，墙钟测同步后的回传和整次扫描；只量异步 launch 的返回时间会严重低估成本。
+一次 setup 包含打包、分配、上传和事件创建。首组约 61 ms，可能含上下文初始化；
+后续组约 0.029--0.110 ms。单独上传约 0.002--0.012 ms，只在构造时支付；
+每帧回传约 0.005--0.013 ms，已计入扫描总时间。若一个扫描器用于 $N$ 帧，
+平均成本为 $T_{\rm setup}/N+T_{\rm scan}$，这说明复用对象为何重要。
+这组 16 个规模的有限 float 输出最大差为零；更换编译选项后仍按上述容差和特殊值重新比较。
+原始数据在 \code{textbook/data/ch20_cuda.csv}，运行 \code{scripts/plot_ch20_cuda.py} 可重画图。
 
-本次 16 组输出的 float 距离最大差为 0，随机位姿与噪声检查也通过；
-这不是所有场景位级一致的承诺，仍保留浮点容差及特殊值检查。
-练习 ch20-1 补齐 ray-circle 根选择，并解释为什么增加障碍、但不增加束数，未必能让 GPU 获益。
-完整 ROS 噪声、消息构建和发布成本仍需在节点中另测，不能由此表推断。
-
-\clearpage
-\section{接入 ROS，再测一次}
-\begin{lstlisting}[language=bash]
+\section{接入 ROS 后，重新看整个发布过程}
+\begin{lstlisting}[language=bash,numbers=none]
 ros2 launch motion2d_bringup ch20.launch.py backend:=cuda beams:=720
 ros2 service call /sim/pause std_srvs/srv/SetBool "{data: false}"
-# Separate experiment: starts and closes its own CPU/CUDA launches.
+# After closing the manual launch, run paired CPU/CUDA trials:
 python3 scripts/run_ch20.py
 \end{lstlisting}
-仿真器通过 lidar.backend 在 cpu 与 cuda 之间选择；参数只在启动时读取。
-CUDA 构建关闭时若请求 cuda，会明确报错，不静默切回 CPU。
-几何和输出缓存跨扫描复用；reset 只重置仿真时间与同一条噪声随机流，不重复上传不变的世界。
-不论后端如何，\textbf{采集时间戳、激光坐标、量程编码和消息 QoS 都相同}。
-RViz 可直接查看 /scan 命中点；/clock 仍只有仿真器一个发布者。
+\code{lidar.backend} 在启动时选择 cpu 或 cuda。CUDA 选项关闭的构建请求 cuda 时会报错，
+可据此检查当前加载的工作空间与构建配置。reset 恢复仿真时间与噪声流，静态世界继续复用。
+RViz 中用 /scan 观察命中点；切换后端后，采集时刻、laser 坐标、量程编码和 QoS 保持相同。
 
-默认关闭性能诊断，选学 launch 开启 lidar.profile，输出结构化 /sim/lidar\_timing。
-其中扫描、噪声、消息构造、publish 调用耗时相加为本次总耗时；
-GPU 另列事件内核与回传，CPU 对这两个不适用字段填 NaN。
-总耗时截至 publish 返回，不包含订阅者接收、RViz 渲染、调试光束或诊断消息自身。
-这说明发布线程花了多久，不是 DDS 传输延迟的直接测量。
-
+选学 launch 开启 \code{lidar.profile}，通过 \code{/sim/lidar_timing} 发布各阶段耗时。
+对同一帧，边界依次为扫描前、扫描后、加噪后、消息构造后、publish 返回，因此
+\[
+ T_{\rm total}=T_{\rm scan}+T_{\rm noise}+T_{\rm message}+T_{\rm publish}.
+\]
+相邻时间差相加时中间端点抵消，剩下总调用区间。
+GPU 诊断另列内核和回传；CPU 对这两项填 NaN。总区间截止于 publish 返回，
+订阅者的接收和 RViz 绘制发生在各自执行线程，需在对应位置另设计时点。
 \begin{center}\small
 \begin{tabular}{lrrrrr}\toprule
 后端/束 & 扫描/ms & 噪声/ms & 发布/ms & 总P50/ms & 总P95/ms\\\midrule
@@ -136,19 +245,37 @@ CPU/16384 & 3.5454 & 0.2585 & 0.0105 & 3.8232 & 4.4095\\
 CUDA/16384 & 0.3700 & 0.4665 & 0.0111 & 0.8418 & 0.9521\\\bottomrule
 \end{tabular}
 \end{center}
-各阶段列为 P50；消息构造约 0.0007--0.0022 ms，完整 CSV 中另列。
-分位数不满足可加性，不能用表中各列 P50 的和校验总 P50。
-90 束时 GPU 仍更慢；720 束与 16384 束的发布线程总 P50 分别约改善 2.07 和 4.54 倍。
-噪声仍在 CPU 执行，在大束数下已经是不可忽视的一部分；两组运行中的 CPU 时钟、缓存和调度也会影响阶段耗时。
+各阶段列为 P50，消息构造的 0.0007--0.0022 ms 在完整 CSV 中另列。
+\textbf{应先逐帧求总耗时，再计算分位数。}例如三帧两个阶段分别为
+$(1,9),(9,1),(5,5)$ ms，每帧总计都是 10 ms；
+换成 $(1,5),(5,1),(9,9)$ 时，两列中位数仍为 5 ms，总耗时中位数却为 6 ms。
+阶段分位数描述的可能是不同帧，因此通常不能相加。
 
-这里采用第 05 章 seed=42 的随机世界、解析圆运动、10 Hz 扫描与 0.01 m 高斯测距噪声，
-不同于上一节的合成计时夹具，不能直接将两张表的比值拼接。
-每种后端采集 0--10 s 的 101 帧，剔除前 10 帧后统计剩余 91 帧。
-三个束数组均逐时间戳、逐束比对有噪声结果，本次最大差为 0；reset 重放初始扫描也通过。
-完整数据为 textbook/data/ch20\_ros.csv。
+本组为第 05 章 seed42 随机世界、解析圆运动、10 Hz 扫描及 0.01 m 高斯测距噪声，
+与前面的合成几何计时采用不同场景。每后端采集 0--10 s 的 101 帧，去掉前 10 帧，
+统计余下 91 帧；按采集时间和束号配对有噪声量程，三组最大差均为零。
+完整数据见 \code{textbook/data/ch20_ros.csv}。
+720 束和 16384 束的总 P50 比值分别约为 2.07 与 4.54。
 
-\paragraph{验收与练习}
-分别运行 CPU 和 CUDA，先核对数组及 NaN/$+\infty$ 类别，再看计时。
-将诊断关闭、打开，比较性能测量自身的开销；不要把 profiler 的开销算成传感器物理延迟。
-若增加逐束采集畸变，应改变每束的采集状态和时间语义，不能仅把本章 snapshot 内核改成更快就宣称完成了畸变模拟。
-GPU 后端与无 GPU 的完整主线应分别在构建矩阵中检验。
+\subsection{为什么内核加速会逐渐遇到上限}
+噪声和消息仍由 CPU 处理。若原来总时间中可加速部分占 $f$，该部分加速 $s$ 倍，
+其余部分保持原耗时，则归一化新耗时为 $(1-f)+f/s$，整体加速比是
+\[
+ S=\frac1{(1-f)+f/s}.
+\]
+例如求交占 80\%，内核快 8 倍，整体只快 $1/(0.2+0.8/8)=3.33$ 倍；
+即使求交耗时趋于零，整体也最多趋于 5 倍。
+表中大束数的噪声阶段已占较大比例，可以先检查随机数与内存访问，再决定下一个优化对象。
+重复测量时同时记录设备负载、预热次数和诊断开关；这些条件会改变实际时间分布。
+
+\section{练习：让每个加速比都有明确含义}
+\begin{enumerate}
+\item 对 90、720、4096 束手算 128 线程一块时的块数、无效线程数和末束的块内编号。
+\item \textbf{代码 ch20-1：}补全最近非负圆交点。检查前向命中、相切、圆内出口、未命中和根在身后。
+\item 写出 $C=8,E=36$ 时各字段偏移，计算几何字节数及 16384 束输出大小。
+\item 从独立零均值噪声推导差值方差 $2\sigma^2$，解释配对比较为何复用同一噪声数组。
+\item 用两张计时表分别计算扫描和发布过程的加速比；固定几何逐步增加束数，找出本机交点。
+\item 推导摊销 setup 和整体加速公式。若求交只占总时间一半，即使它快 10 倍，整体能快多少？
+\item 先逐帧相加、再算 P50/P95；比较诊断开关的耗时影响，并区分采集时间和执行耗时。
+\end{enumerate}
+练习入口、判分项和手算提示见 \code{exercises/ch20/README.md}。
