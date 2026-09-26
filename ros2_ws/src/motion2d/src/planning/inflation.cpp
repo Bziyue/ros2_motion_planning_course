@@ -1,4 +1,5 @@
 #include "motion2d/planning/grid.hpp"
+#include "motion2d/mapping/distance_transform.hpp"
 #include <algorithm>
 #include <cmath>
 #include <stdexcept>
@@ -34,12 +35,9 @@ PlanningGrid inflateGrid(const GridConfig & geometry, const std::vector<std::int
     throw std::invalid_argument("invalid inflation input");
   }
   PlanningGrid grid{geometry, std::vector<std::uint8_t>(occupancy.size(), 0), config.radius+config.margin};
+  const auto blocked = obstacleMask(occupancy, config.free_threshold, config.unknown_blocked);
   std::vector<int> obstacles;
-  for (std::size_t i = 0; i < occupancy.size(); ++i) {
-    const int value = occupancy[i];
-    if (value < -1 || value > 100) {throw std::invalid_argument("occupancy must be -1 or 0..100");}
-    if (value < 0 ? config.unknown_blocked : value > config.free_threshold) {obstacles.push_back(i);}
-  }
+  for (std::size_t i = 0; i < blocked.size(); ++i) {if (blocked[i]) {obstacles.push_back(i);}}
   const double r = grid.clearance_radius, resolution = geometry.resolution;
   // Clamp in floating point before integer conversion for a radius larger than the map.
   const int nx = static_cast<int>(std::min<double>(geometry.width, std::ceil(r/resolution)+1));

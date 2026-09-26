@@ -1,0 +1,144 @@
+\chapter{离障碍多远：二维距离场}
+\begin{notebox}
+\textbf{目标}\quad 把占据标签变成距离，查询连续位置的值与梯度，明确哪些距离可以用于安全判定。\\
+\textbf{先修}\quad 第 07、11 章；范数、偏导数和双线性插值。
+\end{notebox}
+
+\section{先看一个圆的距离场}
+\begin{lstlisting}[language=bash]
+ros2 run motion2d esdf_demo tmp/ch12_esdf
+/usr/bin/python3 scripts/plot_ch12_esdf.py
+\end{lstlisting}
+实验把半径 1 m 的圆按格子中心采样为占据图，再比较三种分辨率。
+连续圆的解析有符号距离是 $d_{circle}(p)=\|p\|-1$：圆外正、圆内负、边界零。
+除圆心外，其梯度为 $p/\|p\|$；圆心没有唯一的梯度方向。
+
+\section{先确定你计算的是哪一种距离}
+本章输入是\textbf{未膨胀的观测栅格}。沿用上一章标签策略：已观测且编码不超过 35 才自由，
+未知默认阻塞；外围补一圈阻塞格，表达地图外部不安全。
+在格子中心 $c_i$ 定义离散场
+\begin{equation}
+d_i=\begin{cases}
+\min_{j\in O_c}\|c_i-c_j\|,&i\text{ 自由},\\
+-\min_{j\in F_c}\|c_i-c_j\|,&i\text{ 阻塞}.
+\end{cases}
+\end{equation}
+$O_c,F_c$ 是阻塞与自由格中心集合。这是\textbf{有符号中心距离}，不是到完整方格边界的精确距离。
+例如宽 $\rho$ 的直墙格外，相邻自由中心距墙格中心为 $\rho$，但距墙边只有 $\rho/2$。
+整张地图阻塞时没有自由中心，内部值为 $-\infty$，查询明确返回不可用。
+
+\section{欧氏距离变换：先平方，后开方}
+平方距离可以分离成 x、y 两项。先逐列，再逐行求最小值：
+\begin{equation}
+D(x,y)=\min_{i,j}\big[(x-i)^2+(y-j)^2+f(i,j)\big],
+\quad f=\begin{cases}0&\text{种子格},\\+\infty&\text{其他格}.\end{cases}
+\end{equation}
+$d=\rho\sqrt D$ 才是米制距离，不能直接把 $D$ 当作 ESDF。
+以阻塞格为种子得到外部距离，以自由格为种子得到内部距离；随后按标签赋予正负号。
+二维变换复用同一段一维算法；源码入口见本章运行说明。
+
+\clearpage
+\section{一维最小值为什么可以快速求}
+给定数组 $f(q)$，每个有限元素贡献一条抛物线 $f(q)+(x-q)^2$。
+我们要的是这些曲线中最低的一条。按中心位置递增加入曲线，保存仍有机会成为最小值的中心索引，
+以及每条曲线从哪里开始胜出。新曲线与旧曲线 $v$ 的交点为
+\begin{equation}
+s=\frac{f(q)+q^2-f(v)-v^2}{2(q-v)}.
+\end{equation}
+若交点早于旧曲线开始胜出的区间，旧曲线永远不再最低，可以删除。
+每条曲线最多加入和删除一次；得到分界点后，再从左到右读取最小值。
+这个下包络算法来自 Felzenszwalb 与 Huttenlocher 的 EDT 论文，正文与原始链接见 REFERENCES.md。
+本课程按公式独立实现，并用暴力最近中心搜索核对结果。
+\lstinputlisting[language=C++,linerange={edt_envelope_begin-edt_envelope_end},
+  includerangemarker=false]{../ros2_ws/src/motion2d/src/mapping/distance_transform.cpp}
+
+\section{连续位置的值与梯度}
+先换算到以\textbf{格子中心}为采样点的坐标：
+\begin{equation}
+\xi=\frac{x-o_x}{\rho}-\frac12,\qquad
+\eta=\frac{y-o_y}{\rho}-\frac12.
+\end{equation}
+令 $i=\lfloor\xi\rfloor,j=\lfloor\eta\rfloor$，局部比例 $u=\xi-i,v=\eta-j$。
+四个中心值按 $00,10,01,11$ 排列：
+\begin{equation}
+\widetilde d=(1-v)[(1-u)d_{00}+u d_{10}]+v[(1-u)d_{01}+u d_{11}].
+\end{equation}
+对权重求导，并用 $du/dx=dv/dy=1/\rho$ 转为米制梯度。
+\lstinputlisting[language=C++,linerange={esdf_bilinear_begin-esdf_bilinear_end},
+  includerangemarker=false]{../ros2_ws/src/motion2d/src/mapping/esdf.cpp}
+查询范围为最外围格子中心组成的闭矩形；越界或角点距离无穷时返回空。
+梯度在插值块边界可能不连续；跨自由/阻塞相邻中心时，值从 $-\rho$ 变到 $+\rho$，斜率为 2。
+所以不要强行把本章梯度解释成处处单位长度的精确 SDF 法向。
+
+\clearpage
+\section{把距离与安全判定分开}
+插值会产生误差，障碍还有方格面积。仅使用 $\widetilde d>r+m$ 可能高估可用净空。
+设当前查询点的四个插值中心为 $c_k$，权重为 $w_k$，且四个中心均自由。
+无符号最近阻塞中心距离 $d_c$ 满足
+\begin{equation}
+|d_c(p)-d_c(c_k)|\leq\|p-c_k\|.
+\end{equation}
+对四个不等式加权求和，可从插值值减去 $E=\sum_k w_k\|p-c_k\|$ 得到 $d_c(p)$ 的下界。
+每个障碍方格离中心最远为半对角线 $h=\rho/\sqrt2$，再由三角不等式得到
+\begin{equation}
+\underline d(p)=\max\left(0,\widetilde d(p)-\sum_{k=1}^4 w_k\|p-c_k\|-\frac{\rho}{\sqrt2}\right).
+\end{equation}
+这就是 sample 返回的 clearance\_lower\_bound，针对\textbf{方格并集与地图外部}。
+四个角中存在阻塞格时返回 0；0 只说明未给出正净空证书，不表示一定碰撞。
+此下界是本课程的保守选择，可能比精确方格距离小很多。
+
+\begin{notebox}
+\textbf{圆盘半径只处理一次}\quad 本章从未膨胀图计算距离，用
+$\underline d>r+m$ 验证单个圆心位置。严格大于对应接触也算不安全。
+若使用第十一章已膨胀的配置空间，则按中心点检查，不再扣一次物理半径。
+\end{notebox}
+返回的 gradient 是 $\widetilde d$ 的导数，\textbf{不是这个下界的导数}。
+轨迹优化可以借助连续插值的值和梯度获得改进方向；优化完成后必须单独验证安全。
+离散采样满足净空不保证采样点之间的曲线安全，第十三、十六章会引入凸走廊与整段包含性检查。
+
+\section{核对距离、梯度与离散误差}
+三个层次分别检查：
+\begin{enumerate}
+\item \textbf{算法：}50 张 seed=1212 小栅格，逐格枚举所有种子，核对平方距离。
+无种子、单行及稀疏整列也覆盖。
+\item \textbf{数值：}直墙的符号/米制距离有解析值；对双线性函数和实际距离场做中心有限差分，
+梯度误差要求小于 $10^{-9}$，查询点避开插值块边界。
+\item \textbf{几何：}1000 个 seed=1213 查询点，逐个障碍方格算点到闭方格的精确距离，
+再取与外部距离的最小值，确认下界从不超过它，容差 $10^{-12}$ m。
+\end{enumerate}
+这些检查针对栅格所表达的几何，不能消除传感器噪声、漏检和建图错误。
+若显式允许未知自由，证书只针对这张乐观地图，不能声称验证过真实未知空间。
+
+\clearpage
+\section{分辨率实验与练习}
+\begin{figure}[h]
+\centering\includegraphics[width=\linewidth]{figures/ch12_esdf.pdf}
+\caption{左：0.1 m 格的有符号场与插值梯度，坐标等比例。右：固定 y 的距离误差切片。
+不同分辨率都存在栅格化和中心距离误差，靠近界面时插值也影响结果。}
+\end{figure}
+\begin{center}\small
+\pgfplotstabletypeset[col sep=comma,
+columns={resolution,cells,mae_m,max_error_m,median_us,p95_us},
+columns/resolution/.style={column name=$\rho$/m,fixed,precision=2},columns/cells/.style={column name=格数},
+columns/mae_m/.style={column name=平均误差/m,fixed,precision=4},
+columns/max_error_m/.style={column name=最大误差/m,fixed,precision=4},
+columns/median_us/.style={column name=中位数/$\mu$s,fixed,precision=1},
+columns/p95_us/.style={column name=P95/$\mu$s,fixed,precision=1},
+every head row/.style={before row=\toprule,after row=\midrule},
+every last row/.style={after row=\bottomrule}]{data/ch12_esdf.csv}
+\end{center}
+给定地图为 $8\times8$ m；中心位于半径 1 m 圆内的格子标为占据。
+三组都使用同一查询晶格，统计 $0.3\leq\|p\|\leq1.6$ m 环带内与解析圆距离的绝对误差。
+这是\textbf{栅格对圆的近似实验}，不是同一方格几何的精确距离误差；原始圆与方格并集不完全相同。
+每个分辨率预热 5 次，计时 100 次，含分类、补边界和两个 EDT，不含 ROS 序列化。
+本机更细网格平均误差更小，但构建更慢；单个点的误差未必单调，耗时也不是跨机器承诺。
+
+\textbf{练习 ch12-1：}补全 bilinearGradient。给定
+$f(x,y)=2x+3y+xy$ 在 $0,\rho$ 四角的值，验证 $\rho=0.2$ m、$u=0.3,v=0.7$ 时
+梯度为 $(2.14,3.06)$。再验证常数场梯度为零。
+提示、评分和参考解分别位于 exercises/ch12 下，练习失败不影响主演示。
+
+\textbf{理解与实验：}画解析圆场；解释圆心处不可微、中心距与边界距的差别。
+改变分辨率，报告误差、格数和构建时间，保留相同查询点与计时范围。
+常见错误是忘记开方、忘记乘分辨率、把索引坐标当米数，以及使用已经膨胀的地图再扣半径。
+ROS 距离场可视化将在下一功能接入。
