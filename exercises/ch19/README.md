@@ -17,3 +17,11 @@ g++ -std=c++17 -I/usr/include/eigen3 -Iros2_ws/src/motion2d/include -Iexercises/
 
 5. ROS实验：运行 `scripts/check_navigation_boundary.py`（启动命令见章节说明），删去候选的一个区域，验证不会收到确认且原参考继续执行。为什么“publish返回”不能当作“接收成功”？
 6. 启动容差和运动中的C2交接分别解决什么问题？把0.03m启动容差用于每次接续会产生什么后果？
+
+7. EXERCISE(ch19-2)：补完 `starter/replan_due.hpp` 的周期触发条件。用仿真时间而非墙钟；等待交接时禁止第二候选。
+```bash
+c++ -std=c++17 -I exercises/ch19/starter exercises/ch19/check_trigger.cpp -o tmp/ch19-trigger
+./tmp/ch19-trigger
+```
+参考答案在solutions，判据包含首次、暂停、到周期前1ns、恰好到周期、待确认和回退。
+8. 用相同种子运行A/B/C。分别报告初始对齐ATE、1s平移RPE、跟踪误差、真实圆盘净空、碰撞尝试、规划/MPC耗时、停车次数。不能把真值注入规划或SLAM来提高分数。

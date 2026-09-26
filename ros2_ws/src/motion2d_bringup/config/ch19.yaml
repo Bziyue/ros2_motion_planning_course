@@ -1,0 +1,137 @@
+# Shared world values: display and collision must describe the same geometry.
+/**:
+  ros__parameters:
+    use_sim_time: true
+    x: -8.0
+    y: -8.0
+    radius: 0.20
+    seed: 42
+    width: 20.0
+    height: 20.0
+    circle_count: 8
+    polygon_count: 8
+    size_min: 0.35
+    size_max: 1.2
+    polygon_samples: 8
+    goal_x: -4.0
+    goal_y: -4.0
+    margin: 0.05
+    require_connected: true
+    check_resolution: 0.25
+simulator:
+  ros__parameters:
+    publish_truth_tf: false # ch10.launch also enforces exclusive adapter ownership
+    dt: 0.005
+    yaw: 0.0
+    start_paused: true
+    command_timeout: 0.5  # seconds of simulated time, not wall time
+    speed_max: 1.0        # translational norm limit, m/s (velocity mode)
+    yaw_rate_max: 1.0     # absolute yaw rate limit, rad/s (velocity mode)
+    mass: 1.0            # kg (inertial mode)
+    inertia_z: -1.0      # -1 derives m*r^2/2; radius=0 needs an explicit positive value
+    linear_drag: 0.15     # kg/s
+    angular_drag: 0.01    # kg*m^2/s
+    force_max: 2.0       # N per odom axis; not a vector norm bound
+    torque_max: 0.2      # N*m
+    reference_radius: 1.0 # radius of the prescribed path, NOT the robot disk (m)
+    reference_omega: 0.4  # reference angular frequency (rad/s)
+    lidar.enabled: true
+    lidar.backend: cpu
+    lidar.scan_model: snapshot
+    lidar.beams: 720
+    lidar.angle_min: -3.141592653589793
+    lidar.fov: 6.283185307179586  # full turn excludes the duplicate endpoint
+    lidar.rate: 10.0            # Hz; nonaligned rates are supported by the ch06 scheduler
+    lidar.range_min: 0.05       # nearer true hit -> NaN, not free space
+    lidar.range_max: 6.0       # no in-range echo -> +inf
+    lidar.range_stddev: 0.01    # m per valid beam/sample; 0 disables noise
+    lidar.noise_seed: 4242      # independent of world seed; reset replays this stream
+    lidar.visualize_beams: false # display helper only; SLAM must not consume it
+    imu.enabled: true
+    imu.rate: 200.0
+    imu.gravity: 9.81           # magnitude; world gravity is (0,0,-gravity)
+    imu.gyro_stddev: [0.002, 0.003, 0.004]  # rad/s per sample, x/y/z
+    imu.accel_stddev: [0.04, 0.05, 0.06]   # m/s^2 per sample, x/y/z
+    imu.noise_seed: 6060        # independent from the world and lidar streams
+    imu.visualize: false        # display helpers only; no orientation estimate
+slam:
+  ros__parameters:
+    slam.enable_loops: true
+    slam.keyframe_distance: 0.3
+    slam.keyframe_angle: 0.25
+    slam.keyframe_seconds: 2.0
+    slam.min_separation: 20
+    slam.candidate_distance: 0.8
+    slam.max_frames: 200
+    mapping.resolution: 0.10  # m/cell; map extent is independent of world geometry
+    mapping.width_cells: 220
+    mapping.height_cells: 220
+    mapping.origin_x: -11.0  # lower-left corner, not centre of cell zero
+    mapping.origin_y: -11.0
+    mapping.hit_probability: 0.7
+    mapping.miss_probability: 0.4
+    mapping.logodds_limit: 4.0
+lidar_odometry:
+  ros__parameters:
+    estimation.metric: line
+    estimation.voxel_size: 0.06
+    estimation.normal_radius: 0.4
+    estimation.association_distance: 0.5
+    estimation.max_rmse: 0.15
+    estimation.max_keyframes: 5
+    estimation.keyframe_distance: 0.2
+    estimation.keyframe_angle: 0.15
+    estimation.max_gap: 1.0
+
+fusion:
+  ros__parameters:
+    fusion.estimate_bias: true
+    fusion.innovation_gate: 16.3
+    fusion.history_seconds: 2.0
+    fusion.stale_seconds: 0.5
+
+mapping:
+  ros__parameters:
+    mapping.resolution: 0.10  # m/cell; map extent is independent of world geometry
+    mapping.width_cells: 220
+    mapping.height_cells: 220
+    mapping.origin_x: -11.0  # lower-left corner, not centre of cell zero
+    mapping.origin_y: -11.0
+    mapping.hit_probability: 0.7
+    mapping.miss_probability: 0.4
+    mapping.logodds_limit: 4.0
+
+tracker:
+  ros__parameters:
+    reference.source: navigation
+    reference.shape: figure_eight
+    reference.scale: 1.0
+    reference.omega: 0.5
+    reference.ramp_seconds: 2.0
+    control.rate_hz: 50.0
+    control.odometry_timeout: 0.12
+    control.controller: mpc
+    mpc.horizon: 20
+    mpc.max_wall_seconds: 0.01
+    mpc.velocity_max: 1.0
+    mpc.force_rate_max: 5.0
+    control.mass: 1.0
+    control.linear_drag: 0.15
+    control.inertia_z: 0.02
+    control.angular_drag: 0.01
+    control.force_max: 2.0
+    control.torque_max: 0.2
+    control.kp: 4.0
+    control.kd: 3.0
+    control.yaw_kp: 4.0
+    control.yaw_kd: 3.0
+    control.feedforward: true
+
+navigation:
+  ros__parameters:
+    navigation.tracking_margin: 0.15
+    navigation.rate_hz: 5.0
+    navigation.lead_seconds: 0.15
+    navigation.local_length: 2.0
+    navigation.bezier_penalties: false
+    navigation.solve_budget: 0.04

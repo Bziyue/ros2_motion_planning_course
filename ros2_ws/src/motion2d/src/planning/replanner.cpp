@@ -6,6 +6,10 @@
 #include <limits>
 #include <stdexcept>
 namespace motion2d {
+bool replanDue(std::int64_t now,const std::optional<std::int64_t> & last,std::int64_t period,bool waiting) {
+  return !waiting && (!last || (now>=*last && now-*last>=period));
+}
+
 LocalRoute observedLocalRoute(const PlanningGrid & grid,const std::vector<std::int8_t> & observed,
   const Eigen::Vector2d & start,const Eigen::Vector2d & goal,double max_length) {
   if(observed.size()!=grid.blocked.size() || !start.allFinite() || !goal.allFinite() || !std::isfinite(max_length) || max_length<=0)

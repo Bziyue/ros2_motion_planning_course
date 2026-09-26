@@ -44,3 +44,12 @@ TEST(Replanner,ImpossibleInitialDerivativeNeverGetsCertified) {
   TranslationState start;start.position={1,2};start.velocity={2,0};ReplanConfig config;config.optimize=false;
   const auto result=replanObserved(grid,raw,field,start,{3,2},config);EXPECT_FALSE(result.success);EXPECT_FALSE(result.curve);EXPECT_EQ(result.status,"no_certified_local_trajectory");
 }
+
+TEST(Replanner,SimulationCadenceDoesNotRepeatPausedOrPending) {
+  EXPECT_TRUE(replanDue(0,{},200,false));
+  EXPECT_FALSE(replanDue(100,100,200,false));
+  EXPECT_FALSE(replanDue(299,100,200,false));
+  EXPECT_TRUE(replanDue(300,100,200,false));
+  EXPECT_FALSE(replanDue(300,100,200,true));
+  EXPECT_FALSE(replanDue(50,100,200,false));
+}

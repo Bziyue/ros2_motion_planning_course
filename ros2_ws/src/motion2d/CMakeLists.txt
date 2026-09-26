@@ -128,7 +128,7 @@ add_executable(lidar_odometry_demo src/examples/lidar_odometry_demo.cpp)
 target_link_libraries(lidar_odometry_demo PRIVATE motion2d_core)
 install(TARGETS lidar_odometry_demo DESTINATION lib/motion2d)
 
-foreach(node lidar_odometry estimated_odometry fusion slam planner esdf trajectory tracker)
+foreach(node lidar_odometry estimated_odometry fusion slam planner esdf trajectory tracker navigation)
   add_executable(${node}_node src/nodes/${node}_node.cpp src/ros/mapping_messages.cpp)
   target_compile_features(${node}_node PRIVATE cxx_std_20)
   target_compile_options(${node}_node PRIVATE -Wall -Wextra -Wpedantic)
@@ -139,6 +139,9 @@ foreach(node lidar_odometry estimated_odometry fusion slam planner esdf trajecto
     visualization_msgs::visualization_msgs__rosidl_typesupport_cpp)
   install(TARGETS ${node}_node DESTINATION lib/motion2d)
 endforeach()
+
+target_sources(navigation_node PRIVATE src/ros/navigation_messages.cpp src/ros/trajectory_messages.cpp src/ros/control_messages.cpp src/ros/planning_messages.cpp)
+target_link_libraries(navigation_node PRIVATE motion2d_interfaces::motion2d_interfaces__rosidl_typesupport_cpp)
 
 target_sources(planner_node PRIVATE src/ros/planning_messages.cpp src/ros/trajectory_messages.cpp)
 target_link_libraries(planner_node PRIVATE motion2d_interfaces::motion2d_interfaces__rosidl_typesupport_cpp)
@@ -212,6 +215,10 @@ install(TARGETS reference_handover_demo DESTINATION lib/motion2d)
 add_executable(replanner_demo src/examples/replanner_demo.cpp)
 target_link_libraries(replanner_demo PRIVATE motion2d_core)
 install(TARGETS replanner_demo DESTINATION lib/motion2d)
+
+add_executable(navigation_clearance src/examples/navigation_clearance.cpp)
+target_link_libraries(navigation_clearance PRIVATE motion2d_core)
+install(TARGETS navigation_clearance DESTINATION lib/motion2d)
 
 if(BUILD_TESTING)
   find_package(ament_cmake_gtest REQUIRED)

@@ -318,3 +318,11 @@ replanObserved固定未来首p/v/a、静止终点，同快照ESDF/走廊；优�
 控制器重新验证消息和曲线/区域证书；自由空间真实性由规划器负责。`/control/accepted_reference` Int64为接受的start_ns；一次仅一个待确认、起点唯一。
 `/navigation/stop` Empty显式清空参考与显示并用当前观测制动。`control.controller=ideal` 输出odom PoseStamped（下一周期目标），需ideal仿真/禁用IMU；pd/mpc仍输出力矩。
 静止启动/重启允许位置0.03m、yaw0.02rad、速度/角速度0.02以内；普通交接严格匹配p/v/a/yaw，拒绝不覆盖旧曲线。
+
+### ch19 在线导航快照与状态
+
+NavigationNode订阅/map、/odometry、/scan（只检查时间）、/goal_pose、/control/status、/control/accepted_reference及TF；禁止真值输入。
+地图快照一次构建raw/config-grid/ESDF，单线程求解期间不修改；最近可用map←odom对齐在本次求解固定。剩余区域在新快照/对齐下重新整体验证，失败制动。
+规划5Hz、控制50Hz（A理想点200Hz），未来.15s交接，优化预算.04s，等待ACK时不发第二候选。`NavigationStatus` 含状态、规划/优化状态、墙钟求解时长、接受数与停车数。
+默认激光.35s、odom.12s、map3s过期触发停车；只有仿真时钟推进才判过期。时间回退清空目标；新目标也显式停车。静止后自动重试当前目标，不承诺完备探索。
+C默认初始yaw=0，估计odom的轴与仿真物理输入轴一致、原点在第一帧；改初始yaw必须同时实现力向量坐标适配，不能仅平移目标。A/B真值适配器明确world=map=odom。

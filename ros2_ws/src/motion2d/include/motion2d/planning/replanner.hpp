@@ -3,6 +3,11 @@
 #include "motion2d/trajectory/trajectory_optimizer.hpp"
 #include "motion2d/trajectory/bezier_bounds.hpp"
 namespace motion2d {
+/** @brief Simulation-time trigger; at most one pending handover, no paused repeats.
+ * @pre now >= 0, period > 0; caller clears last_attempt on clock rollback.
+ */
+bool replanDue(std::int64_t now,const std::optional<std::int64_t> & last_attempt,
+  std::int64_t period,bool waiting);
 /** @brief Reachable observed route, truncated by arc length to a local endpoint. */
 struct LocalRoute {
   bool success=false,reaches_global=false;
