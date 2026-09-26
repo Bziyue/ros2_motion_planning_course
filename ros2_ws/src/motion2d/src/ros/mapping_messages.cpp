@@ -55,6 +55,28 @@ sensor_msgs::msg::PointCloud2 toPointCloud(
   }
   return cloud;
 }
+GridConfig geometryFromOccupancyGrid(const nav_msgs::msg::OccupancyGrid & m)
+{
+  const auto & o = m.info.origin;
+  if (m.header.frame_id != "map" || !std::isfinite(o.position.z) ||
+    std::abs(o.position.z) > 1e-9 || !std::isfinite(o.orientation.w) ||
+    !std::isfinite(o.orientation.x) || !std::isfinite(o.orientation.y) ||
+    !std::isfinite(o.orientation.z) || std::abs(o.orientation.x) > 1e-9 ||
+    std::abs(o.orientation.y) > 1e-9 || std::abs(o.orientation.z) > 1e-9 ||
+    std::abs(std::abs(o.orientation.w)-1) > 1e-9 ||
+    m.info.width > 4000000 || m.info.height > 4000000) {
+    throw std::invalid_argument("Only finite, axis-aligned map grids are supported");
+  }
+  GridConfig g; g.resolution = m.info.resolution;
+  g.width = static_cast<int>(m.info.width); g.height = static_cast<int>(m.info.height);
+  g.origin = {o.position.x, o.position.y};
+  OccupancyGrid2D validate(g);
+  if (m.data.size() != static_cast<std::size_t>(g.width)*g.height) {
+    throw std::invalid_argument("Map data length does not match geometry");
+  }
+  return g;
+}
+
 nav_msgs::msg::OccupancyGrid toOccupancyGrid(const OccupancyGrid2D & grid,
   const builtin_interfaces::msg::Time & stamp, const builtin_interfaces::msg::Time & loaded)
 {

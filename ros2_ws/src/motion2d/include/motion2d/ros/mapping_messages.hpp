@@ -25,6 +25,12 @@ Pose2D poseFromOdometry(const nav_msgs::msg::Odometry & message);
 sensor_msgs::msg::PointCloud2 toPointCloud(
   const std::vector<Eigen::Vector2d> & points, const std_msgs::msg::Header & header);
 
+/** @brief Validate a map-frame, axis-aligned OccupancyGrid and return its geometry.
+ * @throws std::invalid_argument on invalid geometry, pose, frame or data length.
+ * @details Occupancy value classification remains the consuming algorithm's policy.
+ */
+GridConfig geometryFromOccupancyGrid(const nav_msgs::msg::OccupancyGrid & message);
+
 /** @brief Serialize observed probabilities (-1 unknown, 0..100 observed), in map.
  * @param stamp Last integrated scan's acquisition time.
  * @param loaded First integrated scan's acquisition time since clear/reset.

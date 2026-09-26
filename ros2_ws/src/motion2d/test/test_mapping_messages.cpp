@@ -70,3 +70,17 @@ TEST(MappingMessages, OccupancyMetadataOriginAndRowMajorData)
   EXPECT_EQ(message.data[2], 70);
   EXPECT_EQ(message.data[5], -1);
 }
+
+TEST(MappingMessages, SharedMapGeometryRejectsRotationAndBadDimensions)
+{
+  motion2d::GridConfig g; g.width = g.height = 5;
+  builtin_interfaces::msg::Time zero;
+  auto message = motion2d::toOccupancyGrid(motion2d::OccupancyGrid2D(g), zero, zero);
+  EXPECT_EQ(motion2d::geometryFromOccupancyGrid(message).width, 5);
+  message.info.origin.orientation.z = .1;
+  EXPECT_THROW(motion2d::geometryFromOccupancyGrid(message), std::invalid_argument);
+  message.info.origin.orientation.z = 0; message.data.pop_back();
+  EXPECT_THROW(motion2d::geometryFromOccupancyGrid(message), std::invalid_argument);
+  message.data.push_back(-1); message.info.width = 0;
+  EXPECT_THROW(motion2d::geometryFromOccupancyGrid(message), std::invalid_argument);
+}

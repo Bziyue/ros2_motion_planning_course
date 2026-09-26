@@ -2,7 +2,7 @@
 
 从二维世界、圆盘机器人和模拟传感器开始，逐步学习定位建图、路径与轨迹规划、跟踪控制。教材、代码和练习按章节对应。
 
-**当前状态：第 01–11 章已完成。** 已有随机世界、四种机器人模型、CPU 激光雷达、六轴白噪声 IMU、统一传感器时间、真值建图、激光/IMU 融合与回环 SLAM。大纲提交为 `5c0c642`；每完成一个可运行、已验证的功能就单独提交，教材和练习同步更新。已接入观测地图上的 A* 和 RViz 目标；第12章距离场内核已完成，ROS可视化与后续轨迹控制继续实施。
+**当前状态：第 01–12 章已完成。** 已有随机世界、四种机器人模型、CPU 激光雷达、六轴白噪声 IMU、统一传感器时间、真值建图、激光/IMU 融合与回环 SLAM。大纲提交为 `5c0c642`；每完成一个可运行、已验证的功能就单独提交，教材和练习同步更新。已接入观测地图上的 A* 和 RViz 目标；已提供距离场与梯度可视化，继续安全走廊与轨迹控制。
 
 [教材 PDF](output/pdf/course.pdf) · [实施进度](docs/PROGRESS.md) · [主机验收记录](docs/VALIDATION.md)
 
@@ -24,7 +24,7 @@
 | 09 | [IMU 预测与时间融合](chapters/ch09/README.md) | [ch09](exercises/ch09/README.md) | `ch09.launch.py` |
 | 10 | [关键帧回环 SLAM](chapters/ch10/README.md) | [ch10](exercises/ch10/README.md) | `ch10.launch.py` |
 | 11 | [配置空间与 A*](chapters/ch11/README.md) | [ch11](exercises/ch11/README.md) | `ch11.launch.py` |
-| 12 | [距离场与梯度](chapters/ch12/README.md) | [ch12](exercises/ch12/README.md) | 内核演示 `esdf_demo` |
+| 12 | [距离场与梯度](chapters/ch12/README.md) | [ch12](exercises/ch12/README.md) | `ch12.launch.py` |
 
 ~~~bash
 source /opt/ros/lyrical/setup.bash

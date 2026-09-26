@@ -1,0 +1,171 @@
+Panels:
+  - Class: rviz_common/Displays
+    Name: Displays
+Visualization Manager:
+  Class: ""
+  Global Options:
+    Background Color: 239; 246; 247
+    Fixed Frame: map
+    Frame Rate: 30
+  Displays:
+    - Class: rviz_default_plugins/Map
+      Name: Observed occupancy (unknown is gray)
+      Enabled: true
+      Topic:
+        Value: /map
+        Reliability Policy: Reliable
+        Durability Policy: Transient Local
+        History Policy: Keep Last
+        Depth: 1
+      Alpha: 0.85
+      Color Scheme: map
+      Draw Behind: true
+    - Class: rviz_default_plugins/Grid
+      Name: Grid (1 m)
+      Enabled: true
+      Cell Size: 1
+      Plane Cell Count: 22
+      Color: 165; 188; 195
+      Alpha: 0.45
+    - Class: rviz_default_plugins/MarkerArray
+      Name: Simulation world (truth comparison)
+      Enabled: false
+      Topic:
+        Value: /visualization/world
+        Reliability Policy: Reliable
+        Durability Policy: Transient Local
+        History Policy: Keep Last
+        Depth: 1
+    - Class: rviz_default_plugins/MarkerArray
+      Name: Robot and trail
+      Enabled: true
+      Topic:
+        Value: /visualization/robot
+        Reliability Policy: Reliable
+        Durability Policy: Transient Local
+        History Policy: Keep Last
+        Depth: 1
+    - Class: rviz_default_plugins/Axes
+      Name: Body orientation
+      Enabled: true
+      Reference Frame: base_link
+      Length: 0.6
+      Radius: 0.025
+    - Class: rviz_default_plugins/MarkerArray
+      Name: CPU lidar beams
+      Enabled: false
+      Topic:
+        Value: /visualization/lidar
+        Reliability Policy: Reliable
+        Durability Policy: Transient Local
+        History Policy: Keep Last
+        Depth: 1
+    - Class: rviz_default_plugins/LaserScan
+      Name: Measured scan points
+      Enabled: false
+      Topic:
+        Value: /scan
+        Reliability Policy: Best Effort
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Depth: 5
+      Style: Points
+      Size (Pixels): 4
+      Color Transformer: FlatColor
+      Color: 210; 67; 29
+      Position Transformer: XYZ
+      Decay Time: 0
+    - Class: rviz_default_plugins/PointCloud2
+      Name: Registered scan (observed points)
+      Enabled: true
+      Topic:
+        Value: /cloud/registered
+        Reliability Policy: Best Effort
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Depth: 5
+      Style: Points
+      Size (Pixels): 4
+      Color Transformer: FlatColor
+      Color: 210; 67; 29
+      Position Transformer: XYZ
+      Decay Time: 0
+    - Class: rviz_default_plugins/Odometry
+      Name: Truth odometry (explicit source)
+      Enabled: true
+      Topic:
+        Value: /odometry
+        Reliability Policy: Reliable
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Depth: 100
+      Keep: 30
+      Shape: Arrow
+    - Class: rviz_default_plugins/Map
+      Name: Configuration grid (0 free, 100 blocked)
+      Enabled: false
+      Topic:
+        Value: /planning/grid
+        Reliability Policy: Reliable
+        Durability Policy: Transient Local
+        History Policy: Keep Last
+        Depth: 1
+      Alpha: 0.4
+      Color Scheme: map
+      Draw Behind: true
+    - Class: rviz_default_plugins/Path
+      Name: Planned path (not a trajectory)
+      Enabled: true
+      Topic:
+        Value: /plan/path
+        Reliability Policy: Reliable
+        Durability Policy: Transient Local
+        History Policy: Keep Last
+        Depth: 1
+      Color: 0; 125; 142
+      Line Style: Lines
+      Line Width: 0.05
+    - Class: rviz_default_plugins/PointCloud2
+      Name: ESDF (metres, uninflated map)
+      Enabled: true
+      Topic:
+        Value: /esdf/cloud
+        Reliability Policy: Reliable
+        Durability Policy: Transient Local
+        History Policy: Keep Last
+        Depth: 1
+      Style: Flat Squares
+      Size (m): 0.1
+      Alpha: 0.75
+      Color Transformer: Intensity
+      Channel Name: distance
+      Autocompute Intensity Bounds: false
+      Min Intensity: -0.5
+      Max Intensity: 2.0
+      Position Transformer: XYZ
+      Decay Time: 0
+    - Class: rviz_default_plugins/MarkerArray
+      Name: ESDF gradients (toward increasing distance)
+      Enabled: true
+      Topic:
+        Value: /esdf/gradients
+        Reliability Policy: Reliable
+        Durability Policy: Transient Local
+        History Policy: Keep Last
+        Depth: 1
+  Tools:
+    - Class: rviz_default_plugins/Interact
+    - Class: rviz_default_plugins/MoveCamera
+    - Class: rviz_default_plugins/SetGoal
+      Topic: /goal_pose
+  Views:
+    Current:
+      Class: rviz_default_plugins/TopDownOrtho
+      Target Frame: <Fixed Frame>
+      Scale: 29
+      Angle: 0
+      X: 0
+      Y: 0
+Window Geometry:
+  Width: 1100
+  Height: 780

@@ -221,3 +221,15 @@ estimated_odometry 适配器发布 /odometry、运动 TF 与 /path/estimated。�
 - `slam_node` 是map→odom的唯一动态发布者，estimated适配器设置publish_map_alignment=false。
   回环不改写odom轨迹；原始扫描以各自优化位姿重建，不追加到旧地图。
 - 双向几何回环仅在附近旧关键帧上搜索，重复几何仍可能误接；不是失锁后的全局重定位。
+
+## 第11–12章已落地的规划与距离接口
+
+`planner_node`消费`/map`、选源`/odometry`、map系`/goal_pose`及TF；生成`/planning/grid`配置空间0/100掩码、
+`/plan/path`几何折线与`/plan/status`。失败空路径，时间回退清除目标；不直接控制机器人。
+
+`esdf_node`只消费未膨胀`/map`。`/esdf/cloud`为结构化PointCloud2，行列等于地图；
+FLOAT32字段x/y/z/distance，偏移0/4/8/12，每点16B，z=0、其余单位m。距离是带符号中心距离，
+不是占据概率或方格边界精确SDF；全阻塞为-inf、is_dense=false。
+`/esdf/gradients`为map系MarkerArray显示箭头；`/esdf/status`区分ready/no_finite_field/invalid_map。
+输入输出使用地图采样时间，输出保留最新快照；错误输入清空旧云与标记。
+默认未知阻塞，自由阈值35；半径只在规划膨胀或未膨胀ESDF净空约束的一处计算。

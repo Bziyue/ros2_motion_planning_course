@@ -141,4 +141,72 @@ $f(x,y)=2x+3y+xy$ 在 $0,\rho$ 四角的值，验证 $\rho=0.2$ m、$u=0.3,v=0.7
 \textbf{理解与实验：}画解析圆场；解释圆心处不可微、中心距与边界距的差别。
 改变分辨率，报告误差、格数和构建时间，保留相同查询点与计时范围。
 常见错误是忘记开方、忘记乘分辨率、把索引坐标当米数，以及使用已经膨胀的地图再扣半径。
-ROS 距离场可视化将在下一功能接入。
+下面将距离场接入 ROS 可视化。
+
+\clearpage
+\section{ROS 距离通道与梯度显示}
+\begin{lstlisting}[language=bash]
+ros2 launch motion2d_bringup ch12.launch.py
+ros2 topic echo /esdf/status
+# In a separate terminal, with the same ROS_DOMAIN_ID:
+/usr/bin/python3 scripts/check_ch12.py
+/usr/bin/python3 scripts/plot_ch12_observed.py
+\end{lstlisting}
+esdf\_node 只订阅 /map，每张观测地图独立构建一个距离场。
+本章启动保持上一章的真值定位和观测建图；ESDF 节点本身不读真值、激光、里程计或 TF。
+输入与 A* 共用同一套自由阈值、未知策略和轴对齐地图验证，避免两者解释不同的地图。
+
+\begin{center}\small
+\begin{tabular}{lll}\toprule
+话题 & 类型 & 语义 \\\midrule
+/esdf/cloud & PointCloud2 & x、y、z、distance 四个 FLOAT32 \\
+/esdf/gradients & MarkerArray & map 中的梯度方向箭头 \\
+/esdf/status & String & ready / no\_finite\_field / invalid\_map \\\bottomrule
+\end{tabular}
+\end{center}
+点云保持原地图的 width、height，按 $i=yW+x$ 行主序存储；每点 16 字节，
+行步长为 $16W$。x、y 是格子中心的米制坐标，z 固定为零。
+\textbf{distance 单独存有符号中心距离，单位 m}，不是 z 高度，也不是占据概率。
+全阻塞时保留 $-\infty$ 并设置 is\_dense=false，同时发布 no\_finite\_field 和空箭头。
+地图格式错误时清空点云与标记，不保留上一次的有效显示。
+
+RViz 的 Color Transformer 选择 Intensity，Channel Name 选择 distance。
+预设用 $[-0.5,2.0]$ m 固定颜色范围，超出范围只在显示颜色上饱和，消息里的数值不变。
+Size (m) 默认匹配 0.1 m 分辨率；修改地图分辨率后应相应调整显示方块大小。
+配置空间掩码、观测图与 ESDF 是不同产物，可在 Displays 中切换比较。
+
+梯度默认每隔 10 格显示一个箭头，箭头方向朝距离增加处。
+显示长度为 $\min(0.4,0.2\|\nabla\widetilde d\|)$ m，箭头头部随短箭头缩放；
+这只是可视化约定，不能当作速度或控制力。
+\lstinputlisting[language=C++,linerange={esdf_arrow_begin-esdf_arrow_end},
+  includerangemarker=false]{../ros2_ws/src/motion2d/src/nodes/esdf_node.cpp}
+输出继承地图的采样时刻和 map 坐标系，采用保留最后一条消息的 QoS。
+重置不需要维护旧距离场：时间回退的新地图到达后直接重建；晚加入的 RViz 仍能读取当前快照。
+
+\clearpage
+\section{读一次真实距离消息}
+下图来自实际 ROS 的距离点云与箭头消息，固定为 reset 后 100 步、0.5 s。
+图仅截取默认随机世界左下部分；负值同时包含占据、不确定和按策略阻塞的未知区域。
+颜色不能代替原始占据图中的观测来源信息。
+
+\begin{figure}[!ht]
+\centering\includegraphics[width=.72\linewidth]{figures/ch12_observed.pdf}
+\caption{实际观测距离场与消息中的梯度箭头。坐标为米且等比例，颜色在固定范围内显示。
+这张图由消息数据绘制，不作为 RViz GUI 截图。}
+\end{figure}
+
+220\,$\times$\,220 点的独立抽查使用 seed=1214 随机选择 100 格，逐个枚举最近阻塞或自由中心，
+包含外部补边界。消息 FLOAT32 与独立计算的最大差为 $4.3\times10^{-7}$ m，验收阈值为 $10^{-5}$ m。
+93 个箭头的长度、方向与字段梯度一致；还验证地图时间戳、输入隔离和 reset 后数据重放。
+
+额外独立测试给 esdf\_node 发送全未知图、全自由图、含旋转的错误图。
+分别检查 $-\infty$、外部距离和清除旧显示，不能用空图的零距离冒充有效场。
+实际主机已完成无界面 ROS 验收；RViz 配置已提供，GUI 画面未验收。
+
+\textbf{消息练习：}
+\begin{enumerate}
+\item 从 /esdf/cloud 读取一格的四个字段，手算中心坐标和行字节偏移。
+\item 把 esdf.gradient\_stride 从 10 改为 5，比较箭头密度，说明为何数值距离不变。
+\item 对全自由小地图，解释为什么越靠近地图边界，正距离越小。
+\end{enumerate}
+独立检查入口、命令和评分见本章练习说明。
