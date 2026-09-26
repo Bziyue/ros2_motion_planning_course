@@ -1,4 +1,6 @@
+#include <algorithm>
 #include <cmath>
+#include <utility>
 #include <limits>
 #include <gtest/gtest.h>
 #include "motion2d/sim/lidar_cpu.hpp"
@@ -171,4 +173,22 @@ TEST(LidarNoise, GaussianMeanAndVarianceAwayFromRangeLimits)
   EXPECT_LT(std::abs(mean), 5 * config.range_stddev / std::sqrt(n));
   EXPECT_NEAR(variance, config.range_stddev * config.range_stddev,
     .03 * config.range_stddev * config.range_stddev);
+}
+
+TEST(Lidar, SparseAngularSamplingCanMissASmallObstacle)
+{
+  World2D world;
+  const double angle = 2 * kPi / 180;
+  world.circles.push_back({{5 * std::cos(angle), 5 * std::sin(angle)}, .05});
+  LidarConfig config;
+  config.range_max = 8;
+  for (const auto & [beams, expected_hits] :
+    std::vector<std::pair<int, int>>{{90, 0}, {360, 1}, {720, 3}})
+  {
+    config.beams = beams;
+    const auto ranges = scanCpu(world, {}, config);
+    const auto hits = std::count_if(ranges.begin(), ranges.end(),
+      [](float range) {return std::isfinite(range);});
+    EXPECT_EQ(hits, expected_hits) << "beams=" << beams;
+  }
 }

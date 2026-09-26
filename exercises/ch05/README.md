@@ -34,3 +34,14 @@ g++ -std=c++17 -Iexercises/ch05/starter exercises/ch05/check_noise.cpp -o /tmp/c
 ~~~
 
 判定要求：普通回波、上下边界、两类特殊值均通过。不要用不同种子的两次扫描差异直接衡量 CPU/CUDA 的几何误差。
+
+10. 代码 ch05-4：补全 beam_gap.hpp，由两条相邻射线的等腰三角形求相同距离处的端点间距，注意角度单位为 rad。
+11. 实验：运行 lidar_benchmark，比较 90/360/720 束。保持世界 seed=42、起点 (-8,-8)、yaw=0、噪声关闭，记录中位数/P95 和可见回波数。不要把世界生成或 CSV 写入混进扫描计时。
+12. 拓展：把独立小圆实验的方位从 2 度改为 0 度，先预测 90 束是否还会漏掉它；再改变距离与尺寸。解释为何提高束数仍不保证任意小障碍可见。
+
+~~~bash
+g++ -std=c++17 -Iexercises/ch05/starter exercises/ch05/check_gap.cpp -o /tmp/ch05_gap
+/tmp/ch05_gap
+~~~
+
+评分要求：精确弦长通过手算检查；实验报告明确 CPU、构建类型、场景、预热、样本数和计时范围，不将算法内核耗时宣称为端到端消息时延。

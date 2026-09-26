@@ -266,3 +266,84 @@ ros2 launch motion2d_bringup ch05.launch.py model:=ideal rviz:=false \
 \textbf{理解与实验：}把标准差翻倍，预测方差变成几倍；把采样频率翻倍，
 解释为什么单个样本的设定标准差不变。修改后应同步调整验收脚本中的预期参数，
 不要把默认配置的断言直接用于所有实验。
+
+\clearpage
+\section{束数实验：看不见不等于没有障碍}
+相邻光束在相同距离 r 处的端点形成一个等腰三角形，端点间距为
+\begin{equation}
+s=2r\sin\frac{\Delta\alpha}{2}\approx r\Delta\alpha.
+\end{equation}
+距离越远，相同角分辨率对应的间距越大。在 5 m 处，90/360/720 束的整周扫描
+分别约为 34.90/8.73/4.36 cm。增加束数能让边界更密，但有限束数仍可能漏掉细小物体。
+
+\begin{figure}[ht]
+\centering
+\input{figures/ch05_resolution}
+\caption{同一 seed=42 世界、同一圆心 $(-8,-8)$、yaw=0、关闭噪声的有限回波。
+十字为雷达；图中空白不等于已经观测到的自由空间。}
+\end{figure}
+
+再单独构造一个直径 0.10 m 的小圆：圆心距离雷达 5 m，方向为 $2^\circ$。
+雷达位于原点，扫描从 $-\pi$ 开始。90 束的方向间隔是 $4^\circ$，
+恰好从小圆两侧穿过；360 束有一束命中，720 束有三束命中。
+这个确定性例子已经写成测试，不依赖肉眼判断。
+
+\begin{center}
+\pgfplotstabletypeset[
+  col sep=comma,columns={beams,angle_deg,thin_hits},
+  columns/beams/.style={column name={束数},fixed,precision=0},
+  columns/angle_deg/.style={column name={角间隔/度},fixed,precision=1},
+  columns/thin_hits/.style={column name={小圆命中束数},fixed,precision=0},
+  every head row/.style={before row=\toprule,after row=\midrule},
+  every last row/.style={after row=\bottomrule}
+]{data/ch05_benchmark.csv}
+\end{center}
+
+\textbf{代码练习 ch05-4：}补完 \path{exercises/ch05/starter/beam_gap.hpp}，
+把角分辨率换算为米制端点间距。然后改变小圆的方向、尺寸或距离，比较是否命中。
+表中结果只对应这个特定场景，不是“720 束必定能看见所有小障碍”的保证。
+
+\textbf{实际 ROS 对照：}复制 ch05.yaml，分别将 lidar.beams 改为 90、360、720，
+保持其余参数和世界 seed 相同。启动各配置后运行
+\code{check_ch05.py --beams 90}（其余束数类推），核对消息与光束数量。
+
+\clearpage
+\section{性能实验：先说清楚计时范围}
+从 ros2\_ws 运行 CPU 基准：
+\begin{lstlisting}[language=bash,numbers=none]
+ros2 run motion2d lidar_benchmark > ../textbook/data/ch05_benchmark.csv
+ros2 run motion2d lidar_benchmark --points > ../textbook/data/ch05_hits.csv
+# repository root
+make -C textbook
+\end{lstlisting}
+程序使用 seed=42 的默认 8 圆、8 多边形世界和固定起点。
+每种束数先预热 100 帧，再测 1000 次 \code{scanCpu} 调用，用单调时钟统计中位数和 P95。
+P95 表示按耗时排序后，约 95\% 的调用不超过这个数；它不是最坏情况上界。
+
+\begin{figure}[ht]
+\centering
+\input{figures/ch05_timing}
+\caption{本机 AMD Ryzen 7 9700X、GCC 15.2、RelWithDebInfo 下的一次测量。
+仅 CPU 几何扫描，噪声关闭；柱图直接读取实验 CSV。}
+\end{figure}
+
+\begin{center}
+\pgfplotstabletypeset[
+  col sep=comma,columns={beams,median_us,p95_us,world_hits},
+  columns/beams/.style={column name={束数},fixed,precision=0},
+  columns/median_us/.style={column name={中位数/$\mu$s},fixed,precision=2},
+  columns/p95_us/.style={column name={P95/$\mu$s},fixed,precision=2},
+  columns/world_hits/.style={column name={有限回波数},fixed,precision=0},
+  every head row/.style={before row=\toprule,after row=\midrule},
+  every last row/.style={after row=\bottomrule}
+]{data/ch05_benchmark.csv}
+\end{center}
+
+计时包含方向计算、全部表面求交、量程编码和结果数组分配。
+不包含世界生成、加噪、ROS 消息转换、DDS 传输、光束 Marker 或 RViz 渲染，
+所以不能把表中数字称为端到端传感器时延或整机实时性保证。实验未绑定 CPU 核，
+调频与系统负载会使复测数字变化。
+
+\textbf{为 CUDA 留下基准：}未来使用同一几何、姿态、束数和输出编码，先关噪声比较距离，
+再分别测计算内核、主机/设备传输和完整消息发布。不能把 GPU 内核时间与 CPU 完整流程直接比较，
+也不能在未测量前承诺加速比。本章没有建图或规划求解器，求解失败率不适用。

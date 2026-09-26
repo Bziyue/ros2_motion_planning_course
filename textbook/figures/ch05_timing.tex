@@ -1,0 +1,14 @@
+\begin{tikzpicture}
+\begin{axis}[
+  width=.76\linewidth,height=5cm,
+  ybar,/pgf/bar width=14pt,
+  symbolic x coords={90,360,720},xtick=data,enlarge x limits=.35,
+  ymin=0,xlabel={束数 $N$},ylabel={单帧耗时 / $\mu$s},
+  ymajorgrids,grid style={linecolor},
+  legend style={at={(.02,.98)},anchor=north west,draw=none,fill=none,font=\small},
+  tick label style={font=\small},label style={font=\small}]
+\addplot[fill=tealblue,draw=tealblue] table[x=beams,y=median_us,col sep=comma]{data/ch05_benchmark.csv};
+\addplot[fill=navy!30,draw=navy] table[x=beams,y=p95_us,col sep=comma]{data/ch05_benchmark.csv};
+\legend{中位数,P95}
+\end{axis}
+\end{tikzpicture}

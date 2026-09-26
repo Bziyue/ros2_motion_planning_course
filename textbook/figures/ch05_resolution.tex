@@ -1,0 +1,27 @@
+\begin{tikzpicture}
+\begin{groupplot}[
+  group style={group size=3 by 1,horizontal sep=12mm},
+  width=.29\linewidth,height=.29\linewidth,
+  xmin=-10.5,xmax=2.5,ymin=-10.5,ymax=2.5,
+  xtick={-10,-5,0},ytick={-10,-5,0},
+  xlabel={$x$ / m},ylabel={$y$ / m},
+  title style={font=\small},label style={font=\scriptsize},
+  tick label style={font=\scriptsize},grid=major,grid style={linecolor},
+  unbounded coords=discard,filter discard warning=false]
+\nextgroupplot[title={90 束 / $4^\circ$}]
+\addplot[only marks,mark=*,mark size=.55pt,tealblue,
+  restrict expr to domain={\thisrow{beams}}{90:90}]
+  table[x=x,y=y,col sep=comma]{data/ch05_hits.csv};
+\addplot[only marks,mark=+,mark size=3pt,navy] coordinates {(-8,-8)};
+\nextgroupplot[title={360 束 / $1^\circ$}]
+\addplot[only marks,mark=*,mark size=.55pt,tealblue,
+  restrict expr to domain={\thisrow{beams}}{360:360}]
+  table[x=x,y=y,col sep=comma]{data/ch05_hits.csv};
+\addplot[only marks,mark=+,mark size=3pt,navy] coordinates {(-8,-8)};
+\nextgroupplot[title={720 束 / $0.5^\circ$}]
+\addplot[only marks,mark=*,mark size=.55pt,tealblue,
+  restrict expr to domain={\thisrow{beams}}{720:720}]
+  table[x=x,y=y,col sep=comma]{data/ch05_hits.csv};
+\addplot[only marks,mark=+,mark size=3pt,navy] coordinates {(-8,-8)};
+\end{groupplot}
+\end{tikzpicture}

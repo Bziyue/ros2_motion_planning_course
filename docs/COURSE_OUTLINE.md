@@ -2,7 +2,7 @@
 
 版本：v0.1，2026-09-26。**已批准，逐功能实施。** 本文件保留完整计划；实际完成状态见 [PROGRESS.md](PROGRESS.md)，原始 PDF 审阅稿保留不改。
 
-本文件是课程范围与章节映射的主要依据。`textbook/outline.tex` 和 `output/pdf/course_outline.pdf` 保留原始审阅摘要。第 01-04 章已实现，代码映射以下文和各章 README 为准；其他章节的源文件、launch、习题和验收实验仍是计划。
+本文件是课程范围与章节映射的主要依据。`textbook/outline.tex` 和 `output/pdf/course_outline.pdf` 保留原始审阅摘要。第 01-05 章已实现，代码映射以下文和各章 README 为准；其他章节的源文件、launch、习题和验收实验仍是计划。
 
 ## 1. 课程目标与学习路线
 
@@ -87,7 +87,7 @@
 
 - **目标**：从一束射线推导一整圈扫描，认识测距误差和离散分辨率。
 - **内容/公式**：雷达位于圆心；射线与线段/圆的最近交点；`alpha_i = alpha_0 + i Delta_alpha`；360 度扫描不重复首末方向；量程、束数、频率、可选高斯测距噪声。
-- **已实现代码**：`sim/raycast.cpp`；`sim/lidar_cpu.cpp`（几何扫描与可选噪声分开）；`ros/lidar_messages.cpp`；`ch05.launch.py`。束数与性能实验随后补齐。
+- **已实现代码**：`sim/raycast.cpp`；`sim/lidar_cpu.cpp`（几何扫描与可选噪声分开）；`ros/lidar_messages.cpp`；`ch05.launch.py`；`examples/lidar_noise_demo.cpp` 与 `examples/lidar_benchmark.cpp`。
 - **练习**：推导射线与圆二次方程；补完最近正交点选择；用 90/360/720 束比较边界和 CPU 耗时。
 - **验收**：简单墙面和圆的距离与解析值一致；无回波为 `+inf`；RViz2 同时显示光束和命中点。小于近距盲区的真实命中定义为无效读数 `NaN`，建图跳过；不能冒充远距离空闲。
 
@@ -220,13 +220,13 @@
 
 ## 4. 接口与参数摘要
 
-完整草案见 [INTERFACES.md](INTERFACES.md)。本轮只定语义，不生成 ROS `.msg` 或接口代码。
+完整约定见 [INTERFACES.md](INTERFACES.md)，已实现范围见进度表。以下列表包含后续章节接口；当前优先使用 ROS 标准消息。
 
 - 传感器：`/scan` 为 LaserScan；`/imu/data_raw` 为 Imu；外参默认与圆心重合且朝向一致。
 - 位姿：`/ground_truth/odometry`、`/odometry/estimated`、唯一选源后的 `/odometry`；真值与估计不能争抢 TF。
 - 地图：当前扫描点云、累计地图点云、OccupancyGrid、二维 ESDF；每个产物带 frame、时间与来源说明。
 - 规划控制：RViz2 的 `/goal_pose`、Path、包含分段时长/多项式系数的轨迹、显式模式的速度/力指令、运行状态与误差统计。
-- 默认建议：20×20 m 世界，圆盘半径 0.20 m，720 束全周扫描，10 Hz 激光，200 Hz IMU，0.05 m 地图分辨率，200 Hz 仿真。均待实施实验验证；不是性能承诺。
+- 默认建议：20×20 m 世界，圆盘半径 0.20 m，720 束全周扫描，10 Hz 激光，200 Hz IMU，0.05 m 地图分辨率，200 Hz 仿真。其中世界、机器人、CPU 激光和仿真已验收；IMU 与地图参数待后续实验验证。这些设置不是性能承诺。
 - 配置独立选择 `robot.model`、`odometry.source`、`mapping.source`、`planning.map_source`、`lidar.backend`，只启用有物理意义的组合；给出 A/B/C 三个完整预设，避免让初学者随意拼装不兼容参数。
 
 ## 5. 教材风格、代码风格与验收
