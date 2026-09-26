@@ -10,6 +10,16 @@ Eigen::MatrixXd mapDerivative(double T,int order) {
   return M;
 }
 using Controls=Eigen::Matrix<double,6,2>;
+double vectorBound(const Controls & P,int depth) {
+  if(!P.allFinite()) return std::numeric_limits<double>::infinity();
+  if(depth==0) return P.rowwise().norm().maxCoeff();
+  Controls work=P,left,right;left.row(0)=P.row(0);right.row(5)=P.row(5);
+  for(int level=1;level<=5;++level) {
+    for(int j=0;j<6-level;++j) work.row(j)=.5*(work.row(j)+work.row(j+1)).eval();
+    left.row(level)=work.row(0);right.row(5-level)=work.row(5-level);
+  }
+  return std::max(vectorBound(left,depth-1),vectorBound(right,depth-1));
+}
 void bound(const Controls & P,double T,const ConvexRegion & region,int depth,BezierCertificate & result) {
   if(depth>0) {
     Controls work=P,left,right;left.row(0)=work.row(0);right.row(5)=work.row(5);
@@ -74,6 +84,24 @@ CoefficientGradient bezierCost(const PolynomialTrajectory & curve,const std::vec
   if(!std::isfinite(g.cost) || !g.coefficients.allFinite() || !g.times.allFinite()) throw std::runtime_error("Nonfinite Bezier cost");
   return g;
 }
+ForceCertificate certifyForce(const PolynomialTrajectory & curve,const OmniDynamicLimits & d,int depth) {
+  validateDynamicLimits(d);
+  if(depth<0 || depth>10) throw std::invalid_argument("Force certificate depth must be 0..10");
+  ForceCertificate out;
+  for(const auto & piece:curve.pieces()) {
+    // force_polynomial_begin
+    Eigen::Matrix<double,2,6> F=Eigen::Matrix<double,2,6>::Zero(),rate=F;
+    for(int k=0;k<5;++k) F.col(k)+=d.parameters.linear_drag*(k+1)*piece.coefficients.col(k+1);
+    for(int k=0;k<4;++k) F.col(k)+=d.parameters.mass*(k+2)*(k+1)*piece.coefficients.col(k+2);
+    for(int k=0;k<5;++k) rate.col(k)=(k+1)*F.col(k+1);
+    const auto M=bezierMap(piece.duration);
+    out.force_bound=std::max(out.force_bound,vectorBound(M*F.transpose(),depth));
+    out.force_rate_bound=std::max(out.force_rate_bound,vectorBound(M*rate.transpose(),depth));
+    // force_polynomial_end
+  }
+  out.certified=out.force_bound<=d.force+1e-9 && out.force_rate_bound<=d.force_rate+1e-9;
+  return out;
+}
 BezierCertificate certifyBezier(const PolynomialTrajectory & curve,const std::vector<ConvexRegion> & regions,const TrajectoryLimits & limits,int depth) {
   if(regions.size()!=curve.pieces().size() || depth<0 || depth>10 || !std::isfinite(limits.speed) || limits.speed<=0 ||
      !std::isfinite(limits.acceleration) || limits.acceleration<=0) throw std::invalid_argument("Invalid Bezier certificate input");
@@ -85,6 +113,11 @@ BezierCertificate certifyBezier(const PolynomialTrajectory & curve,const std::ve
   }
   result.certified=std::isfinite(result.corridor_residual) && std::isfinite(result.speed_bound) && std::isfinite(result.acceleration_bound) &&
     result.corridor_residual<=1e-9 && result.speed_bound<=limits.speed+1e-9 && result.acceleration_bound<=limits.acceleration+1e-9;
+  if(limits.dynamics) {
+    const auto physical=certifyForce(curve,*limits.dynamics,depth);
+    result.force_bound=physical.force_bound;result.force_rate_bound=physical.force_rate_bound;
+    result.certified=result.certified && physical.certified;
+  }
   return result;
 }
 }

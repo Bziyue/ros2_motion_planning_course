@@ -336,3 +336,9 @@ C默认初始yaw=0，估计odom的轴与仿真物理输入轴一致、原点在�
 
 差速stepDifferential与偏置stepBiasWalk为独立可选核心工具，不新增默认模拟器模式或噪声参数。附录B的轮动力学/NMPC、C的滚动扫描/复杂障碍/重定位为设计练习。
 replay_slam只消费传感器bag，播放器为唯一时钟；启动文件仅提供本课程重合的静态外参。Doxygen和报告模板见附录D。
+
+### 平坦物理映射与位置规划
+
+`omniForward/omniBackward` 使用 odom 中的 v/a/jerk 和独立 yaw 导数，输出水平力、力变化率、偏航力矩及解析偏导。正向不饱和。位置优化器保持 yaw 常数，只优化平移。
+`TrajectoryCostConfig::dynamics` 与 `TrajectoryLimits::dynamics` 可选；缺省不改变旧课程。启用时 `certifyBezier` 也要求连续力/力变化率界通过；规划范数限值与仿真每轴力限值不同。
+ROS planner/navigation 参数前缀 `planning.dynamics`，mass/linear_drag 必须匹配植物模型，force_max (N)/force_rate_max (N/s) 为验证限值，软目标取85%。统一模型配置后续提供。

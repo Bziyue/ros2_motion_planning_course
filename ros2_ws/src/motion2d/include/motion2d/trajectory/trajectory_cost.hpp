@@ -3,9 +3,23 @@
 #include "motion2d/planning/corridor.hpp"
 #include "motion2d/mapping/esdf.hpp"
 #include <limits>
+#include <optional>
+#include "motion2d/dynamics/omni_flatness.hpp"
 
 namespace motion2d
 {
+/** @brief Norm limits on horizontal force (N) and force rate (N/s), with fixed physics.
+ * @details A force-norm bound no greater than the plant's per-axis bound is conservative.
+ * Yaw is held constant by these position-only planners; torque is not optimized.
+ */
+struct OmniDynamicLimits
+{
+  InertialParameters parameters;
+  double force=1, force_rate=2;
+};
+/** @brief Validate positive physical limits and inertial parameters. */
+void validateDynamicLimits(const OmniDynamicLimits & limits);
+
 /** @brief Soft cost weights and targets; weights carry the units needed to sum terms.
  * @details Speed/acceleration targets are vector-norm bounds, SI units. Corridor
  * margin tightens already inflated halfspaces; it is an optional extra buffer,
@@ -20,6 +34,8 @@ struct TrajectoryCostConfig
   double corridor_weight=500, corridor_margin=.02;
   double esdf_weight=100, esdf_distance=.4;
   int quadrature_steps=24;
+  std::optional<OmniDynamicLimits> dynamics; ///< Absent preserves earlier geometric lessons.
+  double force_weight=100, force_rate_weight=100; ///< Dimensionless normalized residuals.
 };
 /** @brief Validate finite nonnegative weights and positive physical targets. */
 void validateCostConfig(const TrajectoryCostConfig & config);
@@ -40,6 +56,7 @@ struct TrajectoryLimits
 {
   double speed=1, acceleration=1, clearance=.2;
   int samples_per_piece=200;
+  std::optional<OmniDynamicLimits> dynamics;
 };
 /** @brief Diagnostic only: a finite sample test cannot certify a continuous curve. */
 struct SampledFeasibility
@@ -47,6 +64,7 @@ struct SampledFeasibility
   bool samples_feasible=false;
   std::string status;
   double peak_speed=0, peak_acceleration=0;
+  double peak_force=0, peak_force_rate=0;
   double max_corridor_residual=-std::numeric_limits<double>::infinity();
   double min_clearance_lower_bound=std::numeric_limits<double>::quiet_NaN();
 };

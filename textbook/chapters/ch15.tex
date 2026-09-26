@@ -146,7 +146,8 @@ $d(p)$ 用于可微软惩罚；独立检查仍使用第十二章的净空下界�
 
 每段在 $s_j=j/K$ 处求梯形积分，局部时间 $t_j=s_jT$。
 改变 $T$ 时，积分权重 $T/K$ 和采样位置都变化。
-下列代码里的 gp/gv/ga 是惩罚对 p/v/a 的偏导，weight 在两端取 $1/2$：
+下列代码里的 gp/gv/ga/gj 是惩罚对 p/v/a/jerk 的偏导，weight 在两端取 $1/2$；
+本章补充的力变化率代价会用到 gj：
 \lstinputlisting[language=C++,linerange={trajectory_quadrature_begin-trajectory_quadrature_end},
  includerangemarker=false]{../ros2_ws/src/motion2d/src/trajectory/trajectory_cost.cpp}
 先求直接偏导，再经 MINCO 的 propagate 传回路点和时长，不能只改变采样间隔。
@@ -237,3 +238,73 @@ RViz 预期：观察地图上出现紫色曲线，青色折线与走廊边框继
 \item \textbf{验收：}默认起点 $(-8,-8)$ m、目标 $(-7.5,-8)$ m，检查曲线端点、preview\_only 标签；
 步进仿真确认机器人未移动，随后发送非法坐标系目标，确认旧曲线消失。
 \end{enumerate}
+
+\clearpage
+\section{补充：以微分平坦映射约束实际力}\label{sec:flatcost}
+第\ref{sec:flatness}节已把轨迹导数变成真实执行器量。现在将质量和阻尼带进优化器，
+而不只给加速度一个与质量无关的上限。正向得到
+$F=m a+c_vv$、$\dot F=mj+c_va$，再用无量纲残差
+\begin{equation}
+h_F=\frac{\|F\|^2}{F_*^2}-1,\qquad
+h_{\dot F}=\frac{\|\dot F\|^2}{R_*^2}-1,\qquad
+P=w_F[h_F]_+^3+w_R[h_{\dot F}]_+^3.
+\end{equation}
+$F_*$ 单位 N，$R_*$ 单位 N/s。平方范数在零力处也可微，不用除以力的模。
+先求物理量偏导，再调用第04章的反向映射：
+\lstinputlisting[language=C++,linerange={flat_penalty_begin-flat_penalty_end},
+ includerangemarker=false]{../ros2_ws/src/motion2d/src/trajectory/trajectory_cost.cpp}
+没有启用 dynamics 时，旧章节仍采用原来的几何代价。启用后，MINCO 与 Spline2D
+共享这一个代价函数和解析偏导；内层如何消去系数，并不改变平坦映射。
+
+\textbf{完整反传路线：}
+物理量代价 $\to(\bar F,\overline{\dot F})\to(\bar v,\bar a,\bar j)
+\to(\bar C,\bar T)\to(\bar q,\bar T)\to(\bar q,\bar\tau)$。
+前两步是平坦映射反传，中间是多项式与积分链式法则，随后才是 MINCO/Spline 伴随。
+这正是参考 GCOPTER 的分工，具体二维公式与代码由本课程独立实现。
+
+\begin{notebox}
+规划约束检查未饱和的期望力。仿真执行仍受力限幅；两者不能互相替代。
+当前只优化二维位置，yaw 保持常数，所以没有声称优化偏航力矩或无人机倾角。
+\end{notebox}
+
+\clearpage
+\section{时长梯度：不能漏掉 snap}
+一段内 $p=C^T\beta_0(t)$，$v=C^T\beta_1(t)$，依次到 jerk $j$ 和 snap $s_4$。
+对归一化积分节点 $\alpha\in[0,1]$，局部采样时刻 $t=\alpha T$：
+\begin{align}
+\bar C&\mathrel{+}=w\frac{T}{K}
+ (\beta_0\bar p^T+\beta_1\bar v^T+\beta_2\bar a^T+\beta_3\bar j^T),\\
+\bar T&\mathrel{+}=w\left[\frac{P}{K}+\frac{T}{K}\alpha
+ (\bar p^Tv+\bar v^Ta+\bar a^Tj+\bar j^Ts_4)\right].
+\end{align}
+这里是\textbf{固定系数的直接时长偏导}；系数本身随段时长改变的部分，随后由伴随求出。
+漏掉最后一项时，力变化率惩罚仍有正常的数值，优化方向却是错的。
+测试分别扰动全部系数、时长、内部路点，再用 MINCO 和 Spline2D 重做，不能只测最终代价下降。
+
+\textbf{可复现实验。}在加载工作空间后运行：
+\begin{lstlisting}[language=bash,numbers=none]
+ros2 run motion2d force_planning_demo
+# Exercise from repository root:
+g++ -std=c++17 -Iexercises/ch15/starter \
+  exercises/ch15/check_flat_time.cpp -o /tmp/ch15_flat_time
+/tmp/ch15_flat_time
+\end{lstlisting}
+两端静止，从 $(0,0)$ 到 $(2,0.3)$ m，阻尼 0.3 kg/s，质量分别 1、3 kg。
+初始时长均 2 s；只调时长，软目标是独立上限的 85\%，独立力上限 1 N、力变化率上限 2 N/s。
+程序输出两种后端的时长、连续力界和求解状态；任一项未通过便非零退出。
+软目标与验证限值分开，使优化器为软约束残差留有空间。
+
+\textbf{配置入口。}planner 与 navigation 都读取以下可选项；规划质量、阻尼必须与模拟器相同：
+\begin{lstlisting}[language={},numbers=none]
+planning.dynamics.enabled: true
+planning.dynamics.mass: 1.0
+planning.dynamics.linear_drag: 0.15
+planning.dynamics.force_max: 1.5
+planning.dynamics.force_rate_max: 4.0
+\end{lstlisting}
+这里 force\_max 是\textbf{向量范数}上限。模拟器的原始 force\_max 是每轴上限；
+将范数上限设为不大于每轴上限是保守且一致的选择。反馈控制还需要保留执行器余量。
+
+\textbf{练习 ch15-3：}补全移动采样时刻的直接偏导；解释质量翻倍但时长固定时，
+旧加速度约束为什么不能保证同样的力界。观察更大质量对应的时长变化，先看 certified 与 status，
+再比较代价；不要拿不可行解宣称规划更快。

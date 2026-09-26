@@ -18,3 +18,15 @@ g++ -std=c++17 -Iexercises/ch15/starter exercises/ch15/check_jerk_gram.cpp -o /t
 
 ROS实验：启动ch15.launch.py，运行scripts/check_ch15.py。检查同地图快照、端点、preview_only，机器人不能因预览自动执行。
 将目标frame改成bad，曲线应清除；重置不能复用之前的曲线。RViz预期紫色优化预览，当前GUI未验收。
+
+## ch15-3 物理约束与移动采样时刻
+
+完成 `starter/flat_time.hpp`，推导受力变化率惩罚为何使时长梯度依赖 snap。
+
+```bash
+g++ -std=c++17 -Iexercises/ch15/starter exercises/ch15/check_flat_time.cpp -o /tmp/ch15_flat_time
+/tmp/ch15_flat_time
+```
+
+将 starter 换为 solutions 验证参考解。评分：包含积分权重导数与 jerk 位置导数，差分误差 <1e-9。
+运行 `ros2 run motion2d force_planning_demo`；解释相同端点下质量变大为什么需要更久，核对 MINCO/Spline 的连续力界。

@@ -1,6 +1,7 @@
 #include <cmath>
 #include <optional>
 #include <rclcpp/rclcpp.hpp>
+#include "motion2d/ros/dynamics_parameters.hpp"
 #include <geometry_msgs/msg/pose_stamped.hpp>
 #include <nav_msgs/msg/path.hpp>
 #include <std_msgs/msg/string.hpp>
@@ -42,6 +43,7 @@ public:
     optimization_.solver.max_iterations=declare_parameter("optimization.max_iterations",200);
     optimization_.solver.max_wall_seconds=declare_parameter("optimization.max_wall_seconds",.2);
     optimization_.limits.clearance=config_.radius+config_.margin;
+    readPlanningDynamics(*this,optimization_);
     validateCostConfig(optimization_.cost);
     if(optimization_.solver.max_iterations<1 || !std::isfinite(optimization_.solver.max_wall_seconds) ||
       optimization_.solver.max_wall_seconds<0) throw std::invalid_argument("Invalid optimization budget");

@@ -216,3 +216,31 @@ RViz 预期同时显示几何优化预览和已发送命令的带时轨迹，圆
 \item \textbf{实验：}先预览再步进，确认没有自动执行；执行后验证 p/v/a，而不只检查最终位置。
 \item \textbf{扩展准备：}若当前机器人正在运动，写出新轨迹起点必须匹配的 p/v/a 条件；暂不删除本章静止检查。
 \end{enumerate}
+
+\clearpage
+\section{补充：力约束也要检查整段}
+第15章的力软惩罚仍是有限采样。对本课程线性受力映射，$F(t)$ 与 $\dot F(t)$
+都是多项式，可以继续使用 Bézier 凸包。若 $p(t)=\sum_{k=0}^5c_kt^k$，越界系数视为零，则
+\begin{equation}
+ F_k=m(k+2)(k+1)c_{k+2}+c_v(k+1)c_{k+1},\qquad
+ (\dot F)_k=(k+1)F_{k+1}.
+\end{equation}
+将力多项式转换成 Bézier 控制点 $B_k$。范数是凸函数，所以
+$\|F(t)\|\le\max_k\|B_k\|$；对力变化率同理。细分收紧的是\textbf{整段充分上界}，
+不是增加几个采样点后声称连续安全。
+\lstinputlisting[language=C++,linerange={force_polynomial_begin-force_polynomial_end},
+ includerangemarker=false]{../ros2_ws/src/motion2d/src/trajectory/bezier_bounds.cpp}
+\code{certifyForce} 可单独检查力；启用 dynamics 后，\code{certifyBezier} 会同时要求
+走廊、速度、加速度、力和力变化率通过。因而第19章的优化候选及回退轨迹也都受同一检查，
+不会在优化失败后悄悄换成未检查力的回退曲线。
+
+这项认证针对固定质量/阻尼、固定地图中的名义轨迹；跟踪误差与模型偏差仍需额外余量。
+分段连接若只满足 C$^2$，力连续但力导数可以跳变；本检查给出每段两侧的有限变化率界，
+没有限制更高阶导数，也不约束力导数的跃变大小。
+
+\begin{enumerate}
+\item \textbf{推导：}写出只有一维匀加速且含阻尼时的力控制点，验证上界包含真实峰值。
+\item \textbf{代码阅读：}在 certifyBezier 最后找到 certifyForce；解释为何检查失败必须阻止发送候选。
+\item \textbf{实验：}将 force\_planning\_demo 的质量从 1 改到 3，再把细分深度从 0 改到 5，
+记录上界与密集采样峰值。上界应不小于采样峰值，不能用密集采样替代上界。
+\end{enumerate}

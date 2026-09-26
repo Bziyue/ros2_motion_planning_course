@@ -1,4 +1,5 @@
 #include <rclcpp/rclcpp.hpp>
+#include "motion2d/ros/dynamics_parameters.hpp"
 #include <std_msgs/msg/empty.hpp>
 #include <std_msgs/msg/int64.hpp>
 #include <std_msgs/msg/string.hpp>
@@ -27,6 +28,7 @@ public:
     config_.max_route_length=declare_parameter("navigation.local_length",2.);
     config_.optimization.bezier_penalties=declare_parameter("navigation.bezier_penalties",false);
     config_.optimization.solver.max_wall_seconds=declare_parameter("navigation.solve_budget",.04);
+    readPlanningDynamics(*this,config_.optimization);
     for(double x:{rate_,lead_,scan_timeout_,map_timeout_,goal_tolerance_})
       if(!std::isfinite(x) || x<=0) throw std::invalid_argument("Invalid navigation timing/tolerance");
     if(rate_>50 || lead_>.5 || config_.optimization.solver.max_wall_seconds<=0 ||

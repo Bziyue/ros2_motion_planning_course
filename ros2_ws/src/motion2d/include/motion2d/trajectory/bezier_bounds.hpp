@@ -16,7 +16,18 @@ struct BezierCertificate {
   bool certified=false;
   double corridor_residual=-std::numeric_limits<double>::infinity();
   double speed_bound=0,acceleration_bound=0;
+  double force_bound=0,force_rate_bound=0;
 };
+/** @brief Continuous convex-hull bounds on unsaturated force and its derivative. */
+struct ForceCertificate {
+  bool certified=false;
+  double force_bound=0,force_rate_bound=0;
+};
+/** @brief Transform polynomial derivatives into F=m*a+c*v, then bound their hulls.
+ * @details No quadrature. Subdivision tightens sufficient bounds; failure can mean
+ * an overly conservative hull. Fixed physics; depth 0..10; yaw is constant.
+ */
+ForceCertificate certifyForce(const PolynomialTrajectory & curve,const OmniDynamicLimits & limits,int depth=5);
 /** @brief Bound the exact curve via convex hulls, optionally tightened by subdivision.
  * @pre Each region has been validated in the robot configuration space; one per piece.
  * @details Rejects missing regions. Uses <=1e-9 arithmetic tolerance, not a physical
