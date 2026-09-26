@@ -423,3 +423,71 @@ g++ -std=c++17 -I/usr/include/eigen3 \
 \textbf{没有移动时先检查}\quad 是否暂停、是否需要 reset、模型是否与输入话题对应，
 再检查 frame 和四元数。只运行一个课程 launch，避免多个时钟或 TF 发布者。
 \end{notebox}
+
+\clearpage
+\section{补充：我们的模型是否微分平坦？}\label{sec:flatness}
+\textbf{微分平坦}的意思是：可以选择一组输出 $y$，仅用 $y$ 和它的有限阶时间导数，
+代数地恢复全部状态和输入，不需要再积分一个隐藏状态。它不是“轨迹很平”，也不保证
+任意曲线都满足执行器限制。我们在局部连续的 yaw 坐标下讨论。
+
+本章受力模型有三个独立输入，因此选 $y=(p_x,p_y,\psi)$：
+\begin{align}
+v&=\dot p, & \omega&=\dot\psi,\\
+F&=m\ddot p+c_v\dot p, & \tau&=I_z\ddot\psi+c_\omega\dot\psi,\\
+\dot F&=m p^{(3)}+c_v\ddot p.&&
+\end{align}
+当 $m,I_z>0$ 时，全部状态与输入都已恢复，模型是微分平坦的。$p$ 单独不够：
+圆盘可以沿固定方向平移，同时独立改变 yaw。后面的二维位置优化保持 yaw 常数，
+所以只优化平移力；若要优化偏航力矩，必须再加入 yaw 轨迹及其导数。
+
+\begin{center}
+\begin{tabularx}{\linewidth}{@{}lX@{}}
+\toprule 模型 & 结论与适用范围\\\midrule
+连续全向速度输入 & 位姿是平坦输出；输入由一阶导数恢复。\\
+受力惯性模型 & 位置和 yaw 是平坦输出；输入需要二阶导数。\\
+理想到点 & 离散位置跳变没有上述连续动力学意义。\\
+解析圆、轨迹直接执行 & 是指定运动的执行方式，不是新的可控动力系统。\\
+差速、阿克曼车 & 位置可作局部平坦输出；零速和行驶方向须另行处理。\\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+\textbf{与无人机的联系。}忽略气动阻力的四旋翼有
+$m\ddot p=f b_3-mg e_3$，所以先恢复 $f=\|m(\ddot p+g e_3)\|$ 与机体推力方向
+$b_3$，再结合 yaw 恢复姿态；jerk 还决定机体角速度。GCOPTER 将这样的
+\emph{正向映射}和代价的\emph{反向梯度}分开实现。我们的水平圆盘由地面承担重力，
+$\|F\|$ 是水平合力，不是四旋翼总推力；不能直接加上 $mg$ 后声称已经模拟无人机。
+含旋翼阻力的三维映射可继续阅读 Faessler 等人的原论文，来源见参考资料文档。
+
+\clearpage
+\section{由物理量把梯度传回轨迹}
+令横线表示标量代价 $J$ 对某量的偏导，例如 $\bar F=\partial J/\partial F$。
+正向先从导数恢复物理量：
+\lstinputlisting[language=C++,linerange={omni_forward_begin-omni_forward_end},
+  includerangemarker=false]{../ros2_ws/src/motion2d/src/dynamics/omni_flatness.cpp}
+如果上层已算出 $\bar F,\overline{\dot F},\bar\tau$，链式法则给出
+\begin{align}
+\bar v&=c_v\bar F,&
+\bar a&=m\bar F+c_v\overline{\dot F},&
+\bar j&=m\overline{\dot F},\\
+\overline{\dot\psi}&=c_\omega\bar\tau,&
+\overline{\ddot\psi}&=I_z\bar\tau.&&
+\end{align}
+\lstinputlisting[language=C++,linerange={omni_backward_begin-omni_backward_end},
+  includerangemarker=false]{../ros2_ws/src/motion2d/src/dynamics/omni_flatness.cpp}
+这里返回的是解析的向量--雅可比乘积，未构造大矩阵。正向函数\textbf{不截断力}：
+若先饱和，优化器会看不到超限的真实大小。仿真器仍在执行输入处饱和。
+停在原地时全向圆盘的这个映射依然有效。
+
+\textbf{运行与练习 ch04-5。}重新构建后运行
+\code{ros2 run motion2d flatness\_demo}；默认结果为 $F=(1.04,-0.37)$ N。
+推导 $J=\frac12\|F\|^2$ 对加速度的梯度，再完成练习：
+\begin{lstlisting}[language=bash,numbers=none]
+# From repository root; change starter to solutions for the reference.
+g++ -std=c++17 -I/usr/include/eigen3 -Iexercises/ch04/starter \
+  exercises/ch04/check_flatness.cpp -o /tmp/ch04_flatness
+/tmp/ch04_flatness
+\end{lstlisting}
+\textbf{实验：}保持同一 $p(t)$，将质量翻倍。无阻尼时力翻倍；有阻尼时总力通常
+不会恰好翻倍。用中央差分检查反向梯度，并解释为什么质量必须出现在规划约束里。
+第 15--16 章将这些偏导继续传到多项式系数、路点和时长。

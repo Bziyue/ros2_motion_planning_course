@@ -15,6 +15,7 @@ find_package(nav_msgs REQUIRED)
 find_package(motion2d_interfaces REQUIRED)
 
 add_library(motion2d_core
+  src/dynamics/omni_flatness.cpp
   src/geometry/se2.cpp src/geometry/obstacles.cpp
   src/sim/sim_clock.cpp src/sim/world.cpp src/sim/world_generator.cpp
   src/sim/ideal_model.cpp src/sim/differential_drive.cpp src/sim/swept_collision.cpp src/sim/velocity_model.cpp
@@ -52,6 +53,10 @@ if(MOTION2D_ENABLE_CUDA)
   target_link_libraries(lidar_cuda_benchmark PRIVATE motion2d_cuda CUDA::cudart_static)
   install(TARGETS lidar_cuda_benchmark DESTINATION lib/motion2d)
 endif()
+
+add_executable(flatness_demo src/examples/flatness_demo.cpp)
+target_link_libraries(flatness_demo PRIVATE motion2d_core)
+install(TARGETS flatness_demo DESTINATION lib/motion2d)
 
 add_executable(se2_demo src/examples/se2_demo.cpp)
 target_link_libraries(se2_demo PRIVATE motion2d_core)
@@ -253,6 +258,8 @@ install(TARGETS bias_walk_demo DESTINATION lib/motion2d)
 
 if(BUILD_TESTING)
   find_package(ament_cmake_gtest REQUIRED)
+  ament_add_gtest(test_omni_flatness test/test_omni_flatness.cpp)
+  target_link_libraries(test_omni_flatness motion2d_core)
   if(MOTION2D_ENABLE_CUDA)
     ament_add_gtest(test_lidar_cuda test/test_lidar_cuda.cpp)
     target_link_libraries(test_lidar_cuda motion2d_cuda CUDA::cudart_static)

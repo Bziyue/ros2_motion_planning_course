@@ -17,3 +17,5 @@ ch04-3：
 3. yaw 也有相同的二次项。最后更新速度、角速度，保存加速度，并归一化 yaw。
 
 ch04-4：theta=omega*t，所以对 sin(theta)/cos(theta) 求时间导数还要乘 omega。加速度模长为 r*omega²；改变 omega 的正负不改变这个模长。
+
+ch04-5：先求 dJ/dF，再乘 dF/da；不要把质量消掉。yaw 是独立平坦输出，二维位置不能恢复它。

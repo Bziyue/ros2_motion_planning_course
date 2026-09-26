@@ -50,3 +50,8 @@ Felzenszwalb 与 Huttenlocher，*Distance Transforms of Sampled Functions*，The
 
 - [rosbag2官方README](https://github.com/ros2/rosbag2#simulation-time)：仿真时间录制与播放器；主机rosbag2 0.33.3的record/play --help核对实际选项，并完成真实记录/回放。
 - [slam_toolbox官方接口说明](https://github.com/SteveMacenski/slam_toolbox#introduction)：扫描、里程计与map到odom输出，作为选做接入协议的来源。未安装、运行或引用其性能数据作为本课程实验。
+
+## 微分平坦与物理约束
+
+- [GCOPTER flatness.hpp](https://github.com/ZJU-FAST-Lab/GCOPTER/blob/e0444f6d47b84f972ced91746b05feb36ce1fd4f/gcopter/include/gcopter/flatness.hpp) 与同版本 gcopter.hpp：正向物理映射、向量--雅可比乘积、固定归一化采样点的系数/时长链式法则。参考锁定 `e0444f6d47b84f972ced91746b05feb36ce1fd4f`，临时克隆保留 MIT LICENSE。课程按二维方程独立实现，未复制三维姿态代码。
+- [Faessler, Franchi, Scaramuzza: Differential Flatness of Quadrotor Dynamics Subject to Rotor Drag (2018)](https://arxiv.org/abs/1712.02402)：三维无人机位置/yaw 平坦输出与旋翼阻力；课程地面圆盘没有竖直推力和姿态倾斜自由度，不套用三维可行性结论。

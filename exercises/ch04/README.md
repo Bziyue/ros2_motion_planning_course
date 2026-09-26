@@ -46,3 +46,16 @@ g++ -std=c++17 -I/usr/include/eigen3 -Iexercises/ch04/starter \
   exercises/ch04/check_reference.cpp -o /tmp/ch04_reference
 /tmp/ch04_reference
 ~~~
+
+## ch04-5 微分平坦与力梯度
+
+推导 `J=0.5*|m*a+c*v|²` 的加速度偏导，完成 `starter/flat_force.hpp`。
+从仓库根目录运行：
+
+```bash
+g++ -std=c++17 -I/usr/include/eigen3 -Iexercises/ch04/starter exercises/ch04/check_flatness.cpp -o /tmp/ch04_flatness
+/tmp/ch04_flatness
+```
+
+参考解将 `starter` 改为 `solutions`。评分：两轴中央差分误差均小于 1e-8；解释质量与阻尼的作用。
+实验：运行 `ros2 run motion2d flatness_demo`，比较相同轨迹在两种质量下的力。提示与答案仍分开。
