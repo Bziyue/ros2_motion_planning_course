@@ -15,3 +15,7 @@ g++ -std=c++17 -I/usr/include/eigen3 \
 ~~~
 
 starter 默认未完成。把 starter 换为 solutions 可检查参考解。提示在 [hints.md](hints.md)，参考解在 [solutions/inverse_point.hpp](solutions/inverse_point.hpp)。
+
+4. 推导：把单位x/y轴分别旋转30度，写出旋转矩阵的两列，计算RᵀR。
+5. 手算：车体在(1,2)、yaw=90度，雷达在车体前方0.5m，观测点在雷达前方2m。先分两次变换，再用compose一次变换，核对结果。
+6. 表示：yaw=0/90/180度分别对应哪些(qz,qw)？代回教材的Rq检查，而不是背诵半角公式。
