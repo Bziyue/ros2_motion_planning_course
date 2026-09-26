@@ -233,3 +233,12 @@ FLOAT32字段x/y/z/distance，偏移0/4/8/12，每点16B，z=0、其余单位m�
 `/esdf/gradients`为map系MarkerArray显示箭头；`/esdf/status`区分ready/no_finite_field/invalid_map。
 输入输出使用地图采样时间，输出保留最新快照；错误输入清空旧云与标记。
 默认未知阻塞，自由阈值35；半径只在规划膨胀或未膨胀ESDF净空约束的一处计算。
+
+
+## 第13章已落地的走廊接口
+
+planner内同一次搜索生成走廊，直接复用PlanningGrid和原始A*路径，不异步拼接地图与路径。
+/plan/path_raw保留邻格点，/plan/corridor_path存每区对应线段端点；/plan/corridors只用于显示。
+这些路径和Marker使用起点里程计时间、map frame；无执行时长，单位姿态不是yaw规划。
+/plan/corridor_status单列走廊构造状态；关闭功能为disabled。每批DELETEALL后重新画闭合LINE_STRIP。
+错误/reset清空全部规划显示；算法消费ConvexRegion，不解析Marker。半径只在配置栅格处理一次。

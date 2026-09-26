@@ -1,6 +1,6 @@
 # 第13章：二维凸安全走廊
 
-先修11–12章。当前完成走廊内核与给定栅格实验；ROS观测路径接入继续实施。
+先修11–12章。完成走廊内核、给定栅格实验及 ROS 观测地图接入。
 
 ```bash
 ros2 run motion2d corridor_demo tmp/ch13_corridor
@@ -27,3 +27,22 @@ regionIsFree按闭半平面逐个裁剪候选阻塞方格，非空包括擦边/�
 不合并/合并分别得到10/3区域、40/19顶点、11/4路点，最小相邻交叠约.06m²。
 测试覆盖单位法向、退化交叠、内部障碍、接触、非矩形凸包、转弯路线、1/.1m尺度及失败清空。
 练习ch13-1实现边到半空间。常见错误：重复膨胀、仅检查顶点、允许共点交叠、将路径安全当成曲线安全。
+
+
+## ROS 观测地图
+
+```bash
+ros2 launch motion2d_bringup ch13.launch.py
+# 同一 ROS_DOMAIN_ID、已 source 的另一个终端
+/usr/bin/python3 scripts/check_ch13.py
+/usr/bin/python3 scripts/plot_ch13_observed.py
+```
+
+planner 在同一配置图快照上完成 A* 与走廊；原始邻格路径直接传入构造器。
+/plan/path_raw 是原始路径，/plan/path 是简化路径，/plan/corridor_path 是区域连接点；
+/plan/corridors 是闭合 LINE_STRIP，先 DELETEALL 再画新区域。Marker 仅显示，算法使用 ConvexRegion。
+/plan/status 和 /plan/corridor_status 分别描述两个阶段。失败/reset 清空；新目标不能直接移动机器人。
+配置 corridor.enabled=true、merge_convex=true、max_extension=.6m。
+路径/区域共用起点里程计时间和 map frame；地图掩码仍保留地图采样时间，不是轨迹执行时间。
+RViz 预期显示配置图、走廊边框和连接点。主机已通过无界面 ROS 检查，GUI 限制见验收记录。
+固定 .5s 的真实观测中，(-8,-8)→(-4,-1) 得到73原始点、4走廊；脚本以独立 SAT 逐格检查安全。

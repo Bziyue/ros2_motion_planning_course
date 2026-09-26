@@ -137,6 +137,8 @@ foreach(node lidar_odometry estimated_odometry fusion slam planner esdf)
   install(TARGETS ${node}_node DESTINATION lib/motion2d)
 endforeach()
 
+target_sources(planner_node PRIVATE src/ros/planning_messages.cpp)
+
 add_executable(planar_ekf_demo src/examples/planar_ekf_demo.cpp)
 target_link_libraries(planar_ekf_demo PRIVATE motion2d_core)
 install(TARGETS planar_ekf_demo DESTINATION lib/motion2d)

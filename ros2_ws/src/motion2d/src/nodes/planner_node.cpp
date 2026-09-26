@@ -8,6 +8,7 @@
 #include <tf2_ros/transform_listener.hpp>
 #include "motion2d/planning/astar.hpp"
 #include "motion2d/ros/mapping_messages.hpp"
+#include "motion2d/ros/planning_messages.hpp"
 
 namespace motion2d
 {
@@ -24,11 +25,19 @@ public:
     config_.margin = declare_parameter("margin", .05);
     config_.free_threshold = declare_parameter("planning.free_threshold", 35);
     config_.unknown_blocked = declare_parameter("planning.unknown_blocked", true);
+    corridor_enabled_ = declare_parameter("corridor.enabled", false);
+    merge_convex_ = declare_parameter("corridor.merge_convex", true);
+    extension_ = declare_parameter("corridor.max_extension", .6);
+    if (!std::isfinite(extension_) || extension_ < 0) {throw std::invalid_argument("invalid corridor extension");}
     diagonal_ = declare_parameter("planning.diagonal", true);
     // Validate startup configuration even before the first map arrives.
     inflateGrid(GridConfig{}, std::vector<int8_t>(220*220, -1), config_);
     const auto retained = rclcpp::QoS(1).transient_local();
     path_pub_ = create_publisher<nav_msgs::msg::Path>("/plan/path", retained);
+    raw_pub_ = create_publisher<nav_msgs::msg::Path>("/plan/path_raw", retained);
+    corridor_path_pub_ = create_publisher<nav_msgs::msg::Path>("/plan/corridor_path", retained);
+    corridor_pub_ = create_publisher<visualization_msgs::msg::MarkerArray>("/plan/corridors", retained);
+    corridor_status_pub_ = create_publisher<std_msgs::msg::String>("/plan/corridor_status", retained);
     grid_pub_ = create_publisher<nav_msgs::msg::OccupancyGrid>("/planning/grid", retained);
     status_pub_ = create_publisher<std_msgs::msg::String>("/plan/status", retained);
     map_sub_ = create_subscription<nav_msgs::msg::OccupancyGrid>("/map", retained,
@@ -106,24 +115,31 @@ private:
     const auto result = astar(*grid_, start.position, *goal_, diagonal_);
     if (!result.success) {publish({}, result.status); return;}
     const auto path = simplifyPath(*grid_, result.path);
-    publish(path, "found");
+    publish(path, "found", result.path);
     // planner_snapshot_end
   }
 
-  void publish(const std::vector<Eigen::Vector2d> & points, const std::string & status)
+  void publish(const std::vector<Eigen::Vector2d> & points, const std::string & status,
+    const std::vector<Eigen::Vector2d> & raw = {})
   {
-    nav_msgs::msg::Path path; path.header.frame_id = "map";
-    path.header.stamp = odom_ ? odom_->header.stamp : static_cast<builtin_interfaces::msg::Time>(now());
-    for (const auto & p : points) {
-      geometry_msgs::msg::PoseStamped pose; pose.header = path.header;
-      pose.pose.position.x = p.x(); pose.pose.position.y = p.y(); pose.pose.orientation.w = 1;
-      path.poses.push_back(pose);
-    }
-    path_pub_->publish(path);
+    std_msgs::msg::Header header; header.frame_id = "map";
+    header.stamp = odom_ ? odom_->header.stamp : static_cast<builtin_interfaces::msg::Time>(now());
+    path_pub_->publish(toPath(points,header)); raw_pub_->publish(toPath(raw,header));
     std_msgs::msg::String message; message.data = status; status_pub_->publish(message);
+    // corridor_snapshot_begin
+    CorridorResult corridor; corridor.status = corridor_enabled_ ? status : "disabled";
+    if (corridor_enabled_ && status == "found") {
+      corridor = buildCorridor(*grid_,raw,merge_convex_,extension_);
+    }
+    corridor_pub_->publish(toCorridorMarkers(corridor.regions,header));
+    corridor_path_pub_->publish(toPath(corridor.waypoints,header));
+    message.data = corridor.status; corridor_status_pub_->publish(message);
+    // corridor_snapshot_end
   }
 
   InflationConfig config_;
+  bool corridor_enabled_, merge_convex_;
+  double extension_;
   bool diagonal_{true}, dirty_{false}, new_goal_{false}, map_changed_{false}, received_map_{false};
   rclcpp::Time map_stamp_{0, 0, RCL_ROS_TIME};
   std::optional<PlanningGrid> grid_;
@@ -131,7 +147,9 @@ private:
   std::optional<Eigen::Vector2d> goal_, last_start_;
   tf2_ros::Buffer buffer_;
   tf2_ros::TransformListener listener_;
-  rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr path_pub_;
+  rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr path_pub_, raw_pub_, corridor_path_pub_;
+  rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr corridor_pub_;
+  rclcpp::Publisher<std_msgs::msg::String>::SharedPtr corridor_status_pub_;
   rclcpp::Publisher<nav_msgs::msg::OccupancyGrid>::SharedPtr grid_pub_;
   rclcpp::Publisher<std_msgs::msg::String>::SharedPtr status_pub_;
   rclcpp::Subscription<nav_msgs::msg::OccupancyGrid>::SharedPtr map_sub_;

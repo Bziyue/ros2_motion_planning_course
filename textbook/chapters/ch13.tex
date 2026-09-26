@@ -136,4 +136,54 @@ every last row/.style={after row=\bottomrule}]{data/ch13_corridor.csv}
 \item \textbf{实验：}改变局部扩展长度与合并开关，记录区域数、形状与最小交叠面积。
 保持地图、半径和路径相同，解释变化原因。
 \end{enumerate}
-ROS 观测路径上的走廊显示将在下一功能接入。
+\clearpage
+\section{同一观测快照上的 ROS 走廊}
+\begin{lstlisting}[language=bash]
+ros2 launch motion2d_bringup ch13.launch.py
+# 另一个已 source 的终端；暂停、reset、单步和目标检查
+/usr/bin/python3 scripts/check_ch13.py
+/usr/bin/python3 scripts/plot_ch13_observed.py
+\end{lstlisting}
+本章沿用静止机器人、真值定位与真实扫描建图；默认半径 0.2 m、裕量 0.05 m。
+RViz 的目标工具发送 map 系目标，规划器先在当前栅格上运行 A*，再把这次搜索的原始路径直接交给走廊构造。
+不通过另一个订阅回调拼接不同时刻的路径和地图。下一章才给几何路线增加时间。
+\lstinputlisting[language=C++,linerange={corridor_snapshot_begin-corridor_snapshot_end},
+  includerangemarker=false]{../ros2_ws/src/motion2d/src/nodes/planner_node.cpp}
+
+\begin{center}\small
+\begin{tabular}{ll}\toprule
+输出 & 含义 \\\midrule
+/plan/path\_raw & 原始 A* 邻格路径 \\
+/plan/path & 第十一章的简化折线 \\
+/plan/corridor\_path & 按区域重新分配的连接点 \\
+/plan/corridors & 区域边框 MarkerArray，仅供显示 \\
+/plan/corridor\_status & 走廊阶段状态，和 A* 状态分开 \\\bottomrule
+\end{tabular}
+\end{center}
+路径与边框共用本次起点里程计的时间戳及 map 坐标系，路径里的姿态单位四元数只是占位，
+不表示实际 yaw。栅格仍保留地图采样时间；这些时间都不是未来执行时刻。
+每次 MarkerArray 先发 DELETEALL，再发新边框，区域数变少也不留下旧多边形。
+错误目标、搜索失败或 reset 都清空路径与边框。
+
+\section{参数、观察与独立检查}
+\begin{itemize}
+\item corridor.enabled：本章开启；旧章节默认关闭。
+\item corridor.merge\_convex：是否尝试安全凸包合并。
+\item corridor.max\_extension：每侧局部扩展长度，默认 0.6 m。
+\end{itemize}
+算法直接使用 ConvexRegion 和半空间，不从显示 Marker 反解约束。
+RViz 应显示观测配置图、闭合区域轮廓及穿过交叠区的分配路线。
+本机完成了真实 ROS 消息验收；由于已记录的桌面显示限制，未宣称 GUI 目视验收。
+
+\begin{figure}[!ht]
+\centering\includegraphics[width=.68\linewidth]{figures/ch13_observed.pdf}
+\caption{由实际 ROS 消息绘制的局部观测结果。灰色包含障碍、未知及膨胀阻塞格；
+彩色区域全部位于白色自由域，浅填充仅用于教材辨认。}
+\end{figure}
+
+固定 seed=42/4242，reset 后单步至 0.5 s，目标为 $(-4,-1)$ m。
+得到 73 个原始路径点、4 个走廊；检查脚本使用独立的分离轴方法逐格验证整个多边形，
+并验证段端点、闭合边框和时间戳。随后换近目标、无效远目标并 reset，核对旧显示确实清除。
+
+\textbf{新增实验：}依次发送远近两个已观测目标，记录区域数；解释为什么需要 DELETEALL。
+将目标改到未知区域，分别观察 A* 和走廊状态，不能因为上一条路径还在截图中就判断当前规划成功。
