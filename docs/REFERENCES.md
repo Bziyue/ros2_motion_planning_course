@@ -26,3 +26,7 @@ Felzenszwalb 与 Huttenlocher，*Distance Transforms of Sampled Functions*，The
 [正式论文及 DOI](https://theoryofcomputing.org/articles/v008a019/)；[作者保存的 PDF](https://cs.brown.edu/people/pfelzens/papers/dt-final.pdf)。
 第12章使用可分离的抛物线下包络方法，按公式独立实现，没有复制上游代码。
 场的正负约定、栅格面积/插值下界以及ROS接口是本课程的具体选择，不将中心EDT称为方格边界精确SDF。
+
+
+第15章再次查阅[MINCO论文v4第IV节](https://arxiv.org/html/2103.00190v4)，核对位置路点对应的C⁴最优性、带状线性表示与伴随。
+课程由最小jerk变分条件独立组装二维系统，未复制上游代码；无主元教学求解器限制与密集KKT对照已说明。

@@ -261,3 +261,10 @@ model=trajectory只订阅该命令；本章要求当前及起终点静止、位�
 /sim/trajectory_status单列idle/accepted/waiting/executing/completed/rejected与碰撞/非法状态。
 未来/终点保持、C²采样、非整步传感器均共用解析函数。扫掠用全区间加速度上界扩展圆盘；碰撞前冻结所有时间。
 错误新消息不会改写已接受曲线；reset清空。在线p/v/a接续与失败制动在第19章扩展。
+
+
+## 第15章MINCO内核
+
+Minco2D固定首尾p/v/a，内部路点N-1个、正时长N个；coefficients为6N×2升幂行矩阵。
+trajectory()返回统一PolynomialTrajectory。energyPartials()的times是固定系数偏导；
+propagate()返回消元后的总路点/时长梯度，不能混用。核心仍无障碍/动力学约束，异常尺度报数值失败。
