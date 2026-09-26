@@ -123,8 +123,9 @@ $t_s$ 是整帧 snapshot 扫描的采集时间。圆心外参为单位变换，�
 \bottomrule
 \end{tabular}
 \end{center}
-两者均为 \code{PointCloud2}，保留扫描时间。每点 x/y/z 是三个 float32，
-z 恒为 0；height=1、point\_step=12 字节，is\_dense=true 表示输出不含无效点。
+两种消息都使用 \code{PointCloud2} 并保留扫描时间。每点的 x、y、z 各用一个 float32，
+其中 z=0。消息只有一行（height=1），每点占用 12 字节（point\_step=12）。
+is\_dense=true 表示输出不含无效点。
 这里的 registered 仅表示已按位姿转入统一坐标系，\textbf{尚未进行扫描匹配}。
 本章不累积 \code{/map/cloud}；后续全局位姿修正需要保留关键帧才能重建点云。
 

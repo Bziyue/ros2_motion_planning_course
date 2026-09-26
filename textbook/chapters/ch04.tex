@@ -44,12 +44,19 @@ ros2 topic pub --once /command/pose geometry_msgs/msg/PoseStamped \
 
 \begin{center}
 \begin{tikzpicture}[x=1cm,y=1cm]
-\fill[tealblue!12,rounded corners=8mm] (-3,-.45) rectangle (3,.45);
-\draw[tealblue,dashed,rounded corners=8mm] (-3,-.45) rectangle (3,.45);
-\draw[-{Stealth},thick,navy] (-2.55,0) -- (2.55,0);
-\draw[fill=white,tealblue,thick] (-2.55,0) circle (.45);
-\draw[fill=white,tealblue,thick] (2.55,0) circle (.45);
-\draw[fill=muted!50,navy] (0,.15) circle (.55);
+% 扫掠外形由两条平行线和半径 r 的两个半圆构成。
+\fill[tealblue!12] (-2.55,-.45)--(2.55,-.45)
+  arc[start angle=-90,end angle=90,radius=.45]
+  --(-2.55,.45) arc[start angle=90,end angle=270,radius=.45]--cycle;
+\draw[tealblue,dashed] (-2.55,-.45)--(2.55,-.45);
+\draw[tealblue,dashed] (-2.55,.45)--(2.55,.45);
+\draw[-{Stealth},thick,navy] (-2.55,0) -- (2.0,0);
+% 显式区分 draw/fill，避免颜色简写覆盖白色填充。
+\draw[draw=tealblue,fill=white,thick] (-2.55,0) circle (.45);
+\draw[draw=tealblue,fill=white,thick] (2.55,0) circle (.45);
+\fill[tealblue] (-2.55,0) circle (1.5pt);
+\fill[tealblue] (2.55,0) circle (1.5pt);
+\draw[draw=navy,fill=muted!50] (0,.15) circle (.55);
 \node[below] at (-2.55,-.5) {$p_0$};
 \node[below] at (2.55,-.5) {$p_1$};
 \node[above] at (0,.8) {端点自由，整段被挡住};
@@ -80,8 +87,8 @@ ros2 topic pub --once /command/pose geometry_msgs/msg/PoseStamped \
 \end{figure}
 
 \section{冻结试验与重新开始}
-若扫掠检查失败，程序不接受候选状态：位置、速度和时间停在上一个通过检查的 tick，
-\code{/sim/status} 为 \code{collision_predicted}，圆盘变红。
+扫掠检查失败时，程序不接受候选状态，位置、速度和时间均保持在上一个安全的 tick。
+此时圆盘变红，\code{/sim/status} 显示 \code{collision_predicted}。
 这是提前终止试验，尚未模拟接触力、反弹或摩擦。它没有把撞入障碍的状态推回自由空间。
 需要调用 reset 才能继续。
 
