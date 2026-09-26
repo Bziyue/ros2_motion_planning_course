@@ -25,7 +25,7 @@ add_library(motion2d_core
   src/estimation/planar_ekf.cpp src/estimation/fusion_timeline.cpp src/estimation/pose_graph.cpp src/estimation/loop_closure.cpp src/estimation/keyframes.cpp
   src/planning/inflation.cpp src/planning/astar.cpp src/planning/path_simplifier.cpp src/planning/corridor.cpp
   src/trajectory/polynomial.cpp src/trajectory/quintic.cpp src/trajectory/execution.cpp src/trajectory/banded_lu.cpp src/trajectory/minco2d.cpp src/trajectory/trajectory_cost.cpp
-  src/optimization/bfgs.cpp src/trajectory/trajectory_optimizer.cpp src/trajectory/spline2d.cpp src/trajectory/bezier_bounds.cpp src/control/pd_tracker.cpp src/control/tracking_reference.cpp)
+  src/optimization/bfgs.cpp src/trajectory/trajectory_optimizer.cpp src/trajectory/spline2d.cpp src/trajectory/bezier_bounds.cpp src/control/pd_tracker.cpp src/control/tracking_reference.cpp src/control/linear_mpc.cpp src/optimization/box_qp.cpp)
 target_compile_features(motion2d_core PUBLIC cxx_std_17)
 target_compile_options(motion2d_core PRIVATE -Wall -Wextra -Wpedantic)
 target_include_directories(motion2d_core PUBLIC
@@ -201,6 +201,10 @@ add_executable(pd_tracking_demo src/examples/pd_tracking_demo.cpp)
 target_link_libraries(pd_tracking_demo PRIVATE motion2d_core)
 install(TARGETS pd_tracking_demo DESTINATION lib/motion2d)
 
+add_executable(mpc_demo src/examples/mpc_demo.cpp)
+target_link_libraries(mpc_demo PRIVATE motion2d_core)
+install(TARGETS mpc_demo DESTINATION lib/motion2d)
+
 if(BUILD_TESTING)
   find_package(ament_cmake_gtest REQUIRED)
   ament_add_gtest(test_trajectory_messages test/test_trajectory_messages.cpp src/ros/trajectory_messages.cpp)
@@ -211,6 +215,8 @@ if(BUILD_TESTING)
   ament_add_gtest(test_control_messages test/test_control_messages.cpp src/ros/control_messages.cpp src/ros/mapping_messages.cpp)
   target_compile_features(test_control_messages PRIVATE cxx_std_20)
   target_link_libraries(test_control_messages motion2d_core nav_msgs::nav_msgs__rosidl_typesupport_cpp sensor_msgs::sensor_msgs__rosidl_typesupport_cpp)
+  ament_add_gtest(test_linear_mpc test/test_linear_mpc.cpp)
+  target_link_libraries(test_linear_mpc motion2d_core)
   ament_add_gtest(test_pd_tracker test/test_pd_tracker.cpp)
   target_link_libraries(test_pd_tracker motion2d_core)
   ament_add_gtest(test_bezier test/test_bezier.cpp)

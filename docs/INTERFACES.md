@@ -285,3 +285,10 @@ tracker_node只读取/odometry（odom/base_link），先将body twist旋转到od
 50Hz按唯一仿真观测时间戳，无补发突发；回退清空曲线和计时起点，暂停不重复控制。
 .12s仿真时间无新观测或积压旧观测触发最后可用速度的限幅阻尼制动，stamp为当前ROS时间；无停车/避障保证。
 reference.source=trajectory时消费/plan/trajectory，要求当前与首尾静止、起点位置/yaw匹配、未来开始；执行中拒绝替换。
+
+## 第18章MPC内核
+
+LinearModel为精确ZOH的4×4 A、4×2 B；状态[p_x,p_y,v_x,v_y]，输入[Fx,Fy]，统一odom。
+LinearMpc::problem暴露实际BoxQp(P,q,A,lower,upper)，强凸代价，N个未来参考/N个可选节点凸区，上一拍实际力。
+LinearMpc::step只有solved才执行并热启动；其他状态丢弃序列、返回新的限幅阻尼力，不复用旧输入。
+走廊/速度仅预测节点约束；力/变化率均按轴，变化率乘控制间隔后单位N。未实现终端不变集或连续避障保证。

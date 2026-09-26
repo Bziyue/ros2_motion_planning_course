@@ -34,3 +34,8 @@ Felzenszwalb 与 Huttenlocher，*Distance Transforms of Sampled Functions*，The
 ### 第16章实际对照
 
 固定上游126525e49a43b0548bc6960e4979dd6b6258f289，QuinticSplineND<2>，MIT LICENSE随临时克隆保留。课程Spline2D根据端点能量二次型独立实现；未复制上游源码。`scripts/benchmark_ch16.sh`将三种实现以相同-O3/-fno-fast-math编译进一个程序，测构造+能量+完整能量梯度，结果见textbook/data/ch16_comparison.csv。
+
+## 第18章 QP
+
+[OSQP 官方求解器说明](https://osqp.org/docs/solver/index.html)，2026-09-26核对二次型、ADMM线性系统/投影、残差终止及原始不可行证书。
+课程为独立编写的强凸稠密教学实现，不复制OSQP源码，不包含其完整预处理/缩放/抛光功能。
