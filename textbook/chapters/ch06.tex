@@ -296,14 +296,16 @@ t_k=\operatorname{round}\!\left(\frac{10^9 k}{f_s}\right)\ \mathrm{ns},
 只用已经确定的区间输入计算 $x(t_s)$，然后生成测量。
 reference 直接计算绝对时刻的圆轨迹；inertial 和 velocity 从 $x(t_a)$ 出发，
 用本区间保持的命令积分 $t_s-t_a$。两者复用第四章解析解，
-不是分别线性插值位置、速度和加速度。以后接入数值动力学时才需重新设计一致的区间插值。
+不是分别线性插值位置、速度和加速度。新增阿克曼模型从区间起点按同一保持输入
+积分到采集时刻；位姿用 RK4，速度、转角与加速度由第四章的一致模型给出。
 
 \lstinputlisting[language=C++,linerange={sensor_dispatch_begin-sensor_dispatch_end},
  includerangemarker=false]{../ros2_ws/src/motion2d/src/nodes/simulator_node.cpp}
 
 代码先选两个采样网格中较早的时刻；同一时刻可同时生成 IMU 和激光。
 每个采样位姿先发布对应的真值 TF，最后补齐 tick 末端的 TF。
-这样按采样 stamp 查询得到精确的模拟位姿，而不是误用最新一帧 TF。
+这样按采样 stamp 查询得到该采集时刻的模拟位姿，而不是误用最新一帧 TF；
+阿克曼位姿包含已说明的数值积分误差。
 暂停时仍重复当前 TF 供晚加入者显示，但不重采样传感器。
 
 \textbf{边界约定。}恰好在 tick 末端的 IMU 使用刚结束区间的加速度；
@@ -351,3 +353,40 @@ ros2 run rviz2 rviz2 -d src/motion2d_bringup/rviz/ch06.rviz \
 \textbf{本章验收：}会区分比力与运动加速度、标准差与方差、采样与到达时间；
 完成三道独立代码练习，能复现白噪声、积分漂移和不对齐频率实验。
 原始 IMU 仍不是位置、姿态或里程计答案；下一章再明确接入真值里程计与观测建图。
+
+\clearpage
+\section{阿克曼转弯时的 IMU 与采集时间}
+新增模型复用同一采样调度，先接受整个运动区间，再发布区间内观测。
+取纵向力 $F$、转向速率 $r_\delta$ 恒定，质量 $m$、阻尼 $c>0$，从静止、零转角起步：
+\begin{align}
+ s(t)&=\frac{F}{c}\left(1-e^{-ct/m}\right), & \delta(t)&=r_\delta t,\\
+ f_x(t)&=\frac{F-cs(t)}m, &
+ f_y(t)&=\frac{s(t)^2\tan\delta(t)}L,\\
+ \omega_z(t)&=\frac{s(t)\tan\delta(t)}L, & f_z(t)&=g.
+\end{align}
+这里 $f_x,f_y$ 已在机体系，$f_y$ 为无侧滑转弯的向心项。
+不能把世界加速度的 x 分量直接当作纵向 IMU，也不能漏掉速度与角速度的乘积。
+
+从仓库根目录、两个已加载 ROS/install 环境的终端运行，仅启动此实验：
+\begin{lstlisting}[language=bash,numbers=none]
+ros2 run motion2d simulator_node --ros-args --params-file \
+  ros2_ws/src/motion2d_bringup/config/ackermann_sensors.yaml
+# Another terminal
+/usr/bin/python3 scripts/check_ackermann_sensors.py
+\end{lstlisting}
+配置 $m=1$ kg、$c=0.15$ kg/s、$L=0.3$ m，物理步长 0.005 s，
+IMU 137 Hz、激光 7 Hz/720 束，噪声关闭。检查器给定 $F=0.8$ N、
+$r_\delta=0.12$ rad/s，单步 40 次到 0.2 s，尚未超过命令有效期和转角界。
+
+清除初始零时刻消息后，应收到 $\lfloor0.2\times137\rfloor=27$ 条 IMU。
+逐条以消息 stamp 代入上式，不能以收到消息时的 tick 代入；
+首个非零激光时刻为 142857143 ns，也不落在 5 ms 网格上。
+主机测得这些比力与角速度的最大误差约 $1.11\times10^{-16}$，reset 后逐值重放一致。
+速度和转角在这个保持输入例子中有解析式，因此这些量可以达到浮点精度；
+这不意味着一般 RK4 位姿误差也为零，位姿精度另由步长减半测试检查。
+
+\paragraph{练习与验收}
+分别把 IMU 改成 200 Hz、将力改为 0 N、把转向速率改成负值，
+先推导样本数量、纵向和侧向项，再修改实验检查器的预期式。
+解释为什么零纵向力不总意味着零加速度：已有速度在有阻尼时仍会减速。
+最后恢复白噪声，比较均值与理论值；不要要求有噪声样本逐条等于解析信号。

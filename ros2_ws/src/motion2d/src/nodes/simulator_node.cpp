@@ -31,6 +31,9 @@
 #include "motion2d/sim/sensor_scheduler.hpp"
 #include "motion2d/sim/lidar_cuda.hpp"
 #include <motion2d_interfaces/msg/lidar_timing.hpp>
+#include <motion2d_interfaces/msg/ackermann_command.hpp>
+#include <sensor_msgs/msg/joint_state.hpp>
+#include "motion2d/ros/ackermann_parameters.hpp"
 
 namespace motion2d
 {
@@ -59,11 +62,16 @@ public:
     if (!std::isfinite(initial_.yaw) || !std::isfinite(command_timeout_) ||
       !std::isfinite(speed_max_) || !std::isfinite(yaw_rate_max_) ||
       command_timeout_ <= 0.0 || speed_max_ <= 0.0 || yaw_rate_max_ <= 0.0 ||
-      (model_ != "ideal" && model_ != "velocity" && model_ != "inertial" && model_ != "reference" && model_ != "trajectory"))
+      (model_ != "ideal" && model_ != "velocity" && model_ != "inertial" && model_ != "reference" && model_ != "trajectory" && model_ != "ackermann"))
     {
       throw std::invalid_argument("Unknown model or invalid limit/timeout; see ch04 configuration");
     }
     if (model_ == "inertial") {readInertia();}
+    if (model_ == "ackermann") {
+      ackermann_parameters_=readAckermannParameters(*this);
+      if(dt()>.02) throw std::invalid_argument("Ackermann RK4 teaching simulator requires dt <= 0.02 s");
+      ackermann_state_.pose=initial_;
+    }
     if (model_ == "reference") {
       reference_radius_ = declare_parameter("reference_radius", 1.0);
       reference_omega_ = declare_parameter("reference_omega", .4);
@@ -99,6 +107,17 @@ public:
         "/command/wrench", rclcpp::QoS(1),
         [this](const geometry_msgs::msg::WrenchStamped & message) {receiveWrench(message);});
     }
+    if (model_ == "ackermann") {
+      joint_pub_=create_publisher<sensor_msgs::msg::JointState>("/joint_states",retained);
+      ackermann_sub_=create_subscription<motion2d_interfaces::msg::AckermannCommand>("/command/ackermann",1,
+        [this](const motion2d_interfaces::msg::AckermannCommand & m) {
+          if(blocked_ || m.header.frame_id!="base_link" || !freshHeader(m.header) ||
+            !std::isfinite(m.force) || !std::isfinite(m.steering_rate)) {
+            RCLCPP_WARN(get_logger(),"Ackermann command rejected: body frame, finite values and fresh stamp required");return;
+          }
+          ackermann_command_={m.force,m.steering_rate};acceptHeldCommand(m.header);
+        });
+    }
     if (model_ == "trajectory") {
       trajectory_status_pub_ = create_publisher<std_msgs::msg::String>("/sim/trajectory_status", retained);
       trajectory_sub_ = create_subscription<motion2d_interfaces::msg::Trajectory2D>(
@@ -132,7 +151,7 @@ private:
     return schedule;
   }
 
-  /** @brief Exact sample inside the last accepted ZOH/reference interval.
+  /** @brief Sample inside the last accepted interval; Ackermann pose uses RK4.
    * @details A boundary sample belongs to the interval that just ended (left
    * limit of acceleration); a later command cannot rewrite a published sample.
    * Ideal pose changes happen only at the tick endpoint, with IMU disabled.
@@ -147,6 +166,10 @@ private:
     }
     if (model_ == "inertial") {
       return stepInertial(interval_start_, interval_wrench_, inertia_, offset);
+    }
+    if (model_ == "ackermann") {
+      const auto x=stepAckermann(interval_ackermann_,interval_ackermann_input_,ackermann_parameters_,offset);
+      return ackermannKinematics(x,interval_ackermann_input_,ackermann_parameters_);
     }
     if (model_ == "velocity") {
       return stepVelocity(interval_start_, interval_velocity_, offset);
@@ -177,8 +200,8 @@ private:
 
   void readImu()
   {
-    if (model_ != "reference" && model_ != "inertial" && model_ != "trajectory") {
-      throw std::invalid_argument("IMU requires model=reference, inertial or trajectory; jumps have no physical IMU");
+    if (model_ != "reference" && model_ != "inertial" && model_ != "trajectory" && model_ != "ackermann") {
+      throw std::invalid_argument("IMU requires reference, inertial, trajectory or ackermann; jumps have no physical IMU");
     }
     gravity_ = declare_parameter("imu.gravity", 9.81);
     if (!std::isfinite(gravity_) || gravity_ <= 0) {
@@ -418,6 +441,8 @@ private:
   {
     if (blocked_) {return false;}
     State2D next = state_;
+    AckermannState next_ackermann=ackermann_state_;
+    AckermannInput applied_ackermann;
     double padding = 0.0;
     if (have_command_ && clock_.nanoseconds() >= command_deadline_) {
       have_command_ = false;
@@ -433,6 +458,12 @@ private:
       const auto command = have_command_ ? wrench_command_ : Wrench2D{};
       next = stepInertial(state_, command, inertia_, dt());
       padding = inertialSweepPadding(state_, command, inertia_, dt());
+    }
+    if (model_ == "ackermann") {
+      applied_ackermann=limitAckermannInput(ackermann_state_,have_command_?ackermann_command_:AckermannInput{},ackermann_parameters_,dt());
+      next_ackermann=stepAckermann(ackermann_state_,applied_ackermann,ackermann_parameters_,dt());
+      next=ackermannKinematics(next_ackermann,applied_ackermann,ackermann_parameters_);
+      padding=ackermannSweepPadding(ackermann_state_,applied_ackermann,ackermann_parameters_,dt());
     }
     if (model_ == "reference") {
       next = sampleCircle(initial_, reference_radius_, reference_omega_, clock_.seconds() + dt());
@@ -468,6 +499,8 @@ private:
     interval_start_ns_ = clock_.nanoseconds();
     interval_velocity_ = have_command_ ? velocity_command_ : VelocityCommand{};
     interval_wrench_ = have_command_ ? wrench_command_ : Wrench2D{};
+    interval_ackermann_=ackermann_state_;interval_ackermann_input_=applied_ackermann;
+    ackermann_state_=next_ackermann;
     state_ = next;
     if (single_step) {clock_.singleStep();} else {clock_.advance();}
     if (model_ == "trajectory" && trajectory_) {
@@ -504,6 +537,8 @@ private:
         std_srvs::srv::Trigger::Response::SharedPtr response) {
         clock_.reset();
         state_ = initialState();
+        ackermann_state_={initial_,0,0};interval_ackermann_=ackermann_state_;
+        ackermann_command_={};interval_ackermann_input_={};
         pending_pose_.reset();
         trajectory_.reset();
         setTrajectoryStatus("idle");
@@ -582,6 +617,11 @@ private:
     acceleration.accel.linear.y = state_.acceleration.y();
     acceleration.accel.angular.z = state_.yaw_acceleration;
     acceleration_pub_->publish(acceleration);
+    if(joint_pub_) {
+      sensor_msgs::msg::JointState m;m.header=pose.header;m.header.frame_id="base_link";
+      m.name={"front_steering"};m.position={ackermann_state_.steering};m.velocity={interval_ackermann_input_.steering_rate};
+      joint_pub_->publish(m); // Explicit ideal steering encoder, not a pose truth channel.
+    }
     publishSensors();  // Includes exact acquisition TF and the endpoint/paused heartbeat TF.
   }
 
@@ -640,6 +680,15 @@ private:
     trail.action = trail_.size() >= 2 ? Marker::ADD : Marker::DELETE;
     visualization_msgs::msg::MarkerArray markers;
     markers.markers = {disk, trail};
+    if(model_=="ackermann") {
+      Marker wheel=disk;wheel.ns="front_steering";wheel.type=Marker::LINE_LIST;
+      wheel.pose.position.z=0;wheel.scale.x=.04;
+      for(double sign:{-1.,1.}) {
+        geometry_msgs::msg::Point p;p.x=ackermann_parameters_.wheelbase+sign*.08*std::cos(ackermann_state_.steering);
+        p.y=sign*.08*std::sin(ackermann_state_.steering);p.z=.13;wheel.points.push_back(p);
+      }
+      markers.markers.push_back(wheel);
+    }
     marker_pub_->publish(markers);
   }
 
@@ -659,6 +708,11 @@ private:
   VelocityCommand velocity_command_;
   Wrench2D wrench_command_;
   InertialParameters inertia_;
+  AckermannParameters ackermann_parameters_;
+  AckermannState ackermann_state_,interval_ackermann_;
+  AckermannInput ackermann_command_,interval_ackermann_input_;
+  rclcpp::Publisher<sensor_msgs::msg::JointState>::SharedPtr joint_pub_;
+  rclcpp::Subscription<motion2d_interfaces::msg::AckermannCommand>::SharedPtr ackermann_sub_;
   LidarConfig lidar_config_;
   std::string lidar_backend_;
   rclcpp::Publisher<motion2d_interfaces::msg::LidarTiming>::SharedPtr lidar_timing_pub_;

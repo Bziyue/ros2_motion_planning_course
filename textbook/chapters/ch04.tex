@@ -595,3 +595,46 @@ g++ -std=c++17 -I/usr/include/eigen3 -Iexercises/ch04/starter \
 \textbf{实验：}比较 0.02 s 与两个 0.01 s 的保持输入积分；再固定路径、只增加时长。
 解释为什么力、侧向加速度和转向速率可以下降，而最大转角不会因此变小。
 后续专用规划器将检查曲率可行性；不能把全向轨迹直接交给小车追踪。
+
+\clearpage
+\section{把模型选择落实到执行器}
+运行完本章的独立模型例子后，第19章提供同一份配置的完整闭环：
+\begin{lstlisting}[language=bash,numbers=none]
+ros2 launch motion2d_bringup flat_vehicle.launch.py rviz:=false
+\end{lstlisting}
+配置文件为 bringup 包中的 \code{config/flat_vehicle.yaml}。编辑顶层 vehicle 并重启：
+\begin{lstlisting}[numbers=none]
+vehicle:
+  model: ackermann       # ackermann / inertial
+  localization: truth    # truth / slam
+  radius: 0.4            # m
+  mass: 1.0              # kg
+  linear_drag: 0.15      # kg/s
+  force_max: 2.0         # N
+  wheelbase: 0.3         # m, Ackermann
+  steering_max: 0.6      # rad, Ackermann
+  steering_rate_max: 1.0 # rad/s, Ackermann
+\end{lstlisting}
+launch 把同一处物理值送给模拟器和规划控制节点，避免把仿真设成 3 kg、规划仍按 1 kg 求力。
+参数在启动时读取；这个文件包含 launch 专用段，不能直接当作节点的 params-file。
+全向惯量默认 $I=mr^2/2$；当半径为零时，必须显式配置正的 \code{inertia_z}。
+
+\begin{center}\small
+\begin{tabular}{lll}\toprule
+模型 & 实际命令 & 相应规划与控制\\\midrule
+inertial & odom 系力/力矩 & MINCO 或 Spline + 前馈PD\\
+ackermann & 纵向力/转向速率 & 正则路径/停车进度 + 局部反馈\\\bottomrule
+\end{tabular}
+\end{center}
+全向位置优化保持起步 yaw，阿克曼规划使用目标 yaw。
+\code{planning.backend} 只在全向模型中选择 minco 或 spline；小车始终使用专用规划器。
+两者都保留有意义的质量参数，切换并非只换机器人外形。
+
+\textbf{阿克曼传感器。}激光和 IMU 位于后轴参考点，转弯时 IMU 包含向心加速度。
+\code{/joint_states} 提供名为 \code{front_steering} 的理想转角编码器，单位 rad；
+这是一项显式的执行器测量，控制器不会从真值位姿推算转角。
+碰撞包络、传感器外参及半径的意义见本章前述约定，非对齐采样见第06章。
+
+\textbf{学习顺序。}先用真值定位理解模型和规划，再换成激光/IMU SLAM 观察估计误差。
+第19章会讲观测地图、未来起点、失败与停车；原第18章全向线性MPC仍是独立入口。
+阿克曼非线性MPC、倒车和运动中接续没有在这次小型扩展中实现。

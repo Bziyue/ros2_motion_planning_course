@@ -170,7 +170,7 @@ add_executable(lidar_odometry_demo src/examples/lidar_odometry_demo.cpp)
 target_link_libraries(lidar_odometry_demo PRIVATE motion2d_core)
 install(TARGETS lidar_odometry_demo DESTINATION lib/motion2d)
 
-foreach(node lidar_odometry estimated_odometry fusion slam planner esdf trajectory tracker navigation)
+foreach(node flat_vehicle lidar_odometry estimated_odometry fusion slam planner esdf trajectory tracker navigation)
   add_executable(${node}_node src/nodes/${node}_node.cpp src/ros/mapping_messages.cpp)
   target_compile_features(${node}_node PRIVATE cxx_std_20)
   target_compile_options(${node}_node PRIVATE -Wall -Wextra -Wpedantic)
@@ -181,6 +181,9 @@ foreach(node lidar_odometry estimated_odometry fusion slam planner esdf trajecto
     visualization_msgs::visualization_msgs__rosidl_typesupport_cpp)
   install(TARGETS ${node}_node DESTINATION lib/motion2d)
 endforeach()
+
+target_sources(flat_vehicle_node PRIVATE src/ros/ackermann_messages.cpp src/ros/trajectory_messages.cpp src/ros/control_messages.cpp src/ros/planning_messages.cpp)
+target_link_libraries(flat_vehicle_node PRIVATE motion2d_interfaces::motion2d_interfaces__rosidl_typesupport_cpp)
 
 target_sources(navigation_node PRIVATE src/ros/navigation_messages.cpp src/ros/trajectory_messages.cpp src/ros/control_messages.cpp src/ros/planning_messages.cpp)
 target_link_libraries(navigation_node PRIVATE motion2d_interfaces::motion2d_interfaces__rosidl_typesupport_cpp)
@@ -271,6 +274,9 @@ install(TARGETS bias_walk_demo DESTINATION lib/motion2d)
 
 if(BUILD_TESTING)
   find_package(ament_cmake_gtest REQUIRED)
+  ament_add_gtest(test_ackermann_messages test/test_ackermann_messages.cpp src/ros/ackermann_messages.cpp)
+  target_compile_features(test_ackermann_messages PRIVATE cxx_std_20)
+  target_link_libraries(test_ackermann_messages motion2d_core motion2d_interfaces::motion2d_interfaces__rosidl_typesupport_cpp)
   ament_add_gtest(test_ackermann_planning test/test_ackermann_planning.cpp)
   target_link_libraries(test_ackermann_planning motion2d_core)
   ament_add_gtest(test_ackermann test/test_ackermann.cpp)

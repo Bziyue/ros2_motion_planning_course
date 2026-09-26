@@ -125,3 +125,12 @@ ros2 launch motion2d_bringup ch04.launch.py model:=reference
 运行画面应显示世界、圆盘及移动后的轨迹，Fixed Frame 为 map。若目标没有执行，先看 `/sim/status`，确认未暂停、无碰撞锁存，并检查输入模型和 frame。后续激光、IMU 在第 05/06 章实现。
 
 本机 RViz2 的时间回退后退出崩溃在本章也有观察；运行显示与 ROS 检查正常，根因仍未确定。可按第 03 章的方法独立启动 RViz2 并分开关闭；详见 [验收记录](../../docs/VALIDATION.md)。
+
+## 微分平坦与阿克曼扩展
+
+新增核心入口 `flatness_demo`、`ackermann_demo`；教材第04章解释平坦输出、纵向力/转向速率、零速奇异性和解析反向梯度，练习 ch04-5/6 对应真实实现。
+全向惯性输出为 `(px,py,yaw)`；阿克曼前进非零速度支路输出为 `(px,py)`，后轴点兼作圆盘和传感器中心。阿克曼模型不是完整轮胎动力学。
+
+第04章也可运行 `ros2 launch motion2d_bringup ch04.launch.py model:=ackermann`，用 `/command/ackermann` 的 `AckermannCommand` 输入 N 和 rad/s，frame 必须 `base_link`。同第04章其他命令，零时间戳表示下一tick；超时归零的是力与转向速率，车仍可能滑行，转角保持。专用完整示例选择0.4m包络以覆盖0.3m轴距和示意前轮，默认第04章0.2m圆盘仅是抽象参考点包络。
+
+推荐从 [统一实验入口](../../docs/FLATNESS.md) 启动 `flat_vehicle.launch.py`，一份YAML配套选择物理模型、相应规划/控制和truth/slam定位；不要把全向曲线直接送给阿克曼执行器。

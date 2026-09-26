@@ -1,0 +1,6 @@
+case,model,localization,status,reference_samples,peak_tracking_error_m,pause_checked,invalid_goal_and_reset_passed,plan
+flat_ack_truth,ackermann,truth,completed,381,0.000679524859885779,True,True,model=ackermann;certified_retimed;retiming=2;force_bound=0.535409;duration=7.327293
+flat_inertial_truth,inertial,truth,completed,570,0.0001452402625900286,True,True,model=inertial;certified;force_bound=0.121048;force_rate_bound=0.088306;duration=11.117513
+flat_ack_slam,ackermann,slam,completed,381,0.004046208670795632,True,True,model=ackermann;certified_retimed;retiming=2;force_bound=0.536363;duration=7.324531
+flat_inertial_slam,inertial,slam,completed,570,0.004930743988214859,True,True,model=inertial;certified;force_bound=0.121064;force_rate_bound=0.088340;duration=11.115213
+flat_ack_reject,ackermann,truth,plan_failed:optimizer:line_search_failed,0,,False,True,

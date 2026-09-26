@@ -262,3 +262,18 @@ C++ 使用普通值类型、Eigen 和薄节点，关键接口及公式采用 Dox
 4. **课程重点**：默认包含小尺度闭环 SLAM、二维 MINCO/SplineTrajectory 核心和线性 MPC；三维飞行动力学、大型 SLAM 系统和完整上游库复刻不属于当前计划。
 
 原始资料与固定上游版本见 [REFERENCES.md](REFERENCES.md)。
+
+## 8. 用户追加：微分平坦与阿克曼模型
+
+保持原章号，增加下列已实现内容：
+
+| 章节 | 增补与代码 | 同步练习/实验 |
+| --- | --- | --- |
+| 04 | 全向/阿克曼平坦性、forward/backward、纵向受力自行车、局部支路与零速 | ch04-5/6、flatness_demo、ackermann_demo |
+| 06 | 阿克曼保持输入下的IMU向心项与非对齐采样 | ackermann_sensors.yaml 与逐采样检查 |
+| 15 | 物理软约束经系数/时长传回MINCO/Spline变量 | ch15-3、质量1/3kg对照 |
+| 16 | 连续力界；阿克曼正则几何+停止进度、解析反向、保守认证 | ch16-3、换道与转角拒绝 |
+| 17 | 阿克曼前馈及局部反馈 | 无噪声受力闭环图 |
+| 19 | 单配置选择inertial/ackermann与truth/slam，匹配传感器、规划和控制 | ch19-3配置实验、四组主机ROS验证 |
+
+入口为 `flat_vehicle.launch.py`；正向仅采用二维地面物理量，与GCOPTER/四旋翼的关系及差异均明确说明。阿克曼使用前进、逐段停车的专用规划器；倒车、Hybrid A*、阿克曼NMPC、运动中接续仍为后续扩展，原全向线性MPC入口保留。

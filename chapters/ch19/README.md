@@ -71,3 +71,9 @@ python3 scripts/check_navigation_failure.py
 脚本为每次试验单独创建和关闭进程组，默认domain78；不要同时在该domain运行自己的仿真。
 详细样本、状态、QP与净空在tmp/ch19_batch；真值仅进入离线评价。
 RViz应显示观测地图、注册点云、参考与预测、凸区域；本主机当前GUI限制仍未解除，已完成的ROS检查不替代GUI验收。
+
+## 微分平坦模型配置实验
+
+新增 `flat_vehicle.launch.py` 和 [统一运行说明](../../docs/FLATNESS.md)。`vehicle.model=inertial/ackermann`、`vehicle.localization=truth/slam`，物理参数同时送入模拟和规划控制；默认阿克曼0.4m包络。
+此入口采用静止求解、未来起步、逐段停车；全向使用带力约束的MINCO/Spline+PD，阿克曼使用专用曲率/力/转向速率/侧向加速度规划与局部跟踪。原A/B/C入口的运动中接续和线性MPC保持原有语义。
+两种模型×两种定位固定seed42短程实验均到达；峰值跟踪约0.15–0.68mm（truth）、4.0–4.9mm（SLAM），不是通用成功率或ATE。运行 `scripts/check_flat_vehicle.py` 检查暂停、reset、输入图和传感器。转角上限0.005rad的失败样本与数据表一起保留。

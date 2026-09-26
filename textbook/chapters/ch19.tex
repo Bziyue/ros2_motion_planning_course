@@ -285,3 +285,127 @@ C 的三次 1 s 平移 RPE 分别为 2.57、2.21、2.55 mm。
 检查节点订阅表：导航、控制、激光里程计、EKF 和 SLAM 都不能订阅 ground\_truth 或 sim 位姿。
 分别增大噪声、减小激光量程、降低重规划频率，记录\textbf{失败状态和停车次数}，不要只保留成功曲线。
 当前主机完成无界面 ROS 实验，RViz 的预期内容已配置；桌面图形问题尚未解除，未声称截图验收通过。
+
+\clearpage
+\section{从一份配置选择微分平坦模型}
+本节将第04、15--17章的新增模块接到观测地图。
+它采用停止到停止的小型闭环：先看清模型与约束如何影响真实输入，再学习更复杂的运动中接续。
+\begin{lstlisting}[language=bash,numbers=none]
+# Repository root; source ROS and ros2_ws/install first.
+mkdir -p tmp
+cp ros2_ws/src/motion2d_bringup/config/flat_vehicle.yaml \
+  tmp/vehicle.yaml
+ros2 launch motion2d_bringup flat_vehicle.launch.py \
+  rviz:=false config:=/absolute/path/to/tmp/vehicle.yaml
+\end{lstlisting}
+先将最后一行替换为自己的绝对路径。物理参数和模型选择见第04章新增配置节。
+
+定位选项在 vehicle 段中，字段名为 \code{localization}，可取 truth 或 slam。
+所有物理量同时传给仿真和规划控制，修改配置后重启，不运行中切换动力学。
+
+\begin{center}\small
+\begin{tabular}{lll}\toprule
+选择 & 全向 inertial & 阿克曼 ackermann\\\midrule
+平坦输出 & $(p_x,p_y,\psi)$ & $(p_x,p_y)$，前进支路\\
+规划变量 & 路点、分段时长 & 正的切向长度、分段时长\\
+物理软约束 & 力、力变化率 & 力、转角、转向速率、侧向加速度\\
+控制输出 & $F_x,F_y,\tau$ & $F,r_\delta$\\
+朝向 & 保持起步 yaw & 采用目标 yaw\\\bottomrule
+\end{tabular}
+\end{center}
+全向采用 MINCO/Spline 与前馈PD；阿克曼采用正则几何五次段、五次停车进度和局部反馈。
+\code{planning.backend} 仅影响全向选择，不能把全向五次时间曲线当作阿克曼几何系数。
+原第18/19章线性MPC和未来运动接续仍使用原入口，本节没有实现阿克曼NMPC。
+
+\textbf{参考限制和执行器限制分开。}默认物理力上限 2 N，规划参考上限 1 N，
+物理转角/转向速率 0.6 rad/1 rad/s，规划为 0.5 rad/0.7 rad/s。
+全向另限制力变化率 2 N/s；阿克曼另限制侧向加速度 0.8 m/s$^2$，两者速度上限均为 0.7 m/s。
+优化软目标取规划上限的 85\%，执行前连续界按完整规划上限验收。
+反馈保留执行器余量，最终指令受物理限幅；参考证书不等于实际跟踪误差或制动过程的保证。
+
+\textbf{数据来源。}truth 也只凭扫描建图；slam 使用激光里程计、IMU融合和关键帧地图，
+不启动真值适配器。阿克曼控制额外读取显式理想转角编码器；SLAM仍只使用扫描和IMU。
+默认半径 0.4 m，配置栅格额外留 0.15 m 跟踪余量，未知格阻塞。
+
+\clearpage
+\section{从观测就绪到未来起步}
+启动时暂停；在另一个已加载环境的终端恢复，然后给出当前可达的近目标：
+\begin{lstlisting}[language=bash,numbers=none]
+ros2 service call /sim/pause std_srvs/srv/SetBool '{data: false}'
+# truth mode: start (-8,-8), goal (-6,-7.7), yaw=0
+ros2 topic pub --once /goal_pose geometry_msgs/msg/PoseStamped \
+  '{header: {frame_id: map}, pose: {
+     position: {x: -6.0, y: -7.7}, orientation: {w: 1.0}}}'
+ros2 topic echo /flat/status
+\end{lstlisting}
+SLAM 第一帧作为初始 map 原点，同一相对目标改为 $(2,0.3)$。
+当前配置要求初始 yaw=0，保持估计 odom 和全向施力轴一致。
+目标必须携带有效平面四元数；阿克曼采用其中的终点朝向，全向仍保持起步朝向。
+
+SLAM 的第一帧自由概率 0.4 尚未低于规划的 0.35 阈值，
+\code{waiting_observed_free_start} 会等下一份观测地图。
+后续关键帧增加证据才继续，不为尽快开车降低自由判据。
+A* 和凸走廊都来自同一份膨胀地图；固定路径曲率不适合小车时，专用优化器可明确失败。
+
+\textbf{求解完成不等于现在开始。}仅在观测速度、角速度以及阿克曼转角接近零时求解，
+预算默认 1 s。成功后还要等求解结束之后的一条新里程计，
+以其 stamp 加 0.3 s 设执行起点；避免使用计算期间排队的旧观测。
+路径和区域由同一 map 到 odom 变换冻结，后续定位校正不重写已发出的系数。
+新地图若使区域失效，则清空参考并制动。
+
+\begin{lstlisting}[language=bash,numbers=none]
+ros2 topic pub --once /flat/stop std_msgs/msg/Empty '{}'
+ros2 service call /sim/reset std_srvs/srv/Trigger '{}'
+\end{lstlisting}
+暂停保持同一个模拟时间，不重复推进控制；reset、非法目标和显式停车清空旧参考。
+有新鲜里程计但激光/地图/转角过期时，以新状态给限幅阻尼输入；
+里程计也超过 120 ms 时，改为零输入，避免反复使用旧速度制动而使车辆反向加速。
+这是明确的故障处理，不是原轨迹连续证书的一部分。
+
+\textbf{接口与显示。}阿克曼曲线通过 \code{/flat/ackermann_trajectory} 输出，
+几何参数 $u$ 无量纲，每段另存物理秒和绝对起点；空曲线表示撤销。
+\code{/flat/reference} 是当前观测时刻的 Odometry 参考。
+RViz配置显示观测地图、注册点云、选定里程计、\code{/plan/path} 和凸区域；
+完整世界与仿真圆盘属于可选真值对照。此主机完成无界面验证，未声称新增GUI画面已验收。
+
+\clearpage
+\section{选模实验、失败案例与练习}
+启动匹配的配置后，从仓库根目录运行；脚本会主动 reset、推进和暂停：
+\begin{lstlisting}[language=bash,numbers=none]
+/usr/bin/python3 scripts/check_flat_vehicle.py \
+  --model ackermann --localization truth --output tmp/flat_check
+\end{lstlisting}
+分别修改配置和脚本参数，完成两种模型与两种定位的四组试验。
+默认 seed42，世界 20$\times$20 m、8圆/8多边形；质量1kg、半径0.4m，
+720束/10Hz激光、每束标准差0.01m，200Hz IMU沿用第06章白噪声。
+相对目标为 $(2,0.3)$ m，初终朝向均为零。
+
+\begin{center}\small
+\begin{tabular}{llrr}\toprule
+模型/定位 & 规划后端 & 参考时长/s & 峰值跟踪/mm\\\midrule
+阿克曼/truth & 专用 & 7.327 & 0.680\\
+全向/truth & Spline & 11.118 & 0.145\\
+阿克曼/SLAM & 专用 & 7.325 & 4.046\\
+全向/SLAM & MINCO & 11.115 & 4.931\\\bottomrule
+\end{tabular}
+\end{center}
+跟踪误差比较相同 stamp 的选定里程计与参考，\textbf{不是 SLAM 的 ATE}。
+四组均完成，暂停保持时刻/状态，非法目标和 reset 后无旧轨迹重放；
+真实节点订阅图确认规划、估计节点不读真值，只有一个时钟发布者。
+数据保存在 \code{textbook/data/flat_vehicle_validation.csv}。
+样本是固定种子的短距离静态场景，不能作为任意环境成功率或两类优化器速度优劣的结论。
+
+\textbf{保留失败。}将规划转角上限改成 0.005 rad，再给同一换道目标，
+验收脚本加 \code{--expect-failure}：主机报告规划失败，未发布非空执行曲线。
+因为 $\delta=\arctan(L\kappa)$ 只取决于几何，单纯延长时长不能减小转角。
+拒绝的是这个固定几何路点/朝向问题，不是证明整个未知世界没有其他可行路线。
+
+\paragraph{ch19-3 配置练习}
+先逐项改变质量、规划力上限、转角上限，每次只改变一个量，记录状态、认证界、时长与跟踪误差。
+解释物理上限、参考软目标和后验认证之间的关系，失败样本也写入报告。
+再试验运动中显式停车，说明为什么不能声称制动仍满足原曲线证书。
+代码练习 ch19-1/2 仍用于原运动接续入口；新增平坦梯度练习在 ch04-5/6、ch15-3、ch16-3。
+
+\textbf{扩展边界。}此小车规划前进、逐段停车，固定几何路点和朝向；
+没有倒车、Hybrid A*、前沿探索或阿克曼NMPC。窄通道、急弯、远处未知目标可以失败。
+下一步扩展时先加入相应几何搜索和控制模型，再沿用这里的单位、时间、解析反向和独立验收约定。

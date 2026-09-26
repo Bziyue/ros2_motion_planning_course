@@ -49,7 +49,7 @@ ros2 launch motion2d_bringup ch01.launch.py
 
 第 05 章默认沿圆参考运动并发布 720 束、10 Hz 的 CPU snapshot 激光，测距噪声标准差 0.01 m。RViz2 同时显示光束和命中点；参数、无噪声基准、空房间统计与束数实验见 [第 05 章说明](chapters/ch05/README.md)。
 
-第 06 章加入 200 Hz 的 /imu/data_raw、可配置的六轴白噪声与采样时间调度，也支持 137 Hz IMU / 7 Hz 雷达。仅 reference/inertial 支持 IMU，不发布真值姿态。运行命令、静止比力、噪声/漂移与时间实验见 [第 06 章说明](chapters/ch06/README.md)。本机 RViz 在 reset/退出时的已知异常及显示建议已记录，自动重置验收可加 `rviz:=false`。
+第 06 章加入 200 Hz 的 /imu/data_raw、可配置的六轴白噪声与采样时间调度，也支持 137 Hz IMU / 7 Hz 雷达。reference/inertial/trajectory/ackermann 支持 IMU，不发布真值姿态。运行命令、静止比力、噪声/漂移与时间实验见 [第 06 章说明](chapters/ch06/README.md)。本机 RViz 在 reset/退出时的已知异常及显示建议已记录，自动重置验收可加 `rviz:=false`。
 
 第 07 章用显式真值里程计定位，仅凭扫描构建点云与占据栅格。RViz 默认关闭完整世界对照，展示未知区域与可见轮廓；提供分辨率、噪声、墙厚和独立真值栅格的可复现实验，详见 [第 07 章说明](chapters/ch07/README.md)。这是真值定位基线，尚不包含扫描匹配或 SLAM。
 
@@ -104,4 +104,13 @@ make -C textbook
 
 批准记录：2026-09-26，用户同意大纲并要求开始实现，逐功能提交。
 
-模型扩展正在按功能落地：第04章新增微分平坦分析与 `flatness_demo`，说明全向受力模型的平坦输出为 `(p_x,p_y,yaw)`，含解析物理量反向梯度。后续接入物理约束优化与阿克曼配置，进展见 [PROGRESS](docs/PROGRESS.md)。
+## 微分平坦与可选阿克曼模型
+
+第04章分析平坦输出与零速边界，第15/16章实现物理量正向恢复、解析反向梯度和连续约束验证，第17/19章接通对应跟踪与观测地图。
+`flat_vehicle.yaml` 的 `vehicle.model` 选择 `inertial` 或 `ackermann`，`vehicle.localization` 选择 `truth` 或 `slam`；同一处质量、阻尼、力上限等参数同时传给仿真与规划控制。
+
+```bash
+ros2 launch motion2d_bringup flat_vehicle.launch.py rviz:=false
+```
+
+默认阿克曼模型以纵向力/转向速率驱动，前进、逐段停车；全向模型采用带力约束的 MINCO/Spline 与前馈PD。两种定位均只凭观测建图。完整启动、目标坐标、模型限制及四组验证见 [微分平坦实验入口](docs/FLATNESS.md)。

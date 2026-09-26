@@ -75,7 +75,7 @@ omega_dot = (tau_z - c_omega omega) / I_z
 
 ## 5. IMU 契约
 
-第 06 章已落地：imu.hpp/imu.cpp 为纯 C++ 核心，imu_messages.cpp 转成 /imu/data_raw（SensorDataQoS）。第06章允许 reference/inertial 启用 IMU，第14章增加连续trajectory支持；旧章节默认关闭。六轴每采样白噪声、独立种子与 reset 重放已实现。无姿态估计，orientation=单位四元数只是占位，orientation_covariance[0]=-1；协方差对角填 sigma²。全部 sigma=0 的无噪声实验会产生全零测量协方差，按 ROS 约定表示未知，后续估计器必须显式配置处理。显示 Marker 不供 SLAM 使用。
+第 06 章已落地：imu.hpp/imu.cpp 为纯 C++ 核心，imu_messages.cpp 转成 /imu/data_raw（SensorDataQoS）。第06章允许 reference/inertial 启用 IMU，第14章增加连续trajectory支持，模型扩展增加ackermann；旧章节默认关闭。六轴每采样白噪声、独立种子与 reset 重放已实现。无姿态估计，orientation=单位四元数只是占位，orientation_covariance[0]=-1；协方差对角填 sigma²。全部 sigma=0 的无噪声实验会产生全零测量协方差，按 ROS 约定表示未知，后续估计器必须显式配置处理。显示 Marker 不供 SLAM 使用。
 
 `sensor_msgs/Imu`，frame 为 `imu_link`，水平面 yaw-only 姿态，roll/pitch 固定为零。真实姿态只在模拟器内部用于生成传感器读数。
 
@@ -341,7 +341,7 @@ replay_slam只消费传感器bag，播放器为唯一时钟；启动文件仅提
 
 `omniForward/omniBackward` 使用 odom 中的 v/a/jerk 和独立 yaw 导数，输出水平力、力变化率、偏航力矩及解析偏导。正向不饱和。位置优化器保持 yaw 常数，只优化平移。
 `TrajectoryCostConfig::dynamics` 与 `TrajectoryLimits::dynamics` 可选；缺省不改变旧课程。启用时 `certifyBezier` 也要求连续力/力变化率界通过；规划范数限值与仿真每轴力限值不同。
-ROS planner/navigation 参数前缀 `planning.dynamics`，mass/linear_drag 必须匹配被控模型，force_max (N)/force_rate_max (N/s) 为验证限值，软目标取85%。统一模型配置后续提供。
+ROS planner/navigation 参数前缀 `planning.dynamics`，mass/linear_drag 必须匹配被控模型，force_max (N)/force_rate_max (N/s) 为验证限值，软目标取85%。统一模型配置已通过flat_vehicle.launch.py提供，见文末。
 
 ### 阿克曼核心模型
 
@@ -352,4 +352,26 @@ ROS planner/navigation 参数前缀 `planning.dynamics`，mass/linear_drag 必�
 
 `AckermannPiece` 分开 `geometry`（q(u)，duration必须=1）与真实 `duration`；`AckermannTrajectory` 每段用五次进度停止起步。端点几何二阶导数为0、切向非零，连接处位置/朝向一致。不要按秒直接读取几何系数，也不要将它伪装成旧 `Trajectory2D`。
 `planAckermann` 只返回收敛且通过连续充分界的曲线；保守延时次数单独记录。检查固定走廊必须先通过 `regionIsFree`，认证函数不能替外部构造者证明世界安全。
-`trackAckermann` 使用后轴位姿、有符号速度、转向角及平坦参考，输出 N 与 rad/s。它是局部跟踪器；不解决任意零速横向停车误差。ROS编码器/选源将在接入功能中实现。
+`trackAckermann` 使用后轴位姿、有符号速度、转向角及平坦参考，输出 N 与 rad/s。它是局部跟踪器；不解决任意零速横向停车误差。ROS编码器/选源已接入，见下面统一入口。
+
+### 统一微分平坦ROS入口（已实现）
+
+`flat_vehicle.launch.py` 读取一份 `flat_vehicle.yaml`：顶层vehicle选择model与localization，质量/阻尼/半径/执行器限制同时传给仿真与规划控制，参数启动读取。不是通用插件配置。规划上限位于flat_vehicle的planning段，与物理执行器上限分开。完整命令见 [FLATNESS](FLATNESS.md)。
+
+| 通道 | 类型 / 单位 / 坐标 |
+| --- | --- |
+| /command/ackermann | AckermannCommand；base_link，force为纵向N，steering_rate为rad/s；零stamp表示下tick，非零stamp按已有命令新鲜度约定 |
+| /joint_states | JointState；base_link，name仅front_steering，position为rad，velocity为rad/s；理想转角编码器，与采集tick同stamp，暂停可重复同stamp |
+| /flat/ackermann_trajectory | AckermannTrajectory2D；odom系q(u)五次几何系数（u无量纲），另存每段物理秒和绝对start_time；空pieces撤销 |
+| /flat/inertial_trajectory | 原Trajectory2D；odom系秒制多项式，固定yaw；空pieces撤销 |
+| /flat/reference | Odometry；采集stamp，odom位姿/base_link速度；用于显示与评价 |
+| /flat/status、/flat/plan_status | String；状态与包含认证界/时长的求解摘要，可靠transient-local深度1 |
+| /flat/stop | Empty；清除目标与参考，以新鲜状态制动 |
+
+AckermannTrajectory2D的stamp表示发布时刻，start_time表示执行起点，geometry.duration固定1而每段duration是物理秒；二者不能互换。曲线消息为已认证内部参考的输出接口，不是外部执行授权；解析成功不能替代走廊或动力学检查。
+
+模型选择会切换真正的规划与控制：全向MINCO/Spline+PD发送WrenchStamped；阿克曼正则几何/停车进度规划+局部反馈仅发送AckermannCommand。阿克曼的理想转向角测量是显式传感器，不从真值位姿恢复转角；SLAM仅使用扫描和IMU。
+
+当前协调器停止到停止，求解只在静止进行，成功后由新里程计stamp+0.3s设起点。选定里程计/扫描/观测地图/编码器驱动执行，无真值订阅；未知阻塞，目标须当前可达。新图检查已冻结odom区域，失败清空参考。暂停同stamp不重复控制；reset回退清旧目标/参考/缓存。里程计过期120ms归零输入；有新鲜里程计但激光400ms/地图3s/编码器120ms过期则阻尼制动。制动和实际反馈不在参考连续证书内。
+
+inertial固定起步yaw；ackermann使用目标yaw。SLAM配置暂要求初始yaw=0，保持odom施力坐标一致。阿克曼前进逐段停车，不含倒车/Hybrid A*或阿克曼NMPC；第18/19章原全向MPC/运动接续入口仍可使用。

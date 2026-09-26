@@ -1,0 +1,57 @@
+# Standalone simulator experiment: held force/steering rate, exact sensor checks.
+simulator:
+  ros__parameters:
+    ackermann.force_max: 2.0
+    ackermann.linear_drag: 0.15
+    ackermann.mass: 1.0
+    ackermann.steering_max: 0.6
+    ackermann.steering_rate_max: 1.0
+    ackermann.wheelbase: 0.3
+    check_resolution: 0.25
+    circle_count: 8
+    command_timeout: 0.25
+    dt: 0.005
+    goal_x: -4.0
+    goal_y: -4.0
+    height: 20.0
+    imu.accel_stddev:
+    - 0.0
+    - 0.0
+    - 0.0
+    imu.enabled: true
+    imu.gravity: 9.81
+    imu.gyro_stddev:
+    - 0.0
+    - 0.0
+    - 0.0
+    imu.noise_seed: 6060
+    imu.rate: 137.0
+    imu.visualize: false
+    lidar.angle_min: -3.141592653589793
+    lidar.backend: cpu
+    lidar.beams: 720
+    lidar.enabled: true
+    lidar.fov: 6.283185307179586
+    lidar.noise_seed: 4242
+    lidar.range_max: 6.0
+    lidar.range_min: 0.05
+    lidar.range_stddev: 0.0
+    lidar.rate: 7.0
+    lidar.scan_model: snapshot
+    lidar.visualize_beams: false
+    margin: 0.05
+    model: ackermann
+    polygon_count: 8
+    polygon_samples: 8
+    publish_truth_tf: true
+    radius: 0.4
+    require_connected: true
+    seed: 42
+    size_max: 1.2
+    size_min: 0.35
+    start_paused: true
+    use_sim_time: true
+    width: 20.0
+    x: -8.0
+    y: -8.0
+    yaw: 0.0

@@ -25,3 +25,8 @@ c++ -std=c++17 -I exercises/ch19/starter exercises/ch19/check_trigger.cpp -o tmp
 ```
 参考答案在solutions，判据包含首次、暂停、到周期前1ns、恰好到周期、待确认和回退。
 8. 用相同种子运行A/B/C。分别报告初始对齐ATE、1s平移RPE、跟踪误差、真实圆盘净空、碰撞尝试、规划/MPC耗时、停车次数。不能把真值注入规划或SLAM来提高分数。
+
+9. ch19-3 配置与闭环实验（代码练习仍为ch19-1/2）：复制 `flat_vehicle.yaml`，运行两种模型×两种定位，参数和命令见 [入口](../../docs/FLATNESS.md)。解释为何同一个物理目标在truth与SLAM下坐标不同；只把评价参数改成slam而不重启launch不能算切换成功。
+10. 分别把 vehicle.mass 改为3kg、planning.force_max改为0.5N、planning.steering_max改为0.005rad，每次只改一个量。记录求解状态、认证界、时长、实际指令和跟踪误差，包括所有失败。哪些约束可以通过延时缓解，哪些必须改变几何？
+11. 把阿克曼的 `planning.backend` 从spline改成minco，解释为何实际仍选择专用规划器；再对全向模型验证后端变化。查看 `/flat/plan_status` 与节点订阅图，证明选模改变了动力学与控制通道。
+12. 运动中发 `/flat/stop`，观察清空参考后使用新状态制动；讨论参考轨迹证书为什么不能直接覆盖制动过程。评分：物理单位/模型对应30%，可复现四组记录40%，失败与零速边界解释30%。

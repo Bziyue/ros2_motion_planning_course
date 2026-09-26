@@ -116,3 +116,15 @@ ros2 service call /sim/pause std_srvs/srv/SetBool '{data: false}'
 ros2 run rviz2 rviz2 -d src/motion2d_bringup/rviz/ch06.rviz \
   --ros-args -p use_sim_time:=true
 ~~~
+
+## 阿克曼保持输入与非对齐采样
+
+`model=ackermann` 已接入同一传感器时间调度。每个有效tick先确定限幅后的纵向力/转向速率，再从区间起点积分到采集stamp；位姿用RK4，速度与转角分别用解析阻尼解和线性式。IMU含纵向加速度和向心项 `s²*tan(delta)/L`，不以最新tick姿态代替采样姿态。
+
+从仓库根目录、两个终端各加载ROS/install，仅启动此模拟器：
+```bash
+ros2 run motion2d simulator_node --ros-args --params-file \
+  ros2_ws/src/motion2d_bringup/config/ackermann_sensors.yaml
+/usr/bin/python3 scripts/check_ackermann_sensors.py
+```
+配置200Hz物理、137Hz无噪声IMU、7Hz无噪声720束激光，质量1kg、阻尼0.15kg/s、轴距0.3m。脚本保持0.8N/0.12rad/s，40tick到0.2s；清除t=0后27条IMU，非零首激光142857143ns。逐样本与独立比力/角速度公式比较，主机误差1.11e-16，reset重复完全相同；这不是一般RK4位置误差为零的声明。
