@@ -41,6 +41,14 @@ TEST(ReferenceSchedule,MapCorrectionTransformsAllDerivativesOnce) {
   EXPECT_GT((other_map.motion.curve.sample(.8).position-before.pose.position).norm(),1.);
   EXPECT_LT((schedule.sample(2000000000).pose.position-before.pose.position).norm(),1e-12);
 }
+TEST(ReferenceSchedule,InitialHoldUsesFirstPendingRegionWithoutActivating) {
+  ReferenceSchedule schedule;auto plan=makePlan({}, {1,0},3,200000000);
+  plan.regions={makeRegion({{{-1,-1},{2,-1},{2,1},{-1,1}}})};
+  ASSERT_TRUE(schedule.accept(plan,0).accepted);
+  ASSERT_NE(schedule.region(100000000),nullptr);
+  EXPECT_TRUE(schedule.region(100000000)->contains(schedule.sample(100000000).pose.position));
+  EXPECT_TRUE(schedule.pending());EXPECT_EQ(schedule.reference(100000000),nullptr);
+}
 TEST(ReferenceSchedule,RejectInvalidReplacementKeepValidAndResetExplicitly) {
   ReferenceSchedule schedule;auto first=makePlan({}, {1,0},3,0);ASSERT_TRUE(schedule.accept(first,0).accepted);schedule.advance(1);
   auto bad=makePlan({}, {2,0},3,1000000000);EXPECT_EQ(schedule.accept(bad,100).reason,"discontinuous_handover");

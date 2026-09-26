@@ -311,3 +311,10 @@ accept要求未来开始、首p/v/a/yaw与旧参考该时刻匹配、终点静�
 observedLocalRoute读取同快照原始占据与PlanningGrid；全局目标可达时A*，否则从可达配置格挑邻近原始未知区且有至少.1m目标距离改善的候选，按弧长截局部前缀。
 原始goal占据>=50、地图外、起点阻塞等单列状态；未知始终阻塞。局部前沿无进展不证明整个未知世界无路。
 replanObserved固定未来首p/v/a、静止终点，同快照ESDF/走廊；优化收敛且certifyBezier通过才接受，否则验证1/1.5/2/3倍时长的停点备用段。结果分别标optimized/fallback、原优化状态、耗时，失败无曲线。
+
+### ch19 原子导航参考
+
+`/navigation/reference` 为 NavigationReference：Trajectory2D、每段一个 ConvexRegion2D(float64 CCW顶点)、snapshot_time。
+控制器重新验证消息和曲线/区域证书；自由空间真实性由规划器负责。`/control/accepted_reference` Int64为接受的start_ns；一次仅一个待确认、起点唯一。
+`/navigation/stop` Empty显式清空参考与显示并用当前观测制动。`control.controller=ideal` 输出odom PoseStamped（下一周期目标），需ideal仿真/禁用IMU；pd/mpc仍输出力矩。
+静止启动/重启允许位置0.03m、yaw0.02rad、速度/角速度0.02以内；普通交接严格匹配p/v/a/yaw，拒绝不覆盖旧曲线。

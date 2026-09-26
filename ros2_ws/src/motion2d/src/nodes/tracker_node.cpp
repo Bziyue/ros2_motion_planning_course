@@ -3,6 +3,10 @@
 #include <geometry_msgs/msg/accel_stamped.hpp>
 #include <nav_msgs/msg/path.hpp>
 #include <std_msgs/msg/string.hpp>
+#include <std_msgs/msg/empty.hpp>
+#include <std_msgs/msg/int64.hpp>
+#include "motion2d/ros/navigation_messages.hpp"
+#include "motion2d/trajectory/bezier_bounds.hpp"
 #include <std_srvs/srv/set_bool.hpp>
 #include "motion2d/control/pd_tracker.hpp"
 #include "motion2d/control/tracking_reference.hpp"
@@ -30,8 +34,8 @@ public:
     const double rate=declare_parameter("control.rate_hz",50.);timeout_=declare_parameter("control.odometry_timeout",.12);
     if(!std::isfinite(rate) || rate<=0 || rate>1000 || !std::isfinite(timeout_) || timeout_<=0) throw std::invalid_argument("Invalid controller rate or timeout");
     period_=std::llround(1e9/rate);
-    const auto controller=declare_parameter("control.controller",std::string("pd"));
-    if(controller!="pd" && controller!="mpc") throw std::invalid_argument("Expected pd or mpc controller");
+    controller_=declare_parameter("control.controller",std::string("pd"));
+    if(controller_!="pd" && controller_!="mpc" && controller_!="ideal") throw std::invalid_argument("Expected pd, mpc or ideal controller");
     mpc_config_.dt=period_*1e-9;mpc_config_.horizon=declare_parameter("mpc.horizon",20);
     mpc_config_.position_weight=declare_parameter("mpc.position_weight",40.);
     mpc_config_.velocity_weight=declare_parameter("mpc.velocity_weight",2.);
@@ -41,11 +45,11 @@ public:
     mpc_config_.force_rate_max=declare_parameter("mpc.force_rate_max",5.);
     mpc_config_.solver.max_iterations=declare_parameter("mpc.max_iterations",1500);
     mpc_config_.solver.max_wall_seconds=declare_parameter("mpc.max_wall_seconds",.01);
-    if(controller=="mpc") mpc_=std::make_unique<LinearMpc>(model_,mpc_config_);
+    if(controller_=="mpc") mpc_=std::make_unique<LinearMpc>(model_,mpc_config_);
     mpc_pub_=create_publisher<motion2d_interfaces::msg::MpcStatus>("/control/mpc_status",100);
     prediction_pub_=create_publisher<nav_msgs::msg::Path>("/control/prediction",rclcpp::QoS(1).transient_local());
     source_=declare_parameter("reference.source",std::string("analytic"));
-    if(source_!="analytic" && source_!="trajectory") throw std::invalid_argument("Expected analytic or trajectory reference");
+    if(source_!="analytic" && source_!="trajectory" && source_!="navigation") throw std::invalid_argument("Expected analytic, trajectory or navigation reference");
     const auto shape=declare_parameter("reference.shape",std::string("figure_eight"));
     if(shape!="circle" && shape!="figure_eight") throw std::invalid_argument("Expected circle or figure_eight");
     reference_config_.shape=shape=="circle" ? ReferenceShape::Circle : ReferenceShape::FigureEight;
@@ -60,6 +64,16 @@ public:
     odom_sub_=create_subscription<nav_msgs::msg::Odometry>("/odometry",100,[this](const nav_msgs::msg::Odometry & m){receive(m);});
     if(source_=="trajectory") trajectory_sub_=create_subscription<motion2d_interfaces::msg::Trajectory2D>("/plan/trajectory",1,
       [this](const motion2d_interfaces::msg::Trajectory2D & m){receiveTrajectory(m);});
+    pose_pub_=create_publisher<geometry_msgs::msg::PoseStamped>("/command/pose",1);
+    accepted_pub_=create_publisher<std_msgs::msg::Int64>("/control/accepted_reference",10);
+    if(source_=="navigation") {
+      navigation_sub_=create_subscription<motion2d_interfaces::msg::NavigationReference>("/navigation/reference",1,
+        [this](const motion2d_interfaces::msg::NavigationReference & m){receiveNavigation(m);});
+      stop_sub_=create_subscription<std_msgs::msg::Empty>("/navigation/stop",1,
+        [this](const std_msgs::msg::Empty &){if(last_stamp_) brake(now(),"navigation_stopped_braking");});
+    }
+    navigation_limits_.speed=declare_parameter("navigation.reference_speed_max",.7);
+    navigation_limits_.acceleration=declare_parameter("navigation.reference_acceleration_max",.8);
     enable_=create_service<std_srvs::srv::SetBool>("/tracker/enable",[this](const std_srvs::srv::SetBool::Request::SharedPtr request,
       std_srvs::srv::SetBool::Response::SharedPtr response){enabled_=request->data;response->success=true;response->message=enabled_ ? "enabled" : "bounded damping brake";
         if(!enabled_ && last_stamp_) brake(now(),"disabled_braking");});
@@ -79,10 +93,18 @@ private:
     m.wrench.force.x=command.force.x();m.wrench.force.y=command.force.y();m.wrench.torque.z=command.torque;
     wrench_->publish(m);previous_force_=command.force;status(label);
   }
+  void sendPose(const Pose2D & target,const rclcpp::Time & stamp,const std::string & label) {
+    geometry_msgs::msg::PoseStamped m;m.header.frame_id="odom";m.header.stamp=stamp;
+    m.pose.position.x=target.position.x();m.pose.position.y=target.position.y();
+    m.pose.orientation.z=std::sin(target.yaw/2);m.pose.orientation.w=std::cos(target.yaw/2);
+    pose_pub_->publish(m);previous_force_.setZero();status(label);
+  }
   void brake(const rclcpp::Time & stamp,const std::string & label) {
     if(mpc_) mpc_->reset();
     nav_msgs::msg::Path empty;empty.header.frame_id="odom";empty.header.stamp=stamp;prediction_pub_->publish(empty);
-    send(dampingBrake(state_,model_),stamp,label);
+    if(source_=="navigation") {schedule_.reset(state_.pose);path_pub_->publish(empty);}
+    if(controller_=="ideal") sendPose(state_.pose,stamp,label);
+    else send(dampingBrake(state_,model_),stamp,label);
   }
   void publishPrediction(const MpcResult & result,std::int64_t stamp) {
     nav_msgs::msg::Path path;path.header.frame_id="odom";path.header.stamp=rclcpp::Time(stamp,RCL_ROS_TIME);
@@ -93,21 +115,43 @@ private:
     prediction_pub_->publish(path);
   }
   State2D referenceAt(std::int64_t stamp) const {
+    if(source_=="navigation") return schedule_.sample(stamp);
     if(source_=="analytic") return sampleTrackingReference(reference_config_,(stamp-epoch_)*1e-9);
     return sampleHeldTrajectory(*trajectory_,stamp);
   }
-  void publishPath(std::int64_t stamp) {
+  void publishPath(std::int64_t stamp,const TimedTrajectory * supplied=nullptr) {
+    const auto * curve=supplied ? supplied : trajectory_ ? &*trajectory_ : nullptr;
     nav_msgs::msg::Path path;path.header.frame_id="odom";path.header.stamp=rclcpp::Time(stamp,RCL_ROS_TIME);
-    const double duration=source_=="analytic" ? 24. : trajectory_->curve.duration();
-    const auto begin=source_=="analytic" ? epoch_ : trajectory_->start_ns;
+    const double duration=source_=="analytic" ? 24. : curve->curve.duration();
+    const auto begin=source_=="analytic" ? epoch_ : curve->start_ns;
     const int n=std::max(1,int(std::ceil(duration/.04)));
     for(int j=0;j<=n;++j) {
-      const auto t=begin+std::llround((double(j)/n)*duration*1e9);const auto ref=referenceAt(t);
+      const auto t=begin+std::llround((double(j)/n)*duration*1e9);const auto ref=supplied ? sampleHeldTrajectory(*supplied,t) : referenceAt(t);
       geometry_msgs::msg::PoseStamped pose;pose.header=path.header;pose.header.stamp=rclcpp::Time(t,RCL_ROS_TIME);
       pose.pose.position.x=ref.pose.position.x();pose.pose.position.y=ref.pose.position.y();
       pose.pose.orientation.z=std::sin(ref.pose.yaw/2);pose.pose.orientation.w=std::cos(ref.pose.yaw/2);path.poses.push_back(pose);
     }
     path_pub_->publish(path);
+  }
+  void receiveNavigation(const motion2d_interfaces::msg::NavigationReference & message) {
+    try {
+      auto next=fromNavigationMessage(message);
+      if(!last_stamp_ || !enabled_) throw std::invalid_argument("Need current enabled odometry");
+      if(!certifyBezier(next.motion.curve,next.regions,navigation_limits_).certified) throw std::invalid_argument("Reference certificate failed");
+      if(schedule_.empty()) {
+        const auto first=next.motion.curve.sample(0);
+        if(state_.velocity.norm()>.02 || std::abs(state_.yaw_rate)>.02 ||
+           (first.position-state_.pose.position).norm()>.03 || std::abs(wrapAngle(next.motion.yaw-state_.pose.yaw))>.02)
+          throw std::invalid_argument("Need a nearby stationary restart");
+        schedule_.reset(Pose2D{first.position,next.motion.yaw});
+      }
+      const auto result=schedule_.accept(next,*last_stamp_);
+      if(!result.accepted) throw std::invalid_argument(result.reason);
+      if(mpc_) mpc_->reset();
+      publishPath(*last_stamp_,&next.motion);
+      std_msgs::msg::Int64 ack;ack.data=next.motion.start_ns;accepted_pub_->publish(ack);
+      status("navigation_reference_accepted");
+    } catch(const std::exception & e) {status(std::string("navigation_reference_rejected:")+e.what());}
   }
   void receiveTrajectory(const motion2d_interfaces::msg::Trajectory2D & m) {
     try {
@@ -135,23 +179,32 @@ private:
       state_=state;last_stamp_=ns;
       if(reset) {
         epoch_=ns;last_control_.reset();trajectory_.reset();reference_config_.origin=state.pose;
-        previous_force_.setZero();if(mpc_) mpc_->reset();
+        previous_force_.setZero();if(mpc_) mpc_->reset();schedule_.reset(state.pose);
         if(source_=="analytic") publishPath(ns);
         else {nav_msgs::msg::Path empty;empty.header=message.header;path_pub_->publish(empty);}
       }
+      if(source_=="navigation") schedule_.advance(ns);
       if(last_control_ && ns-*last_control_<period_) return;
       last_control_=ns;
       if(!enabled_) {brake(stamp,"disabled_braking");return;}
       if(source_=="trajectory" && !trajectory_) {brake(stamp,"waiting_trajectory_braking");return;}
+      if(source_=="navigation" && schedule_.empty()) {brake(stamp,"waiting_navigation_braking");return;}
       // tracker_observation_begin
       const auto reference=referenceAt(ns);
       auto command=trackPd(state_,reference,gains_,model_);
       std::string label=command.saturated ? "saturated" : "tracking";
       if(mpc_) {
-        std::vector<State2D> future;
-        for(int j=1;j<=mpc_config_.horizon;++j) future.push_back(referenceAt(ns+j*period_));
+        std::vector<State2D> future;std::vector<ConvexRegion> regions;
+        for(int j=1;j<=mpc_config_.horizon;++j) {
+          const auto time=ns+j*period_;future.push_back(referenceAt(time));
+          if(source_=="navigation") {
+            const auto * region=schedule_.region(time);
+            if(!region) throw std::invalid_argument("Missing navigation region");
+            regions.push_back(*region);
+          }
+        }
         const auto begin=std::chrono::steady_clock::now();
-        const auto result=mpc_->step(state_,future,previous_force_);
+        const auto result=mpc_->step(state_,future,previous_force_,regions);
         motion2d_interfaces::msg::MpcStatus diagnostic;diagnostic.header=message.header;
         diagnostic.compute_seconds=std::chrono::duration<double>(std::chrono::steady_clock::now()-begin).count();
         diagnostic.status=result.solver.status;diagnostic.iterations=result.solver.iterations;
@@ -161,7 +214,8 @@ private:
         label=result.solver.solved() ? "tracking_mpc" : "mpc_"+result.solver.status+"_braking";
         if(!result.solver.solved()) command.requested=command.applied=dampingBrake(state_,model_);
       }
-      send(command.applied,stamp,label);
+      if(controller_=="ideal") sendPose(referenceAt(ns+period_).pose,stamp,"tracking_ideal");
+      else send(command.applied,stamp,label);
       reference_pub_->publish(referenceOdometry(reference,message.header.stamp));
       geometry_msgs::msg::AccelStamped acceleration;acceleration.header=message.header;
       acceleration.accel.linear.x=reference.acceleration.x();acceleration.accel.linear.y=reference.acceleration.y();
@@ -175,6 +229,11 @@ private:
       else status(std::string("invalid_odometry:")+e.what());
     }
   }
+  std::string controller_;ReferenceSchedule schedule_;TrajectoryLimits navigation_limits_;
+  rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr pose_pub_;
+  rclcpp::Publisher<std_msgs::msg::Int64>::SharedPtr accepted_pub_;
+  rclcpp::Subscription<motion2d_interfaces::msg::NavigationReference>::SharedPtr navigation_sub_;
+  rclcpp::Subscription<std_msgs::msg::Empty>::SharedPtr stop_sub_;
   MpcConfig mpc_config_;std::unique_ptr<LinearMpc> mpc_;Eigen::Vector2d previous_force_=Eigen::Vector2d::Zero();
   rclcpp::Publisher<motion2d_interfaces::msg::MpcStatus>::SharedPtr mpc_pub_;
   rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr prediction_pub_;

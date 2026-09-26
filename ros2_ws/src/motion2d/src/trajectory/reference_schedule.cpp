@@ -28,6 +28,7 @@ State2D ReferenceSchedule::sample(std::int64_t stamp) const {
 }
 const ConvexRegion * ReferenceSchedule::region(std::int64_t stamp) const {
   const auto * selected=reference(stamp);
+  if(!selected && pending_) selected=&*pending_; // Initial stationary hold lies in its first region.
   if(!selected || selected->regions.empty()) return nullptr;
   double t=(stamp-selected->motion.start_ns)*1e-9;std::size_t index=0;
   const auto & pieces=selected->motion.curve.pieces();

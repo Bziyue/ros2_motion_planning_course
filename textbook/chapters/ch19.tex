@@ -119,3 +119,51 @@ Spline 优化的是带能量与软项的总代价，不保证每次都比备用�
 单元检查未知目标、已知断开的地图、占据/越界目标、路线长度、配置区域整体验证和非零首导数。
 另把首速度设为 2 m/s，超过证书上限，必须拒绝全部备用方案。
 比较有无控制点惩罚时的时长与认证结果；画出原始占据和配置栅格，解释半径为何只能处理一次。
+
+\clearpage
+\section{把轨迹与走廊作为一个事务接收}
+\begin{lstlisting}[language=bash]
+# Terminal 1: standalone receiver, no simulator
+ros2 run motion2d tracker_node --ros-args \
+  -p use_sim_time:=true -p reference.source:=navigation \
+  -p control.odometry_timeout:=10.0
+# Terminal 2: synthetic /clock and observations
+python3 scripts/check_navigation_boundary.py
+\end{lstlisting}
+NavigationReference 把带绝对起点的五次系数、逐段凸区域、地图快照时刻放进\textbf{同一条消息}。
+否则分别到达的“新曲线 + 旧走廊”可能组成一个从未被规划器验证过的组合。
+区域顶点用 float64，避免 float32 舍入使贴边曲线的接收检查发生变化。
+接收器检查消息坐标、区域数量、有限值及曲线在区域中的连续证书；
+区域是否属于观测自由空间仍由规划器负责，控制器并不读取地图或世界。
+
+\begin{center}\small
+\begin{tabular}{ll}\toprule
+话题 & 语义\\\midrule
+/navigation/reference & 原子候选，坐标 odom\\
+/control/accepted\_reference & Int64，已接收候选的起点纳秒\\
+/navigation/stop & Empty，显式清空参考并制动\\
+/control/reference & 当前观测时刻的参考位姿与机体速度\\
+/control/reference\_acceleration & 同时刻的 odom 加速度\\\bottomrule
+\end{tabular}
+\end{center}
+发布成功不等于控制器已经接受。规划端应等到对应起点的确认，再更新自己的参考调度；
+每个待确认请求使用不同的未来起点，不能同时积压多个候选。
+运动中的新曲线严格匹配旧参考的 p/v/a/yaw，拒绝候选时保留原曲线。
+MPC 向前查询时，同时选择对应时刻的区域；第一条曲线尚未开始时，静止保持使用它的第一个区域。
+
+\paragraph{启动与停车}
+第一次启动，或显式制动后的重新启动，要求观测速度与角速度不超过 0.02，
+首点在当前位置 0.03 m 内，yaw 差不超过 0.02 rad，并且首 v/a 为零。
+这个小容差用于静止状态的测量波动，不能用于掩盖运动中的不连续交接。
+制动会清空未来曲线、预测和显示路径，使用最新状态计算限幅阻尼力；
+它不承诺制动过程仍满足旧曲线的连续证书或力变化率限制。
+
+理想模式另设 control.controller=ideal，直接发送下一控制周期的参考位置，
+仿真必须配套 ideal 模型并关闭 IMU；带质量模式仍发送力/力矩。
+两者的物理含义不同，完整导航实验会分开报告。
+
+\paragraph{验收与练习}
+合成时钟测试先从静止沿 x 轴运动，再于 0.7 s 接续转向曲线。
+检查确认只出现两次、交接前仍是旧曲线、交接处 p/v/a 相等、错误替换不覆盖有效参考，
+以及显式停车发布新的阻尼力、移动中拒绝重新锚定。
+练习：故意去掉第二条消息的一块区域，再重复发送；说明为什么既不能确认，也不能丢掉原参考。

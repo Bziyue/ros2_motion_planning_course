@@ -28,3 +28,17 @@ replanObserved对同一快照构建走廊、ESDF软项与Spline优化，必须�
 优化失败可尝试保持首p/v/a的停点五次段，1/1.5/2/3倍时长也都逐一认证；不合格返回失败，不复用旧优化结果。
 结果标明optimized或fallback_stop_segments，并保留optimization_status；控制点惩罚默认开启，速度/加速度证书.7/.8。
 手工网格夹具（不是导航成绩）：未知目标局部段，备用/Spline T=7.258/11.424s；绕墙5m前缀T=19.466/12.994s，四组均认证。
+
+## 原子参考接收（ROS）
+
+`NavigationReference` 把 odom 曲线、逐段 float64 顶点区域、地图时刻绑定发布。
+`reference.source:=navigation` 接收后用 `/control/accepted_reference` 回传起点纳秒；不连续/非法替换保留原曲线。
+`/navigation/stop` 清空曲线/显示/热启动并从当前状态重新计算阻尼制动力。
+启动允许 0.03m / 0.02rad 的静止测量容差，运动中仍严格 p/v/a/yaw 接续。
+
+两个终端 source 后运行（不启动仿真器）：
+```bash
+ros2 run motion2d tracker_node --ros-args -p use_sim_time:=true -p reference.source:=navigation -p control.odometry_timeout:=10.0
+python3 scripts/check_navigation_boundary.py
+```
+检查未来确认、C2 切换、非法替换保留、显式新制动与移动重启拒绝。
