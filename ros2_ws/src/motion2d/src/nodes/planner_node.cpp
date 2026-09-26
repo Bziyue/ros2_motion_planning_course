@@ -7,6 +7,7 @@
 #include <tf2_ros/buffer.hpp>
 #include <tf2_ros/transform_listener.hpp>
 #include "motion2d/planning/astar.hpp"
+#include "motion2d/trajectory/minco_optimizer.hpp"
 #include "motion2d/ros/mapping_messages.hpp"
 #include "motion2d/ros/planning_messages.hpp"
 
@@ -29,10 +30,21 @@ public:
     merge_convex_ = declare_parameter("corridor.merge_convex", true);
     extension_ = declare_parameter("corridor.max_extension", .6);
     if (!std::isfinite(extension_) || extension_ < 0) {throw std::invalid_argument("invalid corridor extension");}
+    optimize_enabled_=declare_parameter("optimization.enabled",false);
+    optimization_.cost.corridor_weight=declare_parameter("optimization.corridor_weight",500.);
+    optimization_.cost.corridor_margin=declare_parameter("optimization.corridor_margin",.02);
+    optimization_.solver.max_iterations=declare_parameter("optimization.max_iterations",200);
+    optimization_.solver.max_wall_seconds=declare_parameter("optimization.max_wall_seconds",.2);
+    optimization_.limits.clearance=config_.radius+config_.margin;
+    validateCostConfig(optimization_.cost);
+    if(optimization_.solver.max_iterations<1 || !std::isfinite(optimization_.solver.max_wall_seconds) ||
+      optimization_.solver.max_wall_seconds<0) throw std::invalid_argument("Invalid optimization budget");
     diagonal_ = declare_parameter("planning.diagonal", true);
     // Validate startup configuration even before the first map arrives.
     inflateGrid(GridConfig{}, std::vector<int8_t>(220*220, -1), config_);
     const auto retained = rclcpp::QoS(1).transient_local();
+    optimized_pub_=create_publisher<nav_msgs::msg::Path>("/plan/optimized_preview",retained);
+    optimized_status_pub_=create_publisher<std_msgs::msg::String>("/plan/optimization_status",retained);
     path_pub_ = create_publisher<nav_msgs::msg::Path>("/plan/path", retained);
     raw_pub_ = create_publisher<nav_msgs::msg::Path>("/plan/path_raw", retained);
     corridor_path_pub_ = create_publisher<nav_msgs::msg::Path>("/plan/corridor_path", retained);
@@ -77,13 +89,14 @@ private:
         goal_.reset(); last_start_.reset(); publish({}, "reset");
       }
       received_map_ = true; map_stamp_ = rclcpp::Time(m.header.stamp);
+      if(optimize_enabled_) field_.emplace(g,m.data,config_.free_threshold,config_.unknown_blocked);
       grid_ = std::move(next); map_changed_ = true; dirty_ = true;
       nav_msgs::msg::OccupancyGrid mask; mask.header = m.header; mask.info = m.info;
       mask.data.reserve(grid_->blocked.size());
       for (const auto b : grid_->blocked) {mask.data.push_back(b ? 100 : 0);}
       grid_pub_->publish(mask);
     } catch (const std::invalid_argument & e) {
-      grid_.reset(); publish({}, "invalid_map"); RCLCPP_WARN(get_logger(), "%s", e.what());
+      grid_.reset(); field_.reset(); publish({}, "invalid_map"); RCLCPP_WARN(get_logger(), "%s", e.what());
     }
   }
 
@@ -135,9 +148,33 @@ private:
     corridor_path_pub_->publish(toPath(corridor.waypoints,header));
     message.data = corridor.status; corridor_status_pub_->publish(message);
     // corridor_snapshot_end
+    // The corridor and ESDF below come from this same map callback snapshot.
+    std::vector<Eigen::Vector2d> optimized;
+    std::string diagnostic=optimize_enabled_ ? "waiting_corridor" : "disabled";
+    if(optimize_enabled_ && corridor.success && corridor.waypoints.size()>=2 && field_) {
+      try {
+        TranslationState start,finish;start.position=corridor.waypoints.front();finish.position=corridor.waypoints.back();
+        std::vector<Eigen::Vector2d> q(corridor.waypoints.begin()+1,corridor.waypoints.end()-1);
+        std::vector<double> times;
+        for(std::size_t i=1;i<corridor.waypoints.size();++i)
+          times.push_back(std::max(.5,(corridor.waypoints[i]-corridor.waypoints[i-1]).norm()/.5));
+        const auto solution=optimizeMinco(start,finish,q,times,optimization_,corridor.regions,&*field_);
+        diagnostic=solution.solver.status+";"+solution.samples.status+";preview_only";
+        if(solution.curve) {
+          const int n=std::max(1,int(std::ceil(solution.curve->duration()/.05)));
+          for(int j=0;j<=n;++j) optimized.push_back(solution.curve->sample(solution.curve->duration()*j/n).position);
+          diagnostic+=";corridor_residual="+std::to_string(solution.samples.max_corridor_residual);
+        }
+      } catch(const std::exception & e) {diagnostic=std::string("optimization_failed:")+e.what();}
+    }
+    optimized_pub_->publish(toPath(optimized,header));
+    message.data=diagnostic;optimized_status_pub_->publish(message);
   }
 
   InflationConfig config_;
+  bool optimize_enabled_;
+  MincoOptimizationConfig optimization_;
+  std::optional<Esdf2D> field_;
   bool corridor_enabled_, merge_convex_;
   double extension_;
   bool diagonal_{true}, dirty_{false}, new_goal_{false}, map_changed_{false}, received_map_{false};
@@ -147,6 +184,8 @@ private:
   std::optional<Eigen::Vector2d> goal_, last_start_;
   tf2_ros::Buffer buffer_;
   tf2_ros::TransformListener listener_;
+  rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr optimized_pub_;
+  rclcpp::Publisher<std_msgs::msg::String>::SharedPtr optimized_status_pub_;
   rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr path_pub_, raw_pub_, corridor_path_pub_;
   rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr corridor_pub_;
   rclcpp::Publisher<std_msgs::msg::String>::SharedPtr corridor_status_pub_;

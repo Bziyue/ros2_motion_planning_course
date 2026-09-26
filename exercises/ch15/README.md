@@ -15,3 +15,6 @@ g++ -std=c++17 -Iexercises/ch15/starter exercises/ch15/check_jerk_gram.cpp -o /t
 
 代码ch15-2：正时长变量的链式梯度。用同一命令将文件换成check_time_gradient.cpp。
 参考解和starter分别编译；参考解应通过，starter应失败。实验比较软约束收敛与独立残差，不能把converged等同安全。
+
+ROS实验：启动ch15.launch.py，运行scripts/check_ch15.py。检查同地图快照、端点、preview_only，机器人不能因预览自动执行。
+将目标frame改成bad，曲线应清除；重置不能复用之前的曲线。RViz预期紫色优化预览，当前GUI未验收。

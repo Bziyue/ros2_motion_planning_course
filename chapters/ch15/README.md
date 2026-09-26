@@ -1,6 +1,6 @@
 # 第15章：二维MINCO最小jerk
 
-先修第14章。已完成最小jerk内核、解析伴随梯度与软约束/时间优化；ROS预览随后接入。
+先修第14章。已完成最小jerk内核、解析伴随梯度与软约束/时间优化；ROS预览已接入。
 
 ```bash
 ros2 run motion2d minco_demo tmp/ch15_minco
@@ -28,3 +28,8 @@ BandedLu无主元，针对本章方程顺序；不声称适用于任意矩阵。
 T=Tmin+exp(tau)，密集BFGS外层非线性优化，状态与采样可行性分别报告。
 默认三组均收敛，但优化后穿出走廊（0.0166/0.0233m），联合优化净空下界0.1322m也不满足0.15m。
 这是特意保留的真实结果；第16章连续凸包认证通过之前仅供预览，不作为执行命令。
+
+ROS：`ros2 launch motion2d_bringup ch15.launch.py rviz:=true`；自动验收`/usr/bin/python3 scripts/check_ch15.py`。
+planner在同一观测地图快照上构造走廊/ESDF并优化，输出`/plan/optimized_preview`与`/plan/optimization_status`。
+不发布执行命令；未知阻塞，非法输入/失败/reset清空。默认外层200步、0.2s步间预算，非硬实时。
+可调optimization.corridor_weight/corridor_margin；旧章默认optimization.enabled=false。

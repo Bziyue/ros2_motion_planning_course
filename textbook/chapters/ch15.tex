@@ -199,3 +199,41 @@ $T^*=(3600w_J\|\Delta p\|^2/w_T)^{1/6}$，并用实验核对。
 \item \textbf{代码 ch15-2：}补全正时长变量的链式梯度。改变 $T_{\min}$ 后仍应通过差分。
 \item \textbf{实验：}逐次加大走廊权重，记录残差、迭代数、终止状态；解释为什么权重很大仍不构成连续证明。
 \end{enumerate}
+
+\clearpage
+\section{在观测地图上预览优化结果}
+\begin{lstlisting}[language=bash]
+ros2 launch motion2d_bringup ch15.launch.py rviz:=true
+# A second terminal, same ROS_DOMAIN_ID:
+/usr/bin/python3 scripts/check_ch15.py
+\end{lstlisting}
+从 RViz 的 Goal Pose 工具设置目标后，planner 在同一份观测地图上依次生成 A*、走廊、ESDF 与优化曲线。
+未知空间继续阻塞；没有读取模拟器障碍物。输入仍为 /map、/odometry、/goal\_pose 和坐标变换。
+起终点取静止 p/v/a，初始分段时间为连接点距离除以 0.5 m/s，至少 0.5 s。
+这是静止机器人上的单次预览；移动边界和在线衔接留到第十九章。
+
+\begin{center}\small
+\begin{tabularx}{\linewidth}{lX}\toprule
+接口 & 含义\\\midrule
+/plan/optimized\_preview & map 系几何 Path，约 0.05 s 采样；没有绝对执行时间\\
+/plan/optimization\_status & 求解状态、独立采样状态和 preview\_only 标签\\
+optimization.enabled & 第十五章默认 true，旧章节默认 false\\
+optimization.max\_iterations & 默认 200；终止于迭代上限仍保留诊断\\
+optimization.max\_wall\_seconds & 默认 0.2 s；步间检查预算，不是实时截止保证\\\bottomrule
+\end{tabularx}
+\end{center}
+走廊和距离场由同一回调中的栅格构造，避免把旧走廊与新地图混用。
+非法目标、规划失败或时间回退清空预览；数值失败显示原因。
+预览不发布 /plan/trajectory，也不向理想到点接口发命令。
+
+RViz 预期：观察地图上出现紫色曲线，青色折线与走廊边框继续可见。
+实际主机已检查 ROS 消息、端点、清理与输入隔离；当前桌面限制下未验收 GUI 画面。
+若没有曲线，先读状态：未知目标没有可行路径，ESDF 查询越域和求解失败也不能显示为成功。
+若出现曲线但报告 sampled\_violation，可调整权重和初值，再核对实际残差。
+
+\begin{enumerate}
+\item \textbf{理解：}为什么两个订阅回调中分别缓存走廊和距离场，可能使一次检查失去意义？
+\item \textbf{代码阅读：}在 planner\_node.cpp 找到 publish 中同一地图快照的使用顺序，列出所有输出清空路径。
+\item \textbf{验收：}默认起点 $(-8,-8)$ m、目标 $(-7.5,-8)$ m，检查曲线端点、preview\_only 标签；
+步进仿真确认机器人未移动，随后发送非法坐标系目标，确认旧曲线消失。
+\end{enumerate}
