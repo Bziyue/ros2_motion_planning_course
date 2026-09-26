@@ -1,7 +1,7 @@
 \chapter{让圆盘运动：位置、速度与力}\label{ch:robot}
 \begin{notebox}
 \textbf{目标}\quad 区分位置、速度和力输入；理解质量、阻尼、碰撞与制动。\\
-\textbf{先修}\quad 前三章、速度与加速度的含义。先运行，再推导。
+\textbf{先修}\quad 前三章、一元积分与链式法则。先由位置和速度驱动圆盘，再加入力与质量。
 \end{notebox}
 
 \section{圆心状态与圆盘外形}
@@ -11,11 +11,11 @@ x=(p,v,\psi,\omega),\qquad
 p=(p_x,p_y),\quad v=(v_x,v_y).
 \end{equation}
 位置单位 m，速度 m/s，yaw 为 rad，角速度 rad/s。位置和速度在 odom 系表达；
-本章的 map 与 odom 重合。半径 r 单独参与碰撞，不把“质点状态”误解为“没有体积”。
-若 r=0，才是几何质点；屏幕上的小点仅用于看清位置。
+本章的 map 与 odom 重合。半径 r 描述碰撞外形，状态向量描述圆心运动。
+取 r=0 就得到几何质点；屏幕仍画一个小标记，方便观察位置。
 
 控制量不同，模型的物理意义就不同。理想到点输入目标位姿；速度模型输入平面速度；
-惯性模型输入力和偏航力矩。它们分别使用不同话题，不能把同一个数值悄悄解释成另一种单位。
+惯性模型输入力和偏航力矩。它们分别使用不同话题，消息单位也随控制量而改变。
 下面从最容易运行的理想到点出发，再运行速度模型与受力惯性模型。
 
 \section{先让机器人到一个点}
@@ -32,7 +32,6 @@ ros2 topic pub --once /command/pose geometry_msgs/msg/PoseStamped \
 默认从 $(-8,-8)$ 移到 $(-7,-8)$，图中留下接受过的运动轨迹。目标在下一 tick 才执行；
 暂停时发目标，圆盘保持不动，单步后才到达目标。
 
-\clearpage
 \section{扫过的空间也要安全}
 起终点安全并不足够。半径 r 的圆盘沿线段 $[p_0,p_1]$ 移动，扫过的区域是胶囊形。
 对于圆心 c、半径 R 的障碍，无碰撞要求
@@ -67,18 +66,22 @@ ros2 topic pub --once /command/pose geometry_msgs/msg/PoseStamped \
 \lstinputlisting[language=C++,linerange={sweep_begin-sweep_end},
   includerangemarker=false]{../ros2_ws/src/motion2d/src/sim/swept_collision.cpp}
 \end{minipage}\par
-代码没有按固定间距抽样，因此不会因为障碍很薄、目标很远，就从障碍另一侧“穿过去”。
-这是连续直线扫掠的几何检查，浮点实现仍受数值精度限制。
+循环中的每次检查都覆盖整个运动线段。圆障碍复用点线段距离；多边形先判断线段是否穿过边界，
+相交时距离为零，否则取两条线段端点到对方线段距离的最小值。
+相交判断复用叉积的左右侧符号：两条线段都跨在对方直线两侧且坐标包围盒重叠时相交；
+包围盒的检查同时排除共线却分离的两段。矩形边界内缩 r 后，
+任意两点的插值 $(1-\alpha)p_0+\alpha p_1$（$0\leq\alpha\leq1$）仍满足四个坐标范围，
+因此边界检查可以只看两个端点。
 
-\clearpage
-\section{理想到点不产生真实 IMU}
+\section{直接设置位姿的用途}
 通过几何检查后，理想模型直接赋值目标位姿：
 \par\noindent\begin{minipage}{\linewidth}
 \lstinputlisting[language=C++,linerange={ideal_begin-ideal_end},
   includerangemarker=false]{../ros2_ws/src/motion2d/src/sim/ideal_model.cpp}
 \end{minipage}\par
-理想到点没有有限的运动速度。这里的零导数表示未使用，不能用位置跳变的差分模拟 IMU。
-需要连续运动时，使用本章后面的解析圆参考。
+这个操作适合单独学习几何规划：每次设定一个新的安全位姿。位置在相邻 tick 间直接跳变，
+跳变时刻的导数无法用有限速度、加速度表示，因此状态中的零导数是占位值。
+后面的传感器实验会采用连续圆参考或惯性模型，从连续运动方程中取得加速度。
 
 \begin{figure}[ht]
 \centering
@@ -89,8 +92,7 @@ ros2 topic pub --once /command/pose geometry_msgs/msg/PoseStamped \
 \section{冻结试验与重新开始}
 扫掠检查失败时，程序不接受候选状态，位置、速度和时间均保持在上一个安全的 tick。
 此时圆盘变红，\code{/sim/status} 显示 \code{collision_predicted}。
-这是提前终止试验，尚未模拟接触力、反弹或摩擦。它没有把撞入障碍的状态推回自由空间。
-需要调用 reset 才能继续。
+冻结保留了导致冲突前的状态，便于检查路径和命令。调用 reset 后开始新的运动试验。
 
 \begin{lstlisting}[language=bash,numbers=none]
 ros2 service call /sim/reset std_srvs/srv/Trigger "{}"
@@ -100,7 +102,6 @@ ros2 service call /sim/pause std_srvs/srv/SetBool "{data: false}"
 reset 开始新试验：回初始状态、清空待执行命令与轨迹、仿真时间归零并暂停。
 单步推进一个 dt；恢复运行不改变 dt。墙钟定时器决定运行快慢，整数 tick 决定模拟时间。
 
-\clearpage
 \section{给速度：先分清它在哪个坐标系}
 重启场景，选用速度模型：
 \begin{lstlisting}[language=bash,numbers=none]
@@ -114,54 +115,97 @@ ros2 topic pub -r 20 /command/velocity geometry_msgs/msg/TwistStamped \
 \end{lstlisting}
 odom 系速度方向固定；base\_link 系速度会随机器人转动。同一个 $(0.5,0)$，
 前者表示一直向 odom 的 x 正方向走，后者表示一直朝圆盘的“前方”走。
-全向模型也允许 y 方向输入，这和不能横移的差速车不同。
+全向模型允许沿机体 y 轴横移；差速车和本章后面的小车则沿车头方向行驶。
 
-若一个时间步 h 内保持 odom 速度 u 与角速度 $\omega$，则
+\subsection*{积分固定方向的速度}
+若一个时间步 h 内保持 odom 速度 u 与角速度 $\omega$，分别积分 $\dot p=u$、$\dot\psi=\omega$：
 \begin{equation}
-p_{k+1}=p_k+hu,\qquad
+p_{k+1}=p_k+\int_0^h u\,dt=p_k+hu,\qquad
 \psi_{k+1}=\operatorname{wrap}(\psi_k+h\omega).
 \end{equation}
-若 u 在机体系，积分 $\dot p=R(\psi_k+\omega t)u$ 可得
+wrap 将角度放回 $[-\pi,\pi)$，表示的朝向保持相同。
+
+\subsection*{积分随车头旋转的速度}
+若 u 在机体系固定，地图中的速度为 $R(\psi_k+\omega t)u$。先假设 $u=(U,0)^\top$，
+则 $\dot p_x=U\cos(\psi_k+\omega t)$、$\dot p_y=U\sin(\psi_k+\omega t)$。
+当 $\omega\ne0$ 时直接积分：
+\begin{align}
+\Delta p_x&=\frac U\omega[\sin(\psi_k+\omega h)-\sin\psi_k],\\
+\Delta p_y&=\frac U\omega[\cos\psi_k-\cos(\psi_k+\omega h)].
+\end{align}
+设 $\beta=\omega h/2$，用和差化积公式，两个方括号分别变为
+$2\sin\beta\cos(\psi_k+\beta)$ 和 $2\sin\beta\sin(\psi_k+\beta)$。
+因此位移沿步中间的车头方向，长度为 $Uh\sin\beta/\beta$。
+对机体 y 轴速度作同样积分，只需把方向转过 $\pi/2$；两轴相加得到
 \begin{equation}
-p_{k+1}=p_k+h\,\operatorname{sinc}(\beta)\,R(\psi_k+\beta)u,
-\qquad \beta=\frac{\omega h}{2}.
+p_{k+1}=p_k+h\,\operatorname{sinc}(\beta)R(\psi_k+\beta)u,
+\quad \operatorname{sinc}(\beta)=\frac{\sin\beta}{\beta}.
 \end{equation}
-其中 $\operatorname{sinc}(\beta)=\sin\beta/\beta$，在零处取 1。小角度用
-$1-\beta^2/6$ 避免除以很小的数。这个式子覆盖圆弧与直线极限：
+在零处用极限 $\operatorname{sinc}(0)=1$，运动自然变成直线。
+由 $\sin\beta=\beta-\beta^3/6+\beta^5/120+\cdots$，小角度时可计算
+$1-\beta^2/6$，避开很小的除数。
+例如 $U=1$ m/s、$\omega=1$ rad/s、$\psi_k=0$、$h=\pi/2$ s，
+积分得到位移 $(1,1)$ m，正是半径1 m的四分之一圆。
 
 \par\noindent\begin{minipage}{\linewidth}
 \lstinputlisting[language=C++,linerange={velocity_begin-velocity_end},
   includerangemarker=false]{../ros2_ws/src/motion2d/src/sim/velocity_model.cpp}
 \end{minipage}\par
 
-\clearpage
 \section{限速、超时与圆弧安全}
 默认平移速度模长限制为 1 m/s，角速度绝对值限制为 1 rad/s。
-超出平移限制时等比例缩短向量，保留方向；不能分别限每个分量后，仍声称限制了模长。
+超出平移限制时，按 $u_{\rm applied}=u\,v_{\max}/\|u\|$ 等比例缩短向量，保留方向。
+例如 $(1,1)$ m/s 的模长为 $\sqrt2$ m/s，限制为1 m/s后得到 $(1/\sqrt2,1/\sqrt2)$。
 配置项是 \code{speed_max} 和 \code{yaw_rate_max}。
 
 命令默认在模拟时间中有效 0.5 s，到期后在 tick 边界切为零速度，
 状态为 \code{command_timeout}。暂停不会消耗有效期。零时间戳从接收时刻起算，
 非零时间戳从消息时刻起算。改变 dt 时，过期检测最多量化到一个 tick。
-由于可以瞬间改变速度，该模型依然不用于 IMU 融合；后续惯性模型需要真实制动。
+速度切换时存在瞬时跳变；需要用 IMU 积分连续速度的实验，将采用下面的惯性模型。
 
-圆弧的中间部分不一定贴着起终点连线。设加速度模长在一个步长内不超过
-$a_{\max}$，曲线与线性插值的偏差满足
+\subsection*{把圆弧包进可检查的胶囊}
+圆弧的中间部分会偏离起终点连线。记弦的插值为
+$p_{\rm chord}(t)=p(0)+t[p(h)-p(0)]/h$，偏差为 $e(t)=p(t)-p_{\rm chord}(t)$。
+设步内 $\|a(t)\|\leq a_{\max}$。先把加速度积分两次：
 \begin{equation}
-\|p(t)-p_{\rm chord}(t)\|
-\leq \frac{a_{\max}}{2}t(h-t)
-\leq \frac{a_{\max}h^2}{8}.
+p(t)=p(0)+tv(0)+\int_0^t(t-s)a(s)\,ds.
 \end{equation}
-可把它理解为线性插值的二阶误差界。机体系恒速度转弯时
-$a_{\max}=|\omega|\,\|u\|$，odom 恒速度时为零。
-因此把检查半径暂时改为 $r+a_{\max}h^2/8$，再复用直线扫掠检查，
-就把整段曲线包在胶囊内。这是保守的充分检查，可能拒绝狭窄但实际上可通过的路径。
+积分核 $t-s$ 的来源是：s 时刻产生的速度增量还会作用 $t-s$ 时间。
+把同一个式子分别代入 p(t) 和 p(h)，常数、初速度项相消：
+\begin{align}
+e(t)&=\int_0^t(t-s)a(s)\,ds-\frac th\int_0^h(h-s)a(s)\,ds\\
+ &=-\left(1-\frac th\right)\int_0^t s a(s)\,ds
+   -\frac th\int_t^h(h-s)a(s)\,ds.
+\end{align}
+对两段积分用三角不等式，再用加速度上界替换积分中的模长：
+\begin{align}
+\|e(t)\|&\leq a_{\max}\left[\left(1-\frac th\right)\frac{t^2}{2}
+ +\frac th\frac{(h-t)^2}{2}\right]\\
+ &=\frac{a_{\max}}2t(h-t)\leq\frac{a_{\max}h^2}{8}.
+\end{align}
+最后一步来自 $t(h-t)=h^2/4-(t-h/2)^2$。
+因此用半径 $r+a_{\max}h^2/8$ 检查弦，就能覆盖半径 r 的圆盘沿曲线扫过的空间。
 
-\begin{notebox}
-\textbf{为什么不能只检查两个状态？}\quad 薄墙可能位于两个 tick 之间；
-转弯时障碍也可能位于圆弧上、却不在端点连线上。测试专门构造了后一种场景，
-验证“只检查弦”会漏检，加上曲率引起的余量后能拒绝。
-\end{notebox}
+\begin{figure}[ht]
+\centering
+\begin{tikzpicture}[x=1cm,y=1cm,>=Stealth]
+\draw[line width=13pt,linecolor,line cap=round] (0,0)--(5,0);
+\draw[navy,dashed] (0,0)--(5,0);
+\draw[tealblue,thick,domain=0:5,samples=40] plot (\x,{.16*\x*(5-\x)});
+\draw[<->,muted] (2.5,.05)--(2.5,.95);
+\node[right,fill=white,inner sep=1pt] at (2.6,.48) {$\|e(t)\|$};
+\fill[navy] (0,0) circle(2pt);\fill[navy] (5,0) circle(2pt);
+\node[below] at (0,-.2) {$p(0)$};\node[below] at (5,-.2) {$p(h)$};
+\node[above,tealblue] at (2.5,1.1) {真实圆心曲线};
+\node[below,navy] at (2.5,-.25) {端点间的弦};
+\end{tikzpicture}
+\caption{偏差界随步长平方缩小。检查时，把机器人半径再增加这个偏差上界。}
+\end{figure}
+
+机体系恒速度的加速度为 $\dot R(\psi)u=\omega R(\psi)Ju$，其中
+$J=\begin{bmatrix}0&-1\\1&0\end{bmatrix}$ 把向量逆时针转 $90^\circ$。
+旋转保持长度，所以 $a_{\max}=|\omega|\|u\|$；odom 恒速度时为零。
+这个包络可能比真实扫掠区域稍宽；缩短 h 可减少狭窄处的保守余量。
 
 \textbf{代码练习 ch04-2：}补完 \path{exercises/ch04/starter/velocity_step.hpp}
 的 odom 系速度积分，并归一化 yaw。用 check\_velocity.cpp 检查负速度、时间步长和跨越 pi 的角度。
@@ -173,20 +217,19 @@ $a_{\max}=|\omega|\,\|u\|$，odom 恒速度时为零。
 \begin{lstlisting}[language=bash,numbers=none]
 /usr/bin/python3 ../scripts/check_ch04.py --model velocity
 \end{lstlisting}
-\clearpage
-\section{给力：质量必须真正起作用}
-速度命令能立即停下，真实惯性不能。全向平面模型把平移和偏航分开：
+\section{从合力得到加速度}
+牛顿第二定律把合力与加速度联系起来。设执行器施加 F，运动阻力与速度成正比、方向相反，
+阻力就是 $-c_vv$。合力等于 $m\dot v$；偏航方向则用力矩与转动惯量建立相同关系：
 \begin{align}
 \dot p&=v,& m\dot v&=F-c_vv,\\
 \dot\psi&=\omega,& I_z\dot\omega&=\tau-c_\omega\omega.
 \end{align}
 F 为 odom 系平面力，单位 N；$\tau$ 为偏航力矩，单位 N$\cdot$m。
 m 是质量，$I_z$ 是转动惯量。$c_v,c_\omega$ 分别为平移和转动阻尼，
-不能把 kg/s 的阻尼系数与没有单位的“衰减比例”混用。
+从 $c_vv$ 必须具有力的单位可得，$c_v$ 的单位是 kg/s；$c_\omega$ 的单位是 kg$\cdot$m$^2$/s。
 
-推荐继续使用这个全向模型：控制器给力，可以直接观察质量、限幅和制动，再学习线性 MPC。
-扫地机器人的差速驱动不能横移，适合在附录加上非完整约束。
-本模型也不等价于四旋翼完整的姿态与推力动力学。
+全向模型把 x、y 两轴的受力分开，便于从单轴制动逐步学到平面控制和第18章的线性 MPC。
+本章末尾再加入车轮方向约束，研究阿克曼转向；差速驱动见附录B。
 
 重启场景后，在第二个终端持续施加力与力矩：
 \begin{lstlisting}[language=bash,numbers=none]
@@ -213,65 +256,88 @@ torque\_max & 0.2 & N$\cdot$m，偏航力矩绝对值上限\\
 \bottomrule
 \end{tabular}
 \end{center}
-参数在启动时读取，改 YAML 后重启。若 r=0，必须显式提供正的转动惯量；
-几何质点不意味着可以除以零。速度模式的两个速度上限不用于惯性模式，
-因为直接剪掉速度会改变物理方程。
-
-\clearpage
-\section{从恒加速度到带阻尼的离散模型}
-先设阻尼为零。一个步长 h 内恒力意味着恒加速度 $a=F/m$：
+自动惯量来自均匀圆盘。半径 $\rho$、厚度 $d\rho$ 的圆环面积为 $2\pi\rho\,d\rho$，
+面密度为 $m/(\pi r^2)$，所以圆环质量为 $dm=2m\rho\,d\rho/r^2$。
+转动惯量定义为每份质量乘到转轴距离的平方，再求和：
 \begin{equation}
-p_{k+1}=p_k+h v_k+\frac12h^2a,\qquad v_{k+1}=v_k+ha.
+I_z=\int_0^r\rho^2\,dm=\frac{2m}{r^2}\int_0^r\rho^3\,d\rho=\frac{mr^2}{2}.
 \end{equation}
-位置更新使用旧速度。若先更新速度再用新速度加上同一个二次项，就会多走一段。
-偏航用同样的关系，把 $a$ 换成 $\tau/I_z$。
+参数在启动时读取，改 YAML 后重启。r=0 时，另给一个正的偏航惯量作为独立模型参数。
+惯性模式限制执行器的力和力矩，速度通过运动方程积分得到。
 
-有线性阻尼时，每个分量都是 $\dot v=u-\lambda v$，其中
-$u=F/m,\lambda=c_v/m$。步内输入保持不变称为\textbf{零阶保持}。
-积分这个一阶方程可以得到
+\section{从恒加速度到带阻尼的离散模型}
+先设阻尼为零。一个步长 h 内恒力意味着恒加速度 $a=F/m$。积分一次得到
+$v(t)=v_k+at$，再积分速度：
+\begin{equation}
+p_{k+1}=p_k+\int_0^h(v_k+at)\,dt=p_k+hv_k+\tfrac12h^2a,
+\quad v_{k+1}=v_k+ha.
+\end{equation}
+这里的 $v_k$ 是步初速度。偏航同理，把 a 换成 $\tau/I_z$。
+
+有线性阻尼时，每个分量都是 $\dot v+\lambda v=u$，其中
+$u=F/m,\lambda=c_v/m$。让输入在一个步长内保持常数，称为\textbf{零阶保持}。
+为解这个微分方程，两侧乘 $e^{\lambda t}$，左侧恰好成为乘积的导数：
+\begin{equation}
+\frac{d}{dt}(e^{\lambda t}v)=ue^{\lambda t}.
+\end{equation}
+从0积分到 t 后，$e^{\lambda t}v(t)-v_k=u(e^{\lambda t}-1)/\lambda$，所以
+\begin{equation}
+v(t)=e^{-\lambda t}v_k+\frac{1-e^{-\lambda t}}{\lambda}u.
+\end{equation}
+再积分一次求位移。第一项的积分系数为
+$B=\int_0^h e^{-\lambda t}dt=(1-e^{-\lambda h})/\lambda$；第二项为
+$C=\int_0^h(1-e^{-\lambda t})/\lambda\,dt=(h-B)/\lambda$。记 $A=e^{-\lambda h}$：
+\begin{equation}
+v_{k+1}=Av_k+Bu,\qquad p_{k+1}=p_k+Bv_k+Cu.
+\end{equation}
+A 无量纲，B 的单位为秒，C 的单位为秒平方，因而上式各项单位一致。
+对指数作泰勒展开，得到
 \begin{align}
-A&=e^{-\lambda h},&
-B&=\frac{1-e^{-\lambda h}}{\lambda},&
-C&=\frac{h-B}{\lambda},\\
-v_{k+1}&=A v_k+B u,&
-p_{k+1}&=p_k+Bv_k+Cu.
+A&=1-\lambda h+\tfrac12\lambda^2h^2+\cdots,\\
+B&=h-\tfrac12\lambda h^2+\tfrac16\lambda^2h^3+\cdots,\\
+C&=\tfrac12h^2-\tfrac16\lambda h^3+\tfrac1{24}\lambda^2h^4+\cdots.
 \end{align}
-在 $\lambda=0$ 时取连续极限：$A=1,B=h,C=h^2/2$。
-实现对很小的 $\lambda h$ 用泰勒展开，避免两个相近浮点数相减损失精度。
-偏航使用 $\lambda=c_\omega/I_z,u=\tau/I_z$，复用相同的积分系数。
+因此 $\lambda\to0$ 时回到恒加速度式。代码对很小的 $\lambda h$ 使用展开，
+减少两个接近的浮点数相减造成的精度损失；偏航取 $\lambda=c_\omega/I_z,u=\tau/I_z$，复用同样的系数。
 
 \par\noindent\begin{minipage}{\linewidth}
 \lstinputlisting[language=C++,linerange={inertia_begin-inertia_end},
   includerangemarker=false]{../ros2_ws/src/motion2d/src/sim/inertial_model.cpp}
 \end{minipage}\par
 先限幅，再积分。步末加速度由施加的力和步末速度重新计算，后续 IMU 会使用这个运动真值。
-它不是对有噪声的位置做差分。命令在 tick 切换，位置和速度连续，加速度可以跳变。
+命令在 tick 切换，位置和速度连续，加速度可以随合力改变。
 
-\clearpage
 \section{惯性、超时和碰撞如何一起工作}
 无阻尼时，零力意味着速度不变；有阻尼、零力时，
 \begin{equation}
 v(t)=v(0)e^{-c_vt/m}.
 \end{equation}
-所以命令超时不能让惯性模型“瞬间刹住”。超时只切换为零输入，同时报告
+撤去力以后，机器人继续滑行；阻尼越大，速度衰减越快。超时切换为零输入，同时报告
 \code{command_timeout}。后续控制器要用反向力制动，并考虑剩余空间；
 如果一直保持反向力，越过零速度后会向反方向加速。
 
-碰撞策略仍然是提前终止试验。对于步内恒定力和非负线性阻尼，
+碰撞检查需要本步加速度上界。对 $a=u-\lambda v$ 求导，常数输入满足
+$\dot a=-\lambda\dot v=-\lambda a$。用刚才的指数解便得到
 \begin{equation}
 a(t)=a(0)e^{-c_vt/m},\qquad
 a(0)=\frac{F-c_vv_k}{m}.
 \end{equation}
 因此本步加速度模长不超过 $\|a(0)\|$。继续使用前一节的插值误差界，
 把 $\|a(0)\|h^2/8$ 加到检查半径上，可以保守覆盖整个曲线。
-碰撞或数值异常时都不发布失败候选，而是冻结上一个有效状态。
-这不是接触动力学，也不是任意浮点误差下的形式化无碰撞证明。
+若包络与障碍相交，仿真停在上一个安全状态，供我们调整命令或路径。
 
-\begin{figure}[ht]
-\centering
-\includegraphics[width=.8\linewidth]{figures/ch04_inertial_rviz.png}
-\caption{受力后的实际圆盘、运动轨迹与机体系坐标轴。平移与偏航可以分别驱动。}
-\end{figure}
+\par\noindent\begin{minipage}{\linewidth}
+\begin{center}
+\begin{tikzpicture}[x=1cm,y=1cm,>=Stealth]
+\draw[fill=pale,draw=tealblue,thick] (0,0) circle(.5);
+\node at (0,0) {$m$};
+\draw[->,thick,navy] (.65,0)--(2.3,0) node[right] {$F$};
+\draw[->,thick,muted] (-.65,0)--(-1.9,0) node[left] {$-c_vv$};
+\draw[->,tealblue] (-.5,.85)--(.8,.85) node[right] {$v$};
+\node[below] at (0,-.65) {合力 $F-c_vv$ 决定加速度；撤去 F 后，阻力逐渐减小速度。};
+\end{tikzpicture}
+\end{center}
+\end{minipage}\par
 
 默认配置启动后，执行真实通信实验：
 \begin{lstlisting}[language=bash,numbers=none]
@@ -280,21 +346,22 @@ a(0)=\frac{F-c_vv_k}{m}.
 脚本检查力与力矩限幅、自动惯量、暂停不推进、超时滑行、反向力制动和重置。
 质量改为 2 kg 时，可追加 \code{--mass 2}；其余仍使用默认零阻尼配置。
 
-\clearpage
 \section{实验：质量、步长和制动距离}
 从静止出发，1 N 力持续 1 s，1 kg 的机器人移动 0.50 m、达到 1 m/s；
 2 kg 的机器人移动 0.25 m、达到 0.5 m/s。再从相同初速 $v_0=1$ m/s 出发，
-用大小 $F_b=1$ N 的反向力制动，在无阻尼时
+用大小 $F_b=1$ N 的反向力制动，无阻尼时 $v(t)=v_0-F_bt/m$。
+令速度为零，解出停止时刻；再积分到这个时刻：
 \begin{equation}
 t_{\rm stop}=\frac{m v_0}{F_b},\qquad
-d_{\rm stop}=\frac{m v_0^2}{2F_b}.
+d_{\rm stop}=\int_0^{t_{\rm stop}}\left(v_0-\frac{F_b}{m}t\right)dt
+=v_0t_{\rm stop}-\frac{F_b}{2m}t_{\rm stop}^2=\frac{m v_0^2}{2F_b}.
 \end{equation}
 因此质量翻倍，同速制动距离也翻倍。比较制动时必须明确初速是否相同。
 
 \begin{figure}[ht]
 \centering
 \input{figures/ch04_mass_comparison}
-\caption{直接读取 C++ 实验 CSV 的结果，dt=0.005 s、阻尼为零，力大小为 1 N。}
+\caption{相同力作用于两种质量。左、中图从静止加速1 s；右图从相同初速制动。阻尼为零。}
 \end{figure}
 
 核心实验不依赖 ROS 回调时延，直接运行：
@@ -313,28 +380,29 @@ m / kg & dt / s & 1 s 位移 / m & 1 s 末速 / (m/s) & 同速制动距离 / m\\
 \bottomrule
 \end{tabular}
 \end{center}
-这里改变 dt 仍得到相同解析结果，因为力恒定、切换时刻恰好位于步边界，
-并使用零阶保持的解析离散。这不代表 dt 永远无关：输入刷新、事件检测、未来控制闭环都会受影响；
-曲线碰撞余量也随 dt 的平方变化。
+两种 dt 得到相同结果，是因为恒定输入的解析积分准确累加，且切换时刻恰好落在步边界。
+若制动命令在两步之间到达，执行会延后到下一步；步长也决定输入刷新频率和碰撞包络的大小。
 
 \textbf{代码练习 ch04-3：}补完 \path{exercises/ch04/starter/force_step.hpp}。
 先做无阻尼恒力一步更新，输入已经限幅；平移和偏航都要正确。
 独立的 check\_force.cpp 覆盖非零初速度、不同质量与转动惯量，运行命令见习题 README。
 
 \textbf{拓展实验：}把 linear\_drag 改为 0.5 kg/s，从有速度的状态撤去力，
-画出速度随时间的衰减，与 $v_0e^{-c_vt/m}$ 比较。不要用瞬时速度模式代替这个试验。
-\clearpage
+画出惯性模型速度随时间的衰减，与 $v_0e^{-c_vt/m}$ 比较。
 \section{连续理想参考：给后续传感器一条平滑轨迹}
 还有一种常用实验：先给定一条连续轨迹，让机器人完美执行，单独研究传感器和定位。
-这里从解析圆轨迹开始，不引入尚未需要的轨迹消息和优化器：
+下面用一个可以直接求导的圆轨迹做这个实验：
 \begin{lstlisting}[language=bash,numbers=none]
 ros2 launch motion2d_bringup ch04.launch.py model:=reference
 \end{lstlisting}
-reference 自动运行，不订阅外部位置、速度或力命令。它是理想参考执行，不验证力限幅可行性；
-几何碰撞仍然要检查。轨迹半径 \code{reference_radius} 默认 1 m，
+reference 自动按解析式设置位置、速度和加速度，并检查圆盘扫掠空间；
+后面的轨迹规划章节再研究这条运动需要多大的执行力。轨迹半径 \code{reference_radius} 默认 1 m，
 与机器人碰撞半径 radius 是两个参数；角频率 \code{reference_omega} 默认 0.4 rad/s。
 
-令初始位姿为 $(p_0,\psi_0)$，$R_0=R(\psi_0)$、$\theta=\Omega t$，选择
+令初始位姿为 $(p_0,\psi_0)$，$R_0=R(\psi_0)$、$\theta=\Omega t$。
+先在初始机体系画一个圆心位于 $(0,r_c)$ 的圆：半径向量从 $(0,-r_c)$ 开始逆时针转动，
+其分量为 $(r_c\sin\theta,-r_c\cos\theta)$。加上圆心，再旋转、平移到地图中，得到位置。
+随后用 $d\theta/dt=\Omega$ 逐项求导：
 \begin{align}
 p(t)&=p_0+R_0
  \begin{bmatrix}r_c\sin\theta\\r_c(1-\cos\theta)\end{bmatrix},\\
@@ -346,60 +414,69 @@ a(t)&=R_0r_c\Omega^2
 \omega(t)&=\Omega.
 \end{align}
 因此速度模长是 $r_c|\Omega|$，加速度模长是 $r_c\Omega^2$。
-三个平移量来自同一个解析参考，不需要通过差分位置猜测加速度：
+每求一次时间导数，就因链式法则多乘一个 $\Omega$。方向向量的长度均为1，因而可直接得到上述模长。
+代码把这三项和偏航一起返回：
 
 \par\noindent\begin{minipage}{\linewidth}
 \lstinputlisting[language=C++,linerange={reference_begin-reference_end},
   includerangemarker=false]{../ros2_ws/src/motion2d/src/sim/reference_model.cpp}
 \end{minipage}\par
 
-\clearpage
 \section{运动中的初始条件与导数核对}
 这个圆参考在 t=0 就有非零速度。默认起点仍为 $(-8,-8)$，
 初速度是 0.4 m/s，加速度模长为 0.16 m/s$^2$。
-reset 恢复的是这个运动中的初始条件，开始新试验；它没有模拟“从静止瞬间加速到 0.4 m/s”。
-后续 IMU 积分实验也要明确初始速度、偏航等先验，不能把这些已知条件隐藏起来。
+reset 将时刻、位置、速度和加速度一起恢复到 t=0 的值。
+因此 IMU 积分实验应以0.4 m/s作为初速度，才能与这条参考对应。
 
 碰撞余量取 $r_c\Omega^2h^2/8$。默认场景可以走完一圈；换大轨迹半径或换 seed 后，
-若参考穿过障碍，仍会冻结试验。理想执行并不授予穿越障碍的能力。
+若参考穿过障碍，仿真会冻结，便于重新选择圆的大小或位置。
 
 \begin{figure}[ht]
 \centering
 \includegraphics[width=.83\linewidth]{figures/ch04_reference_rviz.png}
-\caption{默认场景中完整圆参考的局部放大。圆盘与朝向随参考运动，轨迹不由规划器计算。}
+\caption{圆参考的局部放大。轨迹圆心位于起点左侧，初始速度沿车头方向。}
 \end{figure}
 
-\textbf{如何验证导数？}\quad 除了检查四分之一圈的手算值，测试还使用中心差分
+\subsection*{用中心差分核对解析导数}
+对任意足够光滑的分量 f，在 t 的两侧展开：
+\begin{align}
+f(t+\epsilon)&=f(t)+\epsilon f'(t)+\tfrac12\epsilon^2f''(t)
+ +\tfrac16\epsilon^3f^{(3)}(t)+O(\epsilon^4),\\
+f(t-\epsilon)&=f(t)-\epsilon f'(t)+\tfrac12\epsilon^2f''(t)
+ -\tfrac16\epsilon^3f^{(3)}(t)+O(\epsilon^4).
+\end{align}
+相减后偶数次项相消，再除以 $2\epsilon$，得到 $f'(t)+O(\epsilon^2)$。
+符号 $O(\epsilon^2)$ 表示误差的主导大小与 $\epsilon^2$ 成比例。因此可以逐分量检查
 \begin{equation}
 v(t)\approx\frac{p(t+\epsilon)-p(t-\epsilon)}{2\epsilon},\qquad
-a(t)\approx\frac{v(t+\epsilon)-v(t-\epsilon)}{2\epsilon}.
+ a(t)\approx\frac{v(t+\epsilon)-v(t-\epsilon)}{2\epsilon}.
 \end{equation}
-用它核对解析函数，而不拿差分结果驱动 IMU。测试还比较整圈前后的 p/v/a。
-实际离散 tick 未必恰好落在周期终点，应与相同采样时刻的解析值比较。
+先取 $\epsilon=10^{-3}$ s，再减半，观察误差是否约缩为四分之一。
+过小时，两个很接近的浮点数相减会放大舍入误差；应寻找误差随步长稳定下降的区间。
+传感器仍使用解析导数，中心差分用来核对推导和实现。
 
 \textbf{代码练习 ch04-4：}补完 \path{exercises/ch04/starter/reference_acceleration.hpp}，
 对速度求时间导数，注意链式法则中的第二个 $\Omega$。再把角频率翻倍，
-验证速度翻倍、加速度变为四倍。命令与验收入口：
+验证速度翻倍、加速度变为四倍。用以下命令核对运动消息：
 \begin{lstlisting}[language=bash,numbers=none]
 /usr/bin/python3 ../scripts/check_ch04.py --model reference
 \end{lstlisting}
 
-\clearpage
-\section{接口、练习与验收}
+\section{把运动状态接到后续章节}
 本章默认 dt=0.005 s。位姿输入接受 odom/map；map 可用是因为本章二者重合。
 姿态必须是平面单位四元数，不能把四个分量全填零。时间戳为零表示下一 tick；
 非零时间戳只接受当前模拟时刻附近的命令，过旧或过远的未来命令被拒绝。
 
 \code{/sim/pose}、\code{/sim/velocity}、\code{/sim/acceleration} 都是真值调试输出，
 平移分量在 odom 系。第 07 章才引入规范的里程计消息与选源，
-后续 SLAM 不得读取这些调试话题。本章没有激光或 IMU。
+激光与 IMU 将在第05、06章根据这些运动量生成；SLAM 接收它们的传感器消息。
 
 \begin{enumerate}
 \item \textbf{理解：}给一个起终点都自由但中间碰撞的例子。为什么瞬时位置赋值不适合 IMU？
 \item \textbf{代码 ch04-1：}完成 \path{exercises/ch04/starter/sweep_circle.hpp}。
 复用点线段距离，判定圆盘与圆障碍的整段扫掠；相切必须判为碰撞。
 \item \textbf{实验：}暂停后发目标并单步；改变半径重复同一条贴近障碍的移动。
-记录 seed、半径、起终点和结果。不要把显示尺寸当作碰撞半径。
+记录 seed、半径、起终点和结果，核对显示圆盘与碰撞半径是否一致。
 \end{enumerate}
 
 从仓库根目录编译练习：
@@ -424,179 +501,350 @@ g++ -std=c++17 -I/usr/include/eigen3 \
 再检查 frame 和四元数。只运行一个课程 launch，避免多个时钟或 TF 发布者。
 \end{notebox}
 
-\clearpage
-\section{补充：我们的模型是否微分平坦？}\label{sec:flatness}
-\textbf{微分平坦}的意思是：可以选择一组输出 $y$，仅用 $y$ 和它的有限阶时间导数，
-代数地恢复全部状态和输入，不需要再积分一个隐藏状态。它不是“轨迹很平”，也不保证
-任意曲线都满足执行器限制。我们在局部连续的 yaw 坐标下讨论。
+\section{用轨迹恢复状态与输入：微分平坦}\label{sec:flatness}
+到目前为止，我们一直由输入积分出运动。规划时可以反过来：先画一条带时间的曲线，
+再问“要沿它运动，需要怎样的速度和力？”如果选定的一组输出及其有限阶导数，
+就能通过代数运算恢复全部状态和输入，这组输出叫作\textbf{平坦输出}，系统称为\textbf{微分平坦系统}。
+这里的关键是恢复过程只需当前时刻的导数；角度在一个连续支路中表示。
 
-本章受力模型有三个独立输入，因此选 $y=(p_x,p_y,\psi)$：
+对全向惯性模型，选择 $y=(p_x,p_y,\psi)$。位置的一阶导数给出速度，
+二阶导数给出加速度；把运动方程移项，就恢复了输入：
 \begin{align}
-v&=\dot p, & \omega&=\dot\psi,\\
-F&=m\ddot p+c_v\dot p, & \tau&=I_z\ddot\psi+c_\omega\dot\psi,\\
-\dot F&=m p^{(3)}+c_v\ddot p.&&
+v&=\dot p,&\omega&=\dot\psi,\\
+F&=m\ddot p+c_v\dot p,&\tau&=I_z\ddot\psi+c_\omega\dot\psi.
 \end{align}
-当 $m,I_z>0$ 时，全部状态与输入都已恢复，模型是微分平坦的。$p$ 单独不够：
-圆盘可以沿固定方向平移，同时独立改变 yaw。后面的二维位置优化保持 yaw 常数，
-所以只优化平移力；若要优化偏航力矩，必须再加入 yaw 轨迹及其导数。
+所以任意足够光滑的 $p(t),\psi(t)$ 都对应一组满足运动方程的状态和输入。
+执行器上限接下来决定哪些曲线可以实现：例如1 kg机器人无阻尼时，
+$\ddot p_x=3$ m/s$^2$需要3 N，而2 N执行器允许的同向加速度只有2 m/s$^2$。
 
-\begin{center}
-\begin{tabularx}{\linewidth}{@{}lX@{}}
-\toprule 模型 & 结论与适用范围\\\midrule
-连续全向速度输入 & 位姿是平坦输出；输入由一阶导数恢复。\\
-受力惯性模型 & 位置和 yaw 是平坦输出；输入需要二阶导数。\\
-理想到点 & 离散位置跳变没有上述连续动力学意义。\\
-解析圆、轨迹直接执行 & 是指定运动的执行方式，不是新的可控动力系统。\\
-差速、阿克曼车 & 位置可作局部平坦输出；零速和行驶方向须另行处理。\\
-\bottomrule
-\end{tabularx}
-\end{center}
+位置和 yaw 要一起给出。圆盘可以沿直线平移并同时独立转向，单凭 p(t) 无法确定 yaw。
+第15、16章的位置优化先保持 yaw 常数，此时偏航力矩为零；需要转向时，
+可给 yaw 也增加一条曲线，并用上式约束力矩。
+对全向速度模型，同样选择位姿作为输出，其一阶导数就给出速度输入。
+理想到点和圆参考则分别是位置设置方式与预先指定的运动，用于实验中的不同环节。
 
-\textbf{与无人机的联系。}忽略气动阻力的四旋翼有
-$m\ddot p=f b_3-mg e_3$，所以先恢复 $f=\|m(\ddot p+g e_3)\|$ 与机体推力方向
-$b_3$，再结合 yaw 恢复姿态；jerk 还决定机体角速度。GCOPTER 将这样的
-\emph{正向映射}和代价的\emph{反向梯度}分开实现。我们的水平圆盘由地面承担重力，
-$\|F\|$ 是水平合力，不是四旋翼总推力；不能直接加上 $mg$ 后声称已经模拟无人机。
-含旋翼阻力的三维映射可继续阅读 Faessler 等人的原论文，来源见参考资料文档。
+\subsection*{和无人机轨迹规划的联系}
+四旋翼的推力方向随姿态改变。忽略空气阻力时，设向上的单位向量为 $e_3$，
+机体推力轴单位向量为 $b_3$，推力大小为 f，重力加速度大小为 g。
+牛顿定律为 $m\ddot p=f b_3-mg e_3$。移项后令 $w=m(\ddot p+g e_3)$，可得
+\begin{equation}
+f b_3=w,\qquad f=\|w\|,\qquad b_3=w/\|w\|\quad(\|w\|>0).
+\end{equation}
+因为 $b_3$ 长度为1，向量 w 的长度给出推力大小，方向给出机体倾斜方向。
+例如悬停时 $\ddot p=0$，得到 $f=mg,b_3=e_3$；水平加速时 w 向前倾斜，推力也随之倾斜。
+再指定朝向，就能恢复完整姿态。地面圆盘由地面支撑重力，所以上文的 F 表示水平合力。
 
-\clearpage
-\section{由物理量把梯度传回轨迹}
-令横线表示标量代价 $J$ 对某量的偏导，例如 $\bar F=\partial J/\partial F$。
-正向先从导数恢复物理量：
+这种“轨迹导数→物理量”的计算方式也用于 GCOPTER 的轨迹优化。
+带旋翼阻力的三维模型可继续阅读 Faessler 等人的论文\footnote{Faessler, Franchi, Scaramuzza，
+\href{https://arxiv.org/abs/1712.02402}{Differential Flatness of Quadrotor Dynamics Subject to Rotor Drag}，2018。}；
+课程下面用较短的二维方程学习同一计算思路。
+
+\section{把物理代价的梯度传回轨迹}
+规划器可以惩罚过大的力。它还需要知道：稍微改变速度、加速度时，这个惩罚会怎样变化？
+这就是多变量链式法则的问题。令 $a=\ddot p,j=p^{(3)}$，j 称为 jerk，单位 m/s$^3$。
+质量、阻尼为常数时，对力再求导得到
+\begin{equation}
+F=ma+c_vv,\qquad \dot F=mj+c_va.
+\end{equation}
+\code{omniForward} 同时返回力、力变化率和偏航力矩：
+\par\noindent\begin{minipage}{\linewidth}
 \lstinputlisting[language=C++,linerange={omni_forward_begin-omni_forward_end},
   includerangemarker=false]{../ros2_ws/src/motion2d/src/dynamics/omni_flatness.cpp}
-如果上层已算出 $\bar F,\overline{\dot F},\bar\tau$，链式法则给出
+\end{minipage}\par
+
+设标量代价为 J。把它对向量 F 的各个分量偏导排成列，记为
+$\bar F=(\partial J/\partial F_x,\partial J/\partial F_y)^\top$，称为梯度。
+当 F 改变一个很小的 $dF$ 时，一阶变化为 $dJ=\bar F^\top dF$。
+如果代价还依赖 $\dot F$、$\tau$，则把三个贡献相加：
+\begin{equation}
+dJ=\bar F^\top dF+\overline{\dot F}^{\top}d\dot F+\bar\tau\,d\tau.
+\end{equation}
+注意 d 表示变量的小变化，点表示对时间求导。代入
+$dF=m\,da+c_v\,dv$、$d\dot F=m\,dj+c_v\,da$ 及
+$d\tau=I_z\,d\ddot\psi+c_\omega\,d\dot\psi$，按输入的小变化重新分组：
 \begin{align}
-\bar v&=c_v\bar F,&
-\bar a&=m\bar F+c_v\overline{\dot F},&
-\bar j&=m\overline{\dot F},\\
-\overline{\dot\psi}&=c_\omega\bar\tau,&
-\overline{\ddot\psi}&=I_z\bar\tau.&&
+dJ={}&(c_v\bar F)^\top dv+(m\bar F+c_v\overline{\dot F})^\top da
+ +(m\overline{\dot F})^\top dj\nonumber\\
+ &+c_\omega\bar\tau\,d\dot\psi+I_z\bar\tau\,d\ddot\psi.
 \end{align}
+每项前面的系数就是所求梯度：
+\begin{align}
+\bar v&=c_v\bar F,&\bar a&=m\bar F+c_v\overline{\dot F},&\bar j&=m\overline{\dot F},\\
+\overline{\dot\psi}&=c_\omega\bar\tau,&\overline{\ddot\psi}&=I_z\bar\tau.&&
+\end{align}
+
+\begin{figure}[ht]
+\centering
+\begin{tikzpicture}[>=Stealth,node distance=1.8cm]
+\node[draw=tealblue,fill=pale,rounded corners,minimum width=2.3cm,minimum height=.9cm] (x) {$v,a,j$};
+\node[right=of x,draw=tealblue,fill=pale,rounded corners,minimum width=2.3cm,minimum height=.9cm] (f) {$F,\dot F$};
+\node[right=of f,draw=tealblue,fill=pale,rounded corners,minimum width=1.5cm,minimum height=.9cm] (j) {$J$};
+\draw[->,navy] (x.north east) to[bend left=22] node[above]{正向} (f.north west);
+\draw[->,navy] (f.north east) to[bend left=22] node[above]{代价} (j.north west);
+\draw[->,tealblue] (j.south west) to[bend left=22] node[below]{$\bar F,\overline{\dot F}$} (f.south east);
+\draw[->,tealblue] (f.south west) to[bend left=22] node[below]{$\bar v,\bar a,\bar j$} (x.south east);
+\end{tikzpicture}
+\caption{先计算物理量，再沿依赖关系反向传递代价变化。每条分支的梯度贡献相加。}
+\end{figure}
+
+例如只取 $J=\frac12\|F\|^2=\frac12(F_x^2+F_y^2)$，逐分量求导得到 $\bar F=F$，
+于是 $\bar a=mF$。单轴 $m=2,c_v=0.1,v=0.3,a=0.4$ 时，
+$F=0.83$ N，$\partial J/\partial a=1.66$；加速度增加0.001，代价约增加0.00166。
+代码直接算出这些梯度，不必先构造一个含全部偏导的大矩阵。这种运算常称为向量--雅可比乘积：
+\par\noindent\begin{minipage}{\linewidth}
 \lstinputlisting[language=C++,linerange={omni_backward_begin-omni_backward_end},
   includerangemarker=false]{../ros2_ws/src/motion2d/src/dynamics/omni_flatness.cpp}
-这里返回的是解析的向量--雅可比乘积，未构造大矩阵。正向函数\textbf{不截断力}：
-若先饱和，优化器会看不到超限的真实大小。仿真器仍在执行输入处饱和。
-停在原地时全向圆盘的这个映射依然有效。
+\end{minipage}\par
+正向映射返回曲线实际要求的力，包括超限部分；这样惩罚函数才能分辨“超出多少”。
+仿真执行时再按执行器上限限幅。GCOPTER 的
+\href{https://github.com/ZJU-FAST-Lab/GCOPTER/blob/e0444f6d47b84f972ced91746b05feb36ce1fd4f/gcopter/include/gcopter/flatness.hpp}{forward/backward 接口}
+也采用先恢复物理量、再传回梯度的分工。
 
-\textbf{运行与练习 ch04-5。}重新构建后运行
-\code{ros2 run motion2d flatness_demo}；默认结果为 $F=(1.04,-0.37)$ N。
-推导 $J=\frac12\|F\|^2$ 对加速度的梯度，再完成练习：
+\textbf{练习 ch04-5。}运行 \code{ros2 run motion2d flatness_demo}，再完成
+\path{exercises/ch04/starter/flat_force.hpp}。把质量翻倍并保持同一条轨迹，
+比较力与加速度梯度；用前面推导的中心差分检查解析梯度。编译命令：
 \begin{lstlisting}[language=bash,numbers=none]
-# From repository root; change starter to solutions for the reference.
 g++ -std=c++17 -I/usr/include/eigen3 -Iexercises/ch04/starter \
   exercises/ch04/check_flatness.cpp -o /tmp/ch04_flatness
 /tmp/ch04_flatness
 \end{lstlisting}
-\textbf{实验：}保持同一 $p(t)$，将质量翻倍。无阻尼时力翻倍；有阻尼时总力通常
-不会恰好翻倍。用中央差分检查反向梯度，并解释为什么质量必须出现在规划约束里。
-第 15--16 章将这些偏导继续传到多项式系数、路点和时长。
+第15、16章会把这些梯度继续传到曲线系数、路点和时长。
 
-\clearpage
-\section{补充：阿克曼车的状态与控制量}\label{sec:ackermann}
-将前后轮各等效成一个轮子，得到无侧滑自行车模型。选后轴中点为参考点 $p$，
-并将课程的\textbf{保守圆盘中心、激光与 IMU 都放在这里}；不再把后轴点误叫作车身几何中心。
-圆盘半径仍可配置，若要包住实际车身，应把前悬和宽度也算进去。
-本模型不是轮胎侧偏或完整车身动力学。
+\section{有车轮方向约束的阿克曼模型}\label{sec:ackermann}
+小车的前后轮都沿轮子指向滚动。在低速、无侧滑条件下，把前后两组轮子各等效为一个轮子，
+得到自行车模型。取后轴中点为位置 p，车身朝向为 $\psi$，有符号纵向速度为 s，
+等效前轮转角为 $\delta$。轴距 L 是前后轴的距离。
+
+\subsection*{由转弯圆心求偏航速度}
+先在车体系考虑左转。后轮速度沿车身 x 轴，瞬时转弯圆心 O 位于后轮正左方，距离为 R。
+前轮的速度方向比车身转过 $\delta$，所以从前轮指向 O 的线也转过相同角度。
+图中的直角三角形给出 $\tan\delta=L/R$，即 $R=L/\tan\delta$。
+后轮走过弧长 $ds=R\,d\psi$，除以时间增量可得
 \begin{equation}
-x=(p_x,p_y,\psi,s,\delta),\qquad u=(F,r_\delta).
+\dot\psi=s/R=\frac{s\tan\delta}{L}.
 \end{equation}
-$s$ 是有符号纵向速度，$\delta$ 是等效前轮转角；$F$ 为纵向力（N），
-$r_\delta$ 为转向角速度（rad/s）。轴距 $L$、质量 $m$、阻尼 $c$ 为固定参数：
-\begin{align}
-\dot p&=s(\cos\psi,\sin\psi)^T,&
-\dot\psi&=\frac{s\tan\delta}{L},\\
-\dot s&=\frac{F-cs}{m},&\dot\delta&=r_\delta.
-\end{align}
-这种输入让质量真正参与加减速，也可以约束转向速率。车不能像全向圆盘一样横移，
-停车时转动前轮也不会让车身原地旋转。
+右转时 $\delta<0$，同一个式子自动给出负的偏航角速度。
 
-\begin{center}
-\begin{tikzpicture}[x=1.35cm,y=1.35cm]
-\draw[tealblue,dashed] (0,0) circle (1.6);
-\draw[navy,thick,rounded corners] (-.45,-.38) rectangle (1.4,.38);
-\draw[navy,very thick] (-.25,0)--(.25,0);
-\draw[navy,dashed] (1.1,-.38)--(1.1,.38);
-\begin{scope}[shift={(1.1,0)},rotate=25]
-\draw[tealblue,line width=2pt] (-.23,0)--(.23,0);
-\end{scope}
-\fill[tealblue] (0,0) circle (2pt);
-\draw[-{Stealth},navy] (0,0)--(.72,0);
-\draw[<->,navy] (0,.67)--(1.1,.67) node[midway,above] {$L$};
-\node[below] at (0,-1.72) {后轴点 $p$：传感器与圆盘中心};
-\node[above] at (0,1.65) {虚线圆为碰撞包络，不是车轮轨迹};
+\begin{figure}[ht]
+\centering
+\begin{tikzpicture}[x=.85cm,y=.85cm,>=Stealth]
+\draw[navy] (0,0)--(3,0)--(0,4)--cycle;
+\draw[muted] (0,.22)--(.22,.22)--(.22,0);
+\draw[navy,line width=2pt] (-.4,0)--(.4,0);
+\draw[tealblue,line width=2pt] (2.6,-.3)--(3.4,.3);
+\draw[->,tealblue] (3.4,.3)--(4.2,.9) node[right]{前轮速度};
+\draw[dashed,muted] (3.45,0)--(4.3,0);
+\draw[->,muted] (3.95,0) arc[start angle=0,end angle=36.87,radius=.95];
+\node[right] at (4.02,.3) {$\delta$};
+\draw[muted] (0,2.9) arc[start angle=-90,end angle=-53.13,radius=1.1];
+\node at (.38,2.65) {$\delta$};
+\node[left] at (0,2) {$R$};\node[below] at (1.5,0) {$L$};
+\fill[navy] (0,4) circle(2pt);\node[left] at (0,4) {$O$};
+\node[below left] at (0,0) {后轴 p};\node[below] at (3,-.4) {前轴};
+\node[anchor=west,align=left] at (4.8,2.5) {两轮速度均垂直于\\各自指向圆心的线};
 \end{tikzpicture}
-\end{center}
+\caption{无侧滑转弯的几何关系。转角决定曲率 $1/R$，速度决定沿这个圆行驶的快慢。}
+\end{figure}
 
-\textbf{积分与传感器。}纵向速度使用带阻尼解析解，转角在保持输入期间线性变化，
-位姿用 RK4 积分。默认短 tick，并做步长减半对照；未宣称有限步长积分精确。
-\code{ackermannKinematics} 直接给出
-$a=\dot s\,e+s\dot\psi\,e_\perp$，供 IMU 使用，不能只保留纵向加速度而漏掉转弯向心项。
-输入先限幅；转向速率还需保证整个 tick 内角度不越界。
-
-\clearpage
-\section{阿克曼的平坦输出与正向恢复}
-选择 $y=(p_x,p_y)$，先讨论\textbf{前进且速度非零}的局部支路。记
-$v=\dot p,a=\ddot p,j=p^{(3)}$，二维叉积 $[v,a]=v_xa_y-v_ya_x$，并令
-$n=\|v\|,b=v^Ta,h=[v,a]$。则
+给纵向力 F 和转向速率 $r_\delta$ 作为控制输入，采用与圆盘相同的线性纵向阻尼 c：
 \begin{align}
-s&=n,&\psi&=\operatorname{atan2}(v_y,v_x),\\
-\dot\psi&=h/n^2,&\kappa&=h/n^3,\\
-\delta&=\arctan(L\kappa),&F&=m b/n+cn,\\
-\dot\kappa&=[v,j]/n^3-3hb/n^5,&
+x&=(p_x,p_y,\psi,s,\delta),&u&=(F,r_\delta),\\
+\dot p&=s(\cos\psi,\sin\psi)^\top,&\dot\psi&=s\tan\delta/L,\\
+\dot s&=(F-cs)/m,&\dot\delta&=r_\delta.
+\end{align}
+F 的单位为 N，$r_\delta$ 为 rad/s。纵向受力改变快慢，转角改变前进方向；
+当 s=0 时，前轮可以转动，车身朝向保持不变。
+课程把激光、IMU 和圆盘碰撞包络的中心都放在后轴点 p。
+若包络需要覆盖实际车身，半径应覆盖从后轴到前悬及车体侧边的最远距离。
+
+\section{按一个时间步推进小车}
+步内 F 和 $r_\delta$ 保持常数，纵向速度使用前面推导的带阻尼解析解，
+转角直接积分为 $\delta(t)=\delta_k+t r_\delta$。
+为使整个步内转角满足 $-\delta_{\max}\leq\delta(t)\leq\delta_{\max}$，
+线性变化只需检查端点，因此还应满足
+\begin{equation}
+\frac{-\delta_{\max}-\delta_k}{h}\leq r_\delta\leq
+\frac{\delta_{\max}-\delta_k}{h}.
+\end{equation}
+\code{limitAckermannInput} 把这个区间与转向速率本身的上下限取交集，再限制输入。
+
+\subsection*{四次斜率估计}
+对位姿 $q=(p_x,p_y,\psi)$，右端函数记为
+\begin{equation}
+f(t,q)=\big(s(t)\cos\psi,\ s(t)\sin\psi,\ s(t)\tan\delta(t)/L\big)^\top.
+\end{equation}
+若只用步初斜率 $f(0,q_k)$ 乘 h，就是一条切线近似；转弯时，步中斜率已经改变。
+\code{stepAckermann} 使用经典四阶 Runge--Kutta（RK4），先用已有斜率预测中间状态，再重新计算斜率：
+\begin{align}
+k_1&=f(0,q_k),&k_2&=f(h/2,q_k+hk_1/2),\\
+k_3&=f(h/2,q_k+hk_2/2),&k_4&=f(h,q_k+hk_3),\\
+q_{k+1}&=q_k+\frac h6(k_1+2k_2+2k_3+k_4).&&
+\end{align}
+$k_1$ 在起点取斜率；$k_2$ 用起点切线预测半步；$k_3$ 用新的半步斜率再估计一次；
+$k_4$ 用 $k_3$ 预测终点。最终取加权平均，而不是选择其中某一条切线。
+
+这些权重可以先从只依赖时间的积分理解。设起点、中点、终点的权重为 A、B、C，
+要求公式对 $1,t,t^2$ 的积分正确，在单位区间上有
+\begin{equation}
+A+B+C=1,\qquad B/2+C=1/2,\qquad B/4+C=1/3.
+\end{equation}
+解得 $A=C=1/6,B=2/3$，即 Simpson 权重。
+RK4 在依赖状态的问题中用两个中间状态估计中点斜率，各分配 $1/3$ 权重，
+得到上面的 $1,2,2,1$。这里的中间状态本身也是近似值，可用一个 h 步与两个 h/2 步比较数值误差。
+当 s、$\delta$ 均为常数时，$\dot\psi$ 为常数，四次阶段中使用的朝向都是正确时刻的朝向；
+位置更新便退化为对正弦、余弦速度作 Simpson 积分，可以直接和圆弧解析式核对。
+
+\subsection*{IMU 所需的加速度}
+记车头方向 $e=(\cos\psi,\sin\psi)^\top$，左侧方向 $e_\perp=(-\sin\psi,\cos\psi)^\top$。
+逐分量求导有 $\dot e=\dot\psi e_\perp$，所以对 $v=se$ 用乘积法则：
+\begin{equation}
+a=\dot s\,e+s\dot\psi\,e_\perp.
+\end{equation}
+第一项改变速率，第二项改变速度方向。匀速转弯仍有第二项，模长为 $s^2/R$。
+同样对 $\dot\psi=s\tan\delta/L$ 求导，并用
+$d(\tan\delta)/dt=(1+\tan^2\delta)r_\delta$：
+\begin{equation}
+\ddot\psi=\frac{\dot s\tan\delta+s(1+\tan^2\delta)r_\delta}{L}.
+\end{equation}
+\code{ackermannKinematics} 正是计算这几项，把后轴点的运动导数交给传感器模型。
+其扫掠余量也沿用 $a_{\max}h^2/8$：分别用步内最大速率、最大绝对转角，
+上界纵向项 $(|F|+c|s|)/m$ 和侧向项 $s^2|\tan\delta|/L$，再将两项相加。
+
+\section{从位置曲线恢复小车的运动}
+选择平坦输出 $y=(p_x,p_y)$，先取\textbf{速度非零、沿车头前进}的支路。
+令 $v=\dot p,a=\ddot p,j=p^{(3)}$，并保存四个便于复用的标量：
+\begin{equation}
+n=\|v\|,\qquad b=v^\top a,\qquad h=[v,a],\qquad h_p=[v,j].
+\end{equation}
+方括号表示第3章的二维叉积；这一节中的 h 是叉积值。先由速度长度和方向恢复
+$s=n,\psi=\operatorname{atan2}(v_y,v_x)$。
+atan2 同时看两个分量的符号，返回对应象限的方向角。
+
+\subsection*{速率、转向和纵向力}
+由 $n^2=v^\top v$ 求导，$2n\dot n=2v^\top a=2b$，得到 $\dot n=b/n$。
+另一方面，$v=ne,a=\dot n e+n\dot\psi e_\perp$。叉积中 $[e,e]=0$、$[e,e_\perp]=1$，所以
+\begin{equation}
+h=[v,a]=n^2\dot\psi,\qquad \dot\psi=h/n^2.
+\end{equation}
+曲率 $\kappa$ 是单位路程内改变的方向角，因此
+$\kappa=d\psi/d\ell=\dot\psi/n=h/n^3$，单位 m$^{-1}$。
+与自行车的 $\kappa=\tan\delta/L$ 对照后就得到转角；纵向方程则给出力：
+\begin{equation}
+\delta=\arctan(L\kappa),\qquad F=m\dot n+cn=mb/n+cn.
+\end{equation}
+纵向和侧向加速度分别为 $a_\parallel=\dot n=b/n$、$a_\perp=n\dot\psi=h/n$。
+
+\subsection*{转向速率需要三阶导数}
+为了恢复输入 $r_\delta=\dot\delta$，再对曲率求导。
+叉积的乘积法则给出 $\dot h=[a,a]+[v,j]=h_p$，因为 $[a,a]=a_xa_y-a_ya_x=0$。
+分子、分母都随时间变，因而
+\begin{align}
+\dot\kappa&=\frac{d}{dt}(hn^{-3})
+ =h_pn^{-3}-3hn^{-4}\dot n
+ =\frac{h_p}{n^3}-\frac{3hb}{n^5},\\
 r_\delta&=\frac{L\dot\kappa}{1+(L\kappa)^2}.
 \end{align}
-全部状态和两个输入都由位置及其有限阶导数恢复，因此带纵向惯性和转向状态的模型
-在这个支路上仍然微分平坦。曲率单位 $1/\mathrm m$；侧向加速度为 $a_\perp=h/n$。
+最后一步用 $d(\arctan z)/dz=1/(1+z^2)$。
+至此，全部状态和两个输入都由位置的一至三阶导数恢复，得到了这条支路的微分平坦映射。
+代码按照相同的依赖顺序计算：
+\par\noindent\begin{minipage}{\linewidth}
 \lstinputlisting[language=C++,linerange={ackermann_forward_begin-ackermann_forward_end},
  includerangemarker=false]{../ros2_ws/src/motion2d/src/dynamics/ackermann_flatness.cpp}
+\end{minipage}\par
 
-\textbf{手算圆轨迹。}半径 $R$、速度 $s$ 的匀速圆有 $\kappa=1/R$，
-$\delta=\arctan(L/R)$，$r_\delta=0$，$F=cs$。下面的可运行例子把恢复的输入送入实际积分器，
-与圆的解析位置比较：
-\begin{lstlisting}[language=bash,numbers=none]
-ros2 run motion2d ackermann_demo
-\end{lstlisting}
-默认 $L=0.3$ m、$R=1.2$ m、$s=0.6$ m/s、$c=0.15$ kg/s，故转角约 0.245 rad，
-力 0.09 N。改变质量不会改变\emph{匀速}圆上的纵向阻尼补偿力；加速段才体现质量差异。
+\textbf{手算匀速圆。}半径 R、速度 s 的圆有 $\kappa=1/R$，所以
+$\delta=\arctan(L/R),r_\delta=0,F=cs$。运行
+\code{ros2 run motion2d ackermann_demo}，默认 $L=0.3$ m、$R=1.2$ m、
+$s=0.6$ m/s、$c=0.15$ kg/s，应得到转角约0.245 rad、力0.09 N、
+侧向加速度 $s^2/R=0.3$ m/s$^2$。匀速时力只补偿阻尼；加速段的 $m\dot n$ 才体现质量。
 
-\clearpage
-\section{零速奇异性与反向梯度}
-上页公式在 $n=0$ 时不能使用。给分母加一个小数会掩盖奇异性，还可能在停车处恢复错误的
-朝向和转角。本课程的直接平坦映射明确拒绝近零切向量；被控模型本身则可以正常停车、起步。
-倒车时必须另选有符号速度支路，不能直接把前进的 atan2 公式照搬过去。
+\section{停车点如何保存方向}
+上面的恢复式用速度方向表示车头方向。停车时 $v=0$，方向信息消失：同一个静止位置可以对应任意车头方向，
+因此需要额外保留路径的几何信息。第16章将位置写成 $p(t)=q(u(t))$，其中几何曲线满足 $q'(u)\ne0$。
+链式法则给出
+\begin{equation}
+\dot p=q'(u)\dot u.
+\end{equation}
+当 $\dot u>0$，车头沿 $q'$；停车令 $\dot u=0$，但 $q'$ 的方向仍保存在路径中。
+进一步，$\ddot p=q''\dot u^2+q'\ddot u$，于是
+\begin{equation}
+\frac{[\dot p,\ddot p]}{\|\dot p\|^3}
+ =\frac{[q',q'']\dot u^3}{\|q'\|^3\dot u^3}
+ =\frac{[q',q'']}{\|q'\|^3}\quad(\dot u>0).
+\end{equation}
+右侧只依赖几何曲线，可以连续延伸到停车点，用来保存转角。
+仿真模型可以正常起停；直接平坦映射则要求 n 大于最小速度阈值。
+倒车时，位置的切向与车头方向相反，要另选 $s=-n$ 的支路并相应处理朝向。
+本课程的小车规划先采用前进路径与停稳后的下一段运动。
 
-第16章的起停规划保留一条正则几何曲线 $q(u)$，满足 $q'(u)\ne0$，再用
-$u=h(t/T)$ 安排进度；停车时 $\dot u=0$，但几何切向和曲率仍然保存着端点的朝向与转角。
-这是对\textbf{特定已知路径}使用连续极限，不是声称所有零速状态都消除了平坦奇异性。
+\section{逐个标量计算小车的反向梯度}
+阿克曼公式比全向公式长，但反向规则仍是上一节的链式法则。
+先为每个中间变量建立一个梯度累加器，初值为零；
+若 $z=f(x,y)$，就执行 $\bar x\mathrel{+}=\bar z\,\partial f/\partial x$、
+$\bar y\mathrel{+}=\bar z\,\partial f/\partial y$。
+一个变量被多个下游量使用时，各条路径的贡献都要相加。
 
-\textbf{反向如何写？}沿正向依赖倒序求偏导。例如令 $D=1+(L\kappa)^2$，
-转角和转向速率的偏导贡献为
+为缩短式子，记 $z=\dot\kappa$、$D=1+(L\kappa)^2$。
+对 $r_\delta=Lz/D$ 求导有
+$d r_\delta=(L/D)dz-(2L^3\kappa z/D^2)d\kappa$；
+对转角求导有 $d\delta=(L/D)d\kappa$。因此先累加
+\begin{equation}
+\bar z\mathrel{+}=\frac L D\bar r_\delta,\qquad
+\bar\kappa\mathrel{+}=\bar\kappa_{\rm out}+\frac L D\bar\delta
+ -\frac{2L^3\kappa z}{D^2}\bar r_\delta.
+\end{equation}
+$\bar\kappa_{\rm out}$ 表示代价直接作用在曲率上的偏导。其余关系按下表倒序传递。
+每一行都只用乘积、幂函数和商的求导规则；例如 $d(n^{-3})=-3n^{-4}dn$。
+
+\begin{center}\small
+\begin{tabularx}{\linewidth}{@{}lX@{}}
+\toprule 正向关系 & 对应的一阶变化（乘以该行输出梯度后累加）\\\midrule
+$F=ma_\parallel+cn$ & $dF=m\,da_\parallel+c\,dn$\\
+$a_\parallel=b/n$ & $da_\parallel=db/n-b\,dn/n^2$\\
+$\omega=h/n^2$ & $d\omega=dh/n^2-2h\,dn/n^3$\\
+$a_\perp=h/n$ & $da_\perp=dh/n-h\,dn/n^2$\\
+$z=h_p/n^3-3hb/n^5$ & $dz=dh_p/n^3-3b\,dh/n^5-3h\,db/n^5$
+\newline $\phantom{dz=}+(-3h_p/n^4+15hb/n^6)dn$\\
+$\kappa=h/n^3$ & $d\kappa=dh/n^3-3h\,dn/n^4$\\
+\bottomrule
+\end{tabularx}
+\end{center}
+例如力贡献先送到 $\bar a_\parallel$ 和 $\bar n$，再由 $a_\parallel=b/n$ 送到 $\bar b,\bar n$；
+转向速率贡献先到 $\bar z,\bar\kappa$，再到 $\bar h_p,\bar h,\bar b,\bar n$。
+速度输出 s=n 的贡献直接加入 $\bar n$。
+
+最后把四个标量的梯度送回 v、a、j。由坐标定义逐项求导：
 \begin{align}
-\overline{\dot\kappa}&\mathrel{+}=\frac{L}{D}\bar r_\delta,\\
-\bar\kappa&\mathrel{+}=\frac{L}{D}\bar\delta
- -\frac{2L^3\kappa\dot\kappa}{D^2}\bar r_\delta.
+dn&=(v/n)^\top dv,\\
+db&=a^\top dv+v^\top da,\\
+dh&=(a_y,-a_x)\,dv+(-v_y,v_x)\,da,\\
+dh_p&=(j_y,-j_x)\,dv+(-v_y,v_x)\,dj.
 \end{align}
-接着把偏导传回 $h,b,n,[v,j]$，最后传回 $v,a,j$。
-\code{ackermannBackward} 实现全部物理量的解析向量--雅可比乘积；单元测试对每个
-输入分量做中央差分，还把恢复的状态与输入送回运动方程核对 $v,a,\ddot\psi$。
-近零速度和 yaw 跨 $\pi$ 的分支跳变不属于这个局部差分测试域。
+例如 $h=v_xa_y-v_ya_x$，对 $v_x,v_y$ 求导就是 $a_y,-a_x$。
+朝向的变化可以由 $v=ne$ 得到：$dv=e\,dn+n e_\perp d\psi$，
+左乘 $e_\perp^\top$ 后第一项消失，故
+$d\psi=(-v_y,v_x)dv/n^2$。把各项组合起来：
+\begin{align}
+\bar v={}&\bar n\frac v n+\bar b a+\bar h(a_y,-a_x)^\top
+ +\bar h_p(j_y,-j_x)^\top+\frac{\bar\psi}{n^2}(-v_y,v_x)^\top,\\
+\bar a={}&\bar b v+\bar h(-v_y,v_x)^\top,\\
+\bar j={}&\bar h_p(-v_y,v_x)^\top.
+\end{align}
+\code{ackermannBackward} 的最后三个赋值正对应这三行。
+可以先只给 force 输出一个非零梯度，手算力这条分支，再逐一加入转角、转向速率等输出，
+每次用中心差分检查。这比同时调试所有分支更容易定位错误。
 
-\textbf{练习 ch04-6。}推导 $\dot\kappa$ 时，为什么 $[a,a]=0$，但分母求导项不能省？
-完成代码并运行：
+\textbf{练习 ch04-6。}补全 \path{exercises/ch04/starter/curvature_rate.hpp}，
+推导并实现曲率时间导数，再运行：
 \begin{lstlisting}[language=bash,numbers=none]
 g++ -std=c++17 -I/usr/include/eigen3 -Iexercises/ch04/starter \
   exercises/ch04/check_ackermann.cpp -o /tmp/ch04_ackermann
 /tmp/ch04_ackermann
 \end{lstlisting}
-将 starter 改成 solutions 可核对答案。不要仅测试匀速圆：它的曲率导数恰为零，
-即使写成常数零也可能蒙混过关。练习使用同时改变速率和曲率的非退化导数。
+匀速圆的曲率导数恰为零；还应检查速度和曲率同时变化的曲线。
+固定同一条几何路径、把行驶时间增加一倍，预测转角、侧向加速度和转向速率的变化。
+利用 $p(t)=q(t/T)$ 的链式法则可以逐项核对：方向和曲率保持原值，速度减半，侧向加速度缩为四分之一，转向速率减半。
 
-\textbf{实验：}比较 0.02 s 与两个 0.01 s 的保持输入积分；再固定路径、只增加时长。
-解释为什么力、侧向加速度和转向速率可以下降，而最大转角不会因此变小。
-后续专用规划器将检查曲率可行性；不能把全向轨迹直接交给小车追踪。
-
-\clearpage
 \section{把模型选择落实到执行器}
 运行完本章的独立模型例子后，第19章提供同一份配置的完整闭环：
 \begin{lstlisting}[language=bash,numbers=none]
@@ -628,13 +876,13 @@ ackermann & 纵向力/转向速率 & 正则路径/停车进度 + 局部反馈\\\
 \end{center}
 全向位置优化保持起步 yaw，阿克曼规划使用目标 yaw。
 \code{planning.backend} 只在全向模型中选择 minco 或 spline；小车始终使用专用规划器。
-两者都保留有意义的质量参数，切换并非只换机器人外形。
+两个执行器接口分别对应本章推导的运动方程，规划器使用同一份质量、阻尼与输入上限。
 
 \textbf{阿克曼传感器。}激光和 IMU 位于后轴参考点，转弯时 IMU 包含向心加速度。
 \code{/joint_states} 提供名为 \code{front_steering} 的理想转角编码器，单位 rad；
-这是一项显式的执行器测量，控制器不会从真值位姿推算转角。
+控制器从这个编码器读取当前转角，再计算转向速率。
 碰撞包络、传感器外参及半径的意义见本章前述约定，非对齐采样见第06章。
 
 \textbf{学习顺序。}先用真值定位理解模型和规划，再换成激光/IMU SLAM 观察估计误差。
-第19章会讲观测地图、未来起点、失败与停车；原第18章全向线性MPC仍是独立入口。
-阿克曼非线性MPC、倒车和运动中接续没有在这次小型扩展中实现。
+第19章会讲观测地图、未来起点和停车过程；第18章可单独学习全向线性 MPC。
+掌握停车后接续的前进规划后，可继续用自行车方程学习非线性 MPC、倒车支路和运动中的轨迹接续。
