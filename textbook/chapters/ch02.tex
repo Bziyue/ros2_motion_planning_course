@@ -1,0 +1,69 @@
+\chapter{二维坐标、时间与接口}\label{ch:frames}
+\begin{notebox}
+\textbf{目标}\quad 读懂点的坐标系，正确旋转、平移和求逆。\\
+\textbf{先修}\quad 第 1 章；二维向量和正弦、余弦。矩阵只需要理解本章的两行乘法。
+\end{notebox}
+
+\section{一个点可以有不同坐标}
+机器人位于地图坐标 $(1,2)$，朝向正北。雷达观测到正前方 2 m 的点。它在机体系是 $(2,0)$，在地图系是 $(1,4)$。坐标变了，物理上的点没有变。
+
+我们采用右手系：机体 x 轴向前、y 轴向左、z 轴向上，逆时针偏航为正，角度使用弧度。一个平面位姿记作 $T_{A\leftarrow B}=(t,\psi)$：它把 B 系的坐标换成 A 系坐标。
+
+\begin{equation}
+R(\psi)=\begin{bmatrix}\cos\psi&-\sin\psi\\ \sin\psi&\cos\psi\end{bmatrix},
+\qquad p_A=R(\psi)p_B+t.
+\label{eq:transform}
+\end{equation}
+先旋转向量，再加上原点位置。不能先加 t 再旋转，那样会把平移也绕 A 系原点转动。
+
+\begin{center}
+\begin{tikzpicture}[scale=1.0,>=Stealth]
+\draw[->,muted] (0,0)--(4.5,0) node[right] {$x_{\rm map}$};
+\draw[->,muted] (0,0)--(0,4.7) node[above] {$y_{\rm map}$};
+\draw[step=1,linecolor] (0,0) grid (4,4);
+\draw[tealblue,thick,->] (1,2)--(1,3.2) node[left] {$x_{\rm body}$};
+\draw[tealblue,thick,->] (1,2)--(.1,2) node[above] {$y_{\rm body}$};
+\fill[tealblue] (1,2) circle (2pt) node[right] {圆心 $(1,2)$};
+\fill[navy] (1,4) circle (2pt) node[right] {同一个点：map $(1,4)$，body $(2,0)$};
+\draw[dashed,tealblue] (1,2)--(1,4);
+\end{tikzpicture}
+\end{center}
+
+\section{从公式到一个小函数}
+\code{Pose2D} 只保存一个二维向量和一个角度。几何库不包含 ROS 头文件，可以单独用 C++17 编译、调试和测试。
+\lstinputlisting[language=C++,linerange={rotation_begin-rotation_end},
+  includerangemarker=false]{../ros2_ws/src/motion2d/src/geometry/se2.cpp}
+
+\section{逆变换与变换链}
+从式 \eqref{eq:transform} 两侧减去 t，再左乘 $R^\top$：
+\begin{equation}
+p_B=R^\top(p_A-t)=R^\top p_A-R^\top t.
+\end{equation}
+因此逆变换的平移是 $-R^\top t$。旋转矩阵的逆为转置，这是二维旋转保持长度和夹角的结果。
+
+若雷达相对机体有固定外参 $T_{B\leftarrow L}$，机体相对地图为 $T_{M\leftarrow B}$，则
+\begin{equation}
+T_{M\leftarrow L}=T_{M\leftarrow B}T_{B\leftarrow L}.
+\end{equation}
+从右向左应用：先把雷达点放到机体系，再放到地图系。课程默认传感器位于圆心，外参为单位变换；保留显式外参能让后续实验改变安装位置。
+
+\section{运行与理解数值误差}
+按第 1 章的方法重新构建、加载环境，在工作空间运行：
+\begin{lstlisting}[language=bash,numbers=none]
+ros2 run motion2d se2_demo
+colcon test --packages-select motion2d \
+  --event-handlers console_direct+
+colcon test-result --verbose
+\end{lstlisting}
+示例输出机体点 $(2,0)$、地图点 $(1,4)$，再恢复到 $(2,0)$。
+浮点运算中的 $\cos(\pi/2)$ 可能是接近零的小数，所以比较使用绝对误差容限 $10^{-12}$，不是要求每个计算结果逐位相同。
+
+角度是另一个边界问题。$179^\circ$ 到 $-179^\circ$ 的最短旋转只有 $2^\circ$。先将差值归一到 $[-\pi,\pi)$，再把它作为误差。函数 \code{wrapAngle} 使用弧度；输入 90 表示 90 rad，不是 90 度。
+
+\section{练习：自己写一次逆变换}
+\begin{enumerate}
+\item \textbf{推导：}为何逆变换中不能只把 t 取负？用 $\psi=90^\circ,t=(1,2)$ 给一个反例。
+\item \textbf{代码：}补完 \code{exercises/ch02/starter/inverse_point.hpp} 的标记函数。它复用正式库的 \code{Pose2D}，检查包括两个旋转方向。
+\item \textbf{实验：}把示例朝向换成 $-90^\circ$，预测地图点，再运行核对。还可以将激光外参设为机体前方 0.5 m，手算其地图位置。
+\end{enumerate}
+独立编译命令、分级提示和参考答案位于同章习题 README。数学库的自动测试另外覆盖手算变换、传感器偏移、200 次固定种子的往返和角度边界。
