@@ -1,85 +1,237 @@
 \chapter{数学回查与数值检查}
 \begin{notebox}
-\textbf{用途}\quad 忘记符号时回查，不必先读完本附录再运行课程。\\
-\textbf{小实验}\quad 用中央差分检查一个二维点变换的雅可比。
+\textbf{用途}\quad 从一个小例子回查符号、推导和代码含义；可随正文按需阅读。\\
+\textbf{小实验}\quad 写出二维点变换的雅可比，用中央差分检查每一列。
 \end{notebox}
-\section{坐标变换先写清方向}
-位姿 $T_{AB}$ 表示 B 在 A 中的位置和朝向，点变换为
-\begin{equation}
- p_A=R(\psi)p_B+t,\qquad
+\section{向量与矩阵：把多条标量关系放在一起}
+二维位置 $p=(x,y)^T$ 是一个列向量，$T$ 表示转置，即把行列互换。
+矩阵乘法可以按行理解：每一行与输入向量作点积，得到一个输出分量。例如
+\[
+ A=\begin{bmatrix}2&1\\0&3\end{bmatrix},\quad
+ p=\begin{bmatrix}1\\2\end{bmatrix},\quad
+ Ap=\begin{bmatrix}2\cdot1+1\cdot2\\0\cdot1+3\cdot2\end{bmatrix}
+ =\begin{bmatrix}4\\6\end{bmatrix}.
+\]
+也可按列理解：$Ap=p_1A_{:,1}+p_2A_{:,2}$，即按输入分量组合矩阵的列。
+第 02 章旋转矩阵的两列正是旋转后的两个单位轴。
+$m\times n$ 矩阵把 $n$ 个输入分量变成 $m$ 个输出分量；相乘前先检查内侧维度相同。
+
+长度与点积分别为 $\|p\|=\sqrt{x^2+y^2}$、$p^Tq=xq_x+yq_y$。
+若 $n$ 为单位方向，$n^Tp$ 就是 $p$ 在该方向的有符号投影。
+第 08 章点到直线残差 $n^T(p-q)$、第 13 章半空间 $n^Tp\le b$ 都使用这一含义。
+
+\section{坐标变换与导数要使用同一种扰动}
+位姿 $T_{AB}=(R,t)$ 把 B 系的坐标写成 A 系坐标：
+\[
+ p_A=Rp_B+t,\qquad
  R(\psi)=\begin{bmatrix}\cos\psi&-\sin\psi\\\sin\psi&\cos\psi\end{bmatrix}.
-\end{equation}
-平移单位为 m，yaw 单位为 rad、逆时针为正。
-两个变换合成时，顺序与下标一致：$T_{AC}=T_{AB}T_{BC}$。
-逆变换的平移是 $-R^Tt$，不是简单的 $-t$；
-速度或加速度只旋转，不加平移。源码对应 geometry/se2 中的 transformPoint、compose、inverse。
+\]
+由两列单位轴正交，$R^TR=I$。把 $t$ 移到左边，再左乘 $R^T$，得到逆变换
+$p_B=R^T(p_A-t)$；因此逆位姿为 $(R^T,-R^Tt)$。
+两次变换则直接代入：
+\[
+ p_A=R_{AB}(R_{BC}p_C+t_{BC})+t_{AB}
+      =(R_{AB}R_{BC})p_C+R_{AB}t_{BC}+t_{AB}.
+\]
+这给出 \code{compose} 的旋转与平移两部分。
+对\textbf{固定的}坐标变换求时间导数，平移常量消失，故 $v_A=Rv_B$、$a_A=Ra_B$。
+若 $R,t$ 随时间变化，则应按乘积法则加入 $\dot R p_B$ 和 $\dot t$ 等项。
+第 19 章在一次规划中固定 map/odom 变换，正是为了使用固定变换公式。
 
-若采用\textbf{地图坐标的平移加法与 yaw 加法}，点 $p_B=(x,y)$ 的雅可比为
-\begin{equation}
- \frac{\partial p_A}{\partial(t_x,t_y,\psi)}=
- \begin{bmatrix}1&0&-x\sin\psi-y\cos\psi\\0&1&x\cos\psi-y\sin\psi\end{bmatrix}.
-\end{equation}
-前两列无量纲，最后一列为 m/rad。若改成机体系扰动或 SE(2) 左乘/右乘扰动，
-雅可比会改变；同样叫“位姿导数”并不意味着可以直接交换公式。
+\subsection{雅可比的每一列在问什么}
+对于向量函数 $f(x)$，逐个改变输入分量，记
+\[
+ J_{ij}=\frac{\partial f_i}{\partial x_j},\qquad
+ f(x+\Delta x)\approx f(x)+J\Delta x.
+\]
+这是把单变量的一阶近似应用到每个输出分量。
+第 $j$ 列表示只改变第 $j$ 个输入时，所有输出如何变化。
+导数 $J_{ij}$ 的单位为“输出 $i$ 的单位/输入 $j$ 的单位”。
 
-\section{最小二乘在解什么}
-测量模型 $z=Hx+\epsilon$，误差协方差为 $\Sigma$。
-加权最小二乘最小化 $(Hx-z)^T\Sigma^{-1}(Hx-z)$，正规方程为
-\begin{equation}
- (H^TW H)x=H^TWz,\qquad W=\Sigma^{-1}.
-\end{equation}
-实现中用分解解线性方程，通常不显式构造逆矩阵；噪声协方差可通过分解做白化。
-矩阵病态或欠约束时，数值结果并不会因为“解出了一个向量”就可信。
-第 08 章的退化几何、第 10 章固定首帧和第 18 章正定二次项，分别处理不同的可观测性或唯一性问题。
+令 $p_B=(x,y)$，输入为 A 系平移与 yaw 的直接加法 $(t_x,t_y,\psi)$。
+先展开输出，再分别求偏导：
+\[
+ p_{A,x}=t_x+x\cos\psi-y\sin\psi,\qquad
+ p_{A,y}=t_y+x\sin\psi+y\cos\psi,
+\]
+\[
+ J=\frac{\partial p_A}{\partial(t_x,t_y,\psi)}=
+ \begin{bmatrix}1&0&-x\sin\psi-y\cos\psi\\
+ 0&1&x\cos\psi-y\sin\psi\end{bmatrix}.
+\]
+前两列表示平移 1 m 使对应坐标增加 1 m；最后一列为 m/rad。
+在 $p_B=(2,-1)$、$\psi=0$ 时，第三列是 $(1,2)^T$；
+yaw 增加 0.01 rad，点约移动 $(0.01,0.02)$ m。
+机体系平移要先乘 $R$ 才成为 A 系位移，所以采用机体系扰动时，前两列相应变为 $R$。
+明确“怎样改变输入”，才能选择相符的雅可比。
 
-\clearpage
-\section{协方差与权重}
-$P_{ii}$ 是第 i 个状态分量的方差，$P_{ij}$ 描述二者相关性。
-位置方差单位为 m$^2$，位置与角度的交叉协方差为 m$\cdot$rad；
-它们不能不加说明地与位置距离相加。
-一阶传播写为 $P^-=FPF^T+Q$，测量创新协方差为 $S=HP^-H^T+R$。
-这里 F/H 是相应状态与观测的局部雅可比，Q/R 表示建模后的过程和测量不确定性。
-仿真器每采样白噪声标准差，与连续噪声密度的单位和离散缩放不同，回查第 06、09 章。
+\subsection{梯度与反向传播就是链式法则}
+标量代价 $L(f)$ 对向量 $f$ 的各偏导组成列向量 $\nabla_fL$。
+小变化满足 $\Delta L\approx(\nabla_fL)^T\Delta f$。
+代入 $\Delta f\approx J\Delta x$ 得到
+\[
+ \Delta L\approx(\nabla_fL)^TJ\Delta x
+    =(J^T\nabla_fL)^T\Delta x,\qquad
+ \nabla_xL=J^T\nabla_fL.
+\]
+这就是第 04、15、16 章反向传播的基本公式。
+例如 $f=(x_1^2,x_1+x_2)^T$、$L=(f_1^2+f_2^2)/2$，
+在 $(x_1,x_2)=(1,2)$ 处有 $f=(1,3)$、
+$J=\left[\begin{smallmatrix}2&0\\1&1\end{smallmatrix}\right]$，
+故 $\nabla_xL=J^Tf=(5,3)^T$。把 $L$ 直接展开再求导也得到同样结果。
 
-\section{用差分检查，用尺度理解误差}
-对输出向量 f 和第 i 个输入，用
-\begin{equation}
- J_{:,i}\approx\frac{f(x+h e_i)-f(x-h e_i)}{2h}
-\end{equation}
-检查解析雅可比。h 太大时有截断误差，太小时两次接近数值相减会放大舍入误差。
-各维单位不同，应分别选取合适步长，不对所有变量机械地套用一个无单位常数。
-\begin{lstlisting}[language=bash]
+\section{最小二乘：怎样综合不完全一致的测量}
+两次位置测量分别为 $z_1=1.0$ m、$z_2=1.4$ m，标准差为
+$\sigma_1=0.1$ m、$\sigma_2=0.2$ m。误差除以自己的标准差后再平方，得到无量纲代价
+\[
+ L(x)=\frac{(x-z_1)^2}{\sigma_1^2}+\frac{(x-z_2)^2}{\sigma_2^2}.
+\]
+相同距离误差对更精确的测量更严重，因此它得到更大权重。
+令导数 $2\sum_i(x-z_i)/\sigma_i^2=0$，得到
+\[
+ x=\frac{z_1/\sigma_1^2+z_2/\sigma_2^2}{1/\sigma_1^2+1/\sigma_2^2}
+   =\frac{100\cdot1.0+25\cdot1.4}{125}=1.08\ \mathrm m.
+\]
+结果更靠近标准差较小的第一条测量。该解对应加权平均。
+
+\subsection{从标量求导到正规方程}
+多维线性测量写为 $z=Hx+\epsilon$，残差 $r=Hx-z$。
+令权重矩阵 $W$ 对称，目标为 $L=r^TWr$。
+对 $x$ 加上 $\Delta x$，展开并收集一次项：
+\[
+ L(x+\Delta x)=L(x)+2\Delta x^TH^TWr+\Delta x^TH^TWH\Delta x.
+\]
+因此梯度为 $2H^TWr$，令其为零即
+\[
+ (H^TWH)x=H^TWz.
+\]
+独立测量时 $W$ 的对角元为 $1/\sigma_i^2$；存在相关误差时，使用协方差的逆 $W=\Sigma^{-1}$。
+若 $\Sigma=CC^T$ 为三角分解，则
+\[
+ r^T\Sigma^{-1}r=(C^{-1}r)^T(C^{-1}r)=\|C^{-1}r\|^2.
+\]
+通过解三角方程 $Ce=r$ 得到白化残差 $e$，然后最小化它的普通平方和。
+独立测量下 $C$ 的对角元为标准差，这恰好退化为前面的“除以标准差”。
+
+求正规方程时，代码通过分解与回代求解，例如 Eigen 的 \code{ldlt().solve(rhs)}。
+第 08 章演示三元方程的消元；第 16 章将同样思路用于轨迹块矩阵。
+若某个非零方向 $d$ 满足 $Hd=0$，则 $H(x+\alpha d)=Hx$，代价沿该方向不变，
+测量无法决定它。第 08 章走廊退化和第 10 章固定首帧，正是在处理这种自由方向。
+
+\section{协方差：误差沿哪些方向一起变化}
+设随机误差向量 $e=x-\mathbb E[x]$，其均值为零。
+期望 $\mathbb E$ 表示同一实验重复很多次后的平均。定义
+\[
+ P=\mathbb E[ee^T],\qquad P_{ij}=\mathbb E[e_i e_j].
+\]
+对角元是每个分量的方差；非对角元为正，表示两误差常同号，为负则常反号。
+每项单位是对应两个分量的单位相乘，例如位置/角度项为 m$\cdot$rad。
+对任意方向系数 $a$，标量误差 $a^Te$ 的方差为
+\[
+ \mathbb E[(a^Te)^2]=a^T\mathbb E[ee^T]a=a^TPa.
+\]
+例如两位置误差的协方差为
+$P=\left[\begin{smallmatrix}.04&.01\\.01&.09\end{smallmatrix}\right]\ \mathrm{m^2}$，
+$e_1+2e_2$ 的方差为 $.04+4(.09)+4(.01)=.44\ \mathrm{m^2}$。
+交叉项体现两误差共同变化的影响。
+
+\subsection{传播公式来自直接展开}
+若新误差近似为 $e'=Fe+w$，其中 $w$ 零均值、与 $e$ 独立，且协方差为 $Q$，则
+\begin{align*}
+ \mathbb E[e'e'^T]
+ &=F\mathbb E[ee^T]F^T+F\mathbb E[ew^T]+\mathbb E[we^T]F^T+\mathbb E[ww^T]\\
+ &=FPF^T+Q.
+\end{align*}
+中间两项因独立且零均值而为零。
+非线性模型先作一阶近似，$F$ 便是当前点的状态雅可比。
+观测残差同理得到 $S=HP^-H^T+R$；上标负号表示测量校正前的预测协方差。
+第 09 章进一步用 $S$ 计算校正增益。
+
+\section{中央差分：拿函数本身检查导数}
+对单变量函数，在 $x$ 的两侧展开泰勒公式：
+\begin{align*}
+ f(x+h)&=f(x)+hf'(x)+\tfrac12h^2f''(x)+\tfrac16h^3f'''(x)+\cdots,\\
+ f(x-h)&=f(x)-hf'(x)+\tfrac12h^2f''(x)-\tfrac16h^3f'''(x)+\cdots.
+\end{align*}
+两式相减再除以 $2h$，偶次项抵消，得到
+\[
+ \frac{f(x+h)-f(x-h)}{2h}=f'(x)+\tfrac16h^2f'''(x)+\cdots.
+\]
+在光滑函数附近，主要截断误差随 $h^2$ 缩小。
+例如 $f(x)=x^3,x=1$，差分恰为 $3+h^2$，$h=0.3$ 时为 3.09，$h=0.1$ 时为 3.01。
+
+\begin{center}\begin{minipage}{\linewidth}\makeatletter\def\@captype{figure}\makeatother
+\centering
+\begin{tikzpicture}
+\begin{axis}[width=.72\linewidth,height=5cm,xmin=.45,xmax=1.55,ymin=0,ymax=3.6,
+ xlabel={$x$},ylabel={$f$},grid=major,legend style={at={(1.04,.95)},anchor=north west,font=\small},
+ tick label style={font=\small}]
+\addplot[tealblue,thick,domain=.5:1.5,samples=80]{x^3};\addlegendentry{$x^3$}
+\addplot[navy,dashed,domain=.7:1.5]{3*x-2};\addlegendentry{切线}
+\addplot[orange!80!black,domain=.7:1.3]{3.09*x-1.82};\addlegendentry{两侧割线}
+\addplot[only marks,orange!80!black] coordinates {(.7,.343)(1.3,2.197)};
+\addplot[only marks,navy] coordinates {(1,1)};
+\end{axis}
+\end{tikzpicture}
+\caption{中央差分取两侧点的割线斜率。缩小两侧间隔后，割线斜率趋向中间点的切线斜率。}
+\end{minipage}\end{center}
+
+计算机还带来舍入误差。若两次函数值的计算各带有大小约为 $\varepsilon$ 的误差，
+相减再除以 $2h$ 后，误差可能达到约 $\varepsilon/h$。
+因此缩小 $h$ 同时减小截断误差、放大舍入影响；应扫描多个步长，观察中间一段稳定区域。
+向量函数按列重复同样操作：
+\[
+ J_{:,i}\approx\frac{f(x+h_i e_i)-f(x-h_i e_i)}{2h_i},
+\]
+$e_i$ 是第 $i$ 个单位坐标向量，$h_i$ 使用该输入的单位。
+位置用米、角度用弧度分别扰动；差分与解析导数必须作用在同一个函数及同一种扰动上。
+
+\begin{lstlisting}[language=bash,numbers=none]
+mkdir -p tmp
 c++ -std=c++17 -I/usr/include/eigen3 \
   -I exercises/appA/starter exercises/appA/check_jacobian.cpp \
   -o tmp/appA-check
 ./tmp/appA-check
-# Use solutions instead of starter to check the reference answer.
 \end{lstlisting}
-练习 appA-1 的固定点为 (2,-1) m，位姿为 (0.3,-0.8,0.7)，依次尝试四个步长。
-验收在 $h=10^{-5}$ 时要求矩阵误差范数小于 $10^{-7}$；
-这个例子的坐标与角度按各自单位扰动，阈值只服务于该数值检查。
-差分通过说明局部导数与所写函数一致，不代表函数的物理模型、时间关联或坐标约定就正确。
+练习 appA-1 使用点 $(2,-1)$ m、位姿 $(0.3,-0.8,0.7)$。
+程序逐列建立正负扰动，比较两矩阵对应元素误差平方和的平方根。
+在本例的单位与数值尺度下，$h=10^{-5}$ 时要求此范数小于 $10^{-7}$。
+先用零角度的手算雅可比检查方向，再运行四个步长，可以同时检查坐标含义和导数实现。
 
-\section{凸集、二次型与课程接口}
-凸集中的任意两点，其连线仍在集合内。半空间 $Ap\le b$ 的交集是凸集，
-这使第 13 章凸走廊与第 16 章 Bézier 控制点证书可以连接起来。
-正定二次型满足 $x^TPx>0$（$x\ne0$）；半正定只要求非负，允许零方向。
-第 18 章自写 QP 解算器要求强凸，并没有承诺支持所有半正定 QP。
+\section{凸集与正定二次型为何适合规划}
+凸集要求任意两点 $p,q$ 的连线 $(1-\lambda)p+\lambda q$ 仍在集合中，$0\le\lambda\le1$。
+若 $Ap\le b,Aq\le b$，则逐行有
+\[
+ A[(1-\lambda)p+\lambda q]=(1-\lambda)Ap+\lambda Aq\le b.
+\]
+因此线性半空间的交集是凸集。把两点推广为非负权重和为 1 的多个点，仍有同样不等式，
+这便是第 16 章 Bézier 控制点界的基础。
+
+对称矩阵 $P$ 若对所有非零 $x$ 满足 $x^TPx>0$，称为正定；只要求非负则称为半正定。
+例如
+\[
+ x^T\begin{bmatrix}2&1\\1&2\end{bmatrix}x
+   =x_1^2+x_2^2+(x_1+x_2)^2>0\quad(x\ne0).
+\]
+而 $P=\operatorname{diag}(1,0)$ 只惩罚 $x_1$，允许沿 $x_2$ 的零方向。
+对二次目标 $L=\tfrac12x^TPx+q^Tx$，若 $Px_*+q=0$，展开得到
+\[
+ L(x_*+d)-L(x_*)=\tfrac12d^TPd.
+\]
+$P$ 正定时，任何非零偏移都会使代价增加，从而得到唯一极小值。
+第 18 章加入正定输入权重，使凝聚 QP 的二次矩阵具有这一性质。
 
 \begin{center}\small
 \begin{tabular}{lll}\toprule
 要回查的量 & 关键问题 & 课程位置\\\midrule
-位姿与速度 & 表达在哪个坐标系？ & 02、07\\
-力、质量与加速度 & 输入是 N 还是 m/s$^2$？ & 04、17\\
-白噪声与偏置 & 每采样方差，还是随时间积累？ & 06、09\\
-雅可比 & 扰动方向、单位、差分误差？ & 08--10、15--16\\
-ESDF 与走廊 & 软代价，还是连续区域证书？ & 12--16\\
-QP 约束 & 节点约束能否保证采样间安全？ & 18\\
-未来交接 & 同一个时刻的 p/v/a 是否一致？ & 19\\\bottomrule
+位姿与速度 & 坐标变换固定还是随时间变化？ & 02、07、19\\
+力、质量与加速度 & 输入与输出的单位是什么？ & 04、17\\
+白噪声与偏置 & 独立采样还是持久累积？ & 06、09、附录 C\\
+雅可比与梯度 & 输入怎样扰动，链式法则怎样连接？ & 08--10、15--16\\
+ESDF 与走廊 & 距离代价与区域界怎样配合？ & 12--16\\
+QP 约束 & 约束覆盖节点还是整段运动？ & 18\\\bottomrule
 \end{tabular}
 \end{center}
-
-\paragraph{理解练习}
-任选一个源文件，在纸上列出输入、输出、单位与坐标系，再写一个可以手算的极端例子。
-例如把旋转角设为 0 或 $\pi/2$，把力设为 0，把协方差设为对角矩阵；
-若这些例子解释不通，先修正模型含义，再考虑增加复杂算法。
+\paragraph{练习}
+补全点变换雅可比并扫描差分步长；手算本附录的加权平均、梯度反传和协方差投影。
+最后选一个正文函数，写出输入、输出、单位与一个可手算的特殊情形，再与源码对照。

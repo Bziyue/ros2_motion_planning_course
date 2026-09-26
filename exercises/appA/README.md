@@ -1,8 +1,20 @@
 # 附录A：数学回查与差分练习
 
-- EXERCISE(appA-1)：补全point_jacobian.hpp。明确扰动是地图系tx/ty/yaw加法，不是右乘机体系SE(2)扰动。
-- 编译：`c++ -std=c++17 -I/usr/include/eigen3 -I exercises/appA/starter exercises/appA/check_jacobian.cpp -o tmp/appA-check`；运行`./tmp/appA-check`。
-- 实验：改变h为1e-3/1e-5/1e-7/1e-9。为什么误差不随h无限减小？参考解在solutions；h=1e-5时矩阵误差范数<1e-7为通过。
-- 推导：将各列单位写出；给定2×2协方差，说明协方差非对角项的含义。为什么最小二乘应解线性方程而非显式求逆？
+1. 令A=[[2,1],[0,3]]、p=(1,2)，按行点积与按列组合分别计算Ap；解释两种算法为何相同。
+2. **EXERCISE(appA-1)**：补全 `starter/point_jacobian.hpp`。输入扰动为地图系tx/ty/yaw直接加法；先手算yaw=0、点(2,-1)时的三列。
 
-提示：前两列是单位阵，第三列是旋转矩阵对角度的导数乘以point。差分只验证局部导数，不能证明代价或观测模型正确。
+```bash
+mkdir -p tmp
+c++ -std=c++17 -I/usr/include/eigen3 \
+  -I exercises/appA/starter exercises/appA/check_jacobian.cpp -o tmp/appA-check
+./tmp/appA-check
+```
+
+检查器尝试1e-3/1e-5/1e-7/1e-9；h=1e-5时矩阵误差范数<1e-7为通过。参考解在 `solutions`。
+
+3. 将f=(x1²,x1+x2)、L=||f||²/2直接展开，与Jᵀ∇fL比较。在(1,2)处手算两种结果。
+4. 两位置观测为1.0、1.4m、标准差0.1、0.2m。推导加权平均；把第二个标准差改为0.1m，结果怎样改变？
+5. P=[[.04,.01],[.01,.09]]m²。求e1+2e2的方差；将交叉项改为-.01，说明变化原因。对e'=Fe+w逐项展开协方差，标明独立性在哪一步起作用。
+6. 用f(x)=x³推导x=1处中央差分3+h²；分别计算h=.3/.1/.01。画出截断误差随h的变化，并解释浮点运算中曲线为何不无限下降。
+7. 证明半空间交集为凸集。将P=[[2,1],[1,2]]的二次型写成平方和，解释正定；再找diag(1,0)的零方向。
+8. 在第08、15或18章选一个函数，把输入、输出、单位、扰动和极端例子对应到公式与代码。
