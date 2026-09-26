@@ -6,10 +6,7 @@
 
 [教材 PDF](output/pdf/course.pdf) · [实施进度](docs/PROGRESS.md) · [主机验收记录](docs/VALIDATION.md)
 
-后续第 08–20 章已获连续实施授权。第 08 章已完成点到点/点到线配准、局部里程计与 ROS 接入；
-运行入口见 [第 08 章说明](chapters/ch08/README.md) 和 [第 09 章说明](chapters/ch09/README.md)。
-第 09–10 章已完成 EKF、时间融合、关键帧回环和观测地图重建，见 [第 10 章](chapters/ch10/README.md)。
-后续继续配置空间、规划与轨迹控制。
+选学附录入口见 [附录说明](chapters/appendices/README.md)，数学回查与差分练习已完成。
 
 | 章节 | 内容与运行说明 | 练习 | 启动文件 |
 | --- | --- | --- | --- |

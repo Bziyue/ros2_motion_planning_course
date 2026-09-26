@@ -1,0 +1,85 @@
+\chapter{数学回查与数值检查}
+\begin{notebox}
+\textbf{用途}\quad 忘记符号时回查，不必先读完本附录再运行课程。\\
+\textbf{小实验}\quad 用中央差分检查一个二维点变换的雅可比。
+\end{notebox}
+\section{坐标变换先写清方向}
+位姿 $T_{AB}$ 表示 B 在 A 中的位置和朝向，点变换为
+\begin{equation}
+ p_A=R(\psi)p_B+t,\qquad
+ R(\psi)=\begin{bmatrix}\cos\psi&-\sin\psi\\\sin\psi&\cos\psi\end{bmatrix}.
+\end{equation}
+平移单位为 m，yaw 单位为 rad、逆时针为正。
+两个变换合成时，顺序与下标一致：$T_{AC}=T_{AB}T_{BC}$。
+逆变换的平移是 $-R^Tt$，不是简单的 $-t$；
+速度或加速度只旋转，不加平移。源码对应 geometry/se2 中的 transformPoint、compose、inverse。
+
+若采用\textbf{地图坐标的平移加法与 yaw 加法}，点 $p_B=(x,y)$ 的雅可比为
+\begin{equation}
+ \frac{\partial p_A}{\partial(t_x,t_y,\psi)}=
+ \begin{bmatrix}1&0&-x\sin\psi-y\cos\psi\\0&1&x\cos\psi-y\sin\psi\end{bmatrix}.
+\end{equation}
+前两列无量纲，最后一列为 m/rad。若改成机体系扰动或 SE(2) 左乘/右乘扰动，
+雅可比会改变；同样叫“位姿导数”并不意味着可以直接交换公式。
+
+\section{最小二乘在解什么}
+测量模型 $z=Hx+\epsilon$，误差协方差为 $\Sigma$。
+加权最小二乘最小化 $(Hx-z)^T\Sigma^{-1}(Hx-z)$，正规方程为
+\begin{equation}
+ (H^TW H)x=H^TWz,\qquad W=\Sigma^{-1}.
+\end{equation}
+实现中用分解解线性方程，通常不显式构造逆矩阵；噪声协方差可通过分解做白化。
+矩阵病态或欠约束时，数值结果并不会因为“解出了一个向量”就可信。
+第 08 章的退化几何、第 10 章固定首帧和第 18 章正定二次项，分别处理不同的可观测性或唯一性问题。
+
+\clearpage
+\section{协方差与权重}
+$P_{ii}$ 是第 i 个状态分量的方差，$P_{ij}$ 描述二者相关性。
+位置方差单位为 m$^2$，位置与角度的交叉协方差为 m$\cdot$rad；
+它们不能不加说明地与位置距离相加。
+一阶传播写为 $P^-=FPF^T+Q$，测量创新协方差为 $S=HP^-H^T+R$。
+这里 F/H 是相应状态与观测的局部雅可比，Q/R 表示建模后的过程和测量不确定性。
+仿真器每采样白噪声标准差，与连续噪声密度的单位和离散缩放不同，回查第 06、09 章。
+
+\section{用差分检查，用尺度理解误差}
+对输出向量 f 和第 i 个输入，用
+\begin{equation}
+ J_{:,i}\approx\frac{f(x+h e_i)-f(x-h e_i)}{2h}
+\end{equation}
+检查解析雅可比。h 太大时有截断误差，太小时两次接近数值相减会放大舍入误差。
+各维单位不同，应分别选取合适步长，不对所有变量机械地套用一个无单位常数。
+\begin{lstlisting}[language=bash]
+c++ -std=c++17 -I/usr/include/eigen3 \
+  -I exercises/appA/starter exercises/appA/check_jacobian.cpp \
+  -o tmp/appA-check
+./tmp/appA-check
+# Use solutions instead of starter to check the reference answer.
+\end{lstlisting}
+练习 appA-1 的固定点为 (2,-1) m，位姿为 (0.3,-0.8,0.7)，依次尝试四个步长。
+验收在 $h=10^{-5}$ 时要求矩阵误差范数小于 $10^{-7}$；
+这个例子的坐标与角度按各自单位扰动，阈值只服务于该数值检查。
+差分通过说明局部导数与所写函数一致，不代表函数的物理模型、时间关联或坐标约定就正确。
+
+\section{凸集、二次型与课程接口}
+凸集中的任意两点，其连线仍在集合内。半空间 $Ap\le b$ 的交集是凸集，
+这使第 13 章凸走廊与第 16 章 Bézier 控制点证书可以连接起来。
+正定二次型满足 $x^TPx>0$（$x\ne0$）；半正定只要求非负，允许零方向。
+第 18 章自写 QP 解算器要求强凸，并没有承诺支持所有半正定 QP。
+
+\begin{center}\small
+\begin{tabular}{lll}\toprule
+要回查的量 & 关键问题 & 课程位置\\\midrule
+位姿与速度 & 表达在哪个坐标系？ & 02、07\\
+力、质量与加速度 & 输入是 N 还是 m/s$^2$？ & 04、17\\
+白噪声与偏置 & 每采样方差，还是随时间积累？ & 06、09\\
+雅可比 & 扰动方向、单位、差分误差？ & 08--10、15--16\\
+ESDF 与走廊 & 软代价，还是连续区域证书？ & 12--16\\
+QP 约束 & 节点约束能否保证采样间安全？ & 18\\
+未来交接 & 同一个时刻的 p/v/a 是否一致？ & 19\\\bottomrule
+\end{tabular}
+\end{center}
+
+\paragraph{理解练习}
+任选一个源文件，在纸上列出输入、输出、单位与坐标系，再写一个可以手算的极端例子。
+例如把旋转角设为 0 或 $\pi/2$，把力设为 0，把协方差设为对角矩阵；
+若这些例子解释不通，先修正模型含义，再考虑增加复杂算法。
