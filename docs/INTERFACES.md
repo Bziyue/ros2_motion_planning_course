@@ -138,7 +138,7 @@ reference 按绝对时刻求解析轨迹，inertial/velocity 在最近接受区�
 | `/command/wrench` | `geometry_msgs/WrenchStamped` | odom；力和偏航力矩 |
 | `/visualization/*` | `visualization_msgs/MarkerArray` | 对应帧；机器人、走廊、ESDF、轨迹 |
 
-`Trajectory2D` 计划固定二维五次表示：Header 与执行起始时刻、每段正 duration、x/y 各 6 个系数；系数按升幂，时间变量为每段起点开始的局部秒。yaw 参考单独明确，不从平移轨迹默默推断。具体 `.msg` 在第 14 章按实际需求确定。
+`Trajectory2D` 计划固定二维五次表示：Header 与执行起始时刻、每段正 duration、x/y 各 6 个系数；系数按升幂，时间变量为每段起点开始的局部秒。yaw 参考单独明确，不从平移轨迹默默推断。第14章已定义 motion2d_interfaces/Trajectory2D 与 QuinticPiece2D；具体约定见文末。
 
 栅格原点/分辨率和 ESDF 符号属于数据契约。ESDF 初版作为普通值对象传给规划器并用 Marker 可视化；确实跨节点共享时再引入包含 Header、origin、resolution、width/height、有效性掩码和距离数组的消息。不使用 OccupancyGrid 的 0-100 值域偷装米制距离。
 
@@ -249,3 +249,15 @@ QuinticPiece包含正duration和2×6秒制升幂系数；列k单位m/s^k。
 PolynomialTrajectory验证非空/有限/C²连接，evaluate/sample只接收[0,total]，内部连接点取右段。
 TranslationState给p/v/a，yaw独立。stopAtWaypoints每路点零v/a，nominal_speed是平均速度参数。
 CSV包含段时长与全部系数；ROS时刻与执行策略在后续接入中定义，不以Path伪装有时间的轨迹。
+
+
+## 第14章ROS执行契约
+
+/plan/trajectory使用motion2d_interfaces/Trajectory2D。header是发布时间和固定odom执行帧，start_time为绝对仿真起点（零就是原点）。
+pieces非空，duration正有限，x/y各6个升幂秒制系数，C²连接；yaw为独立常值朝向。
+trajectory_node显式/trajectory/execute服务将同一路线一次转换到odom并发布；下游不随TF跳变改写它。
+/plan/trajectory_path是预览，逐点stamp为执行时间。控制/仿真只使用系数。
+model=trajectory只订阅该命令；本章要求当前及起终点静止、位置/yaw匹配、起点非过去，运行中拒绝替换。
+/sim/trajectory_status单列idle/accepted/waiting/executing/completed/rejected与碰撞/非法状态。
+未来/终点保持、C²采样、非整步传感器均共用解析函数。扫掠用全区间加速度上界扩展圆盘；碰撞前冻结所有时间。
+错误新消息不会改写已接受曲线；reset清空。在线p/v/a接续与失败制动在第19章扩展。

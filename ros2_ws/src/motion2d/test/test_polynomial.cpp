@@ -68,3 +68,24 @@ TEST(Polynomial, ExplicitStopsRepeatedPointAndInvalidInput)
   auto p=interpolateQuintic({}, {},1); p.coefficients(1,3)=std::numeric_limits<double>::quiet_NaN();
   EXPECT_THROW(PolynomialTrajectory({p}),std::invalid_argument);
 }
+
+#include "motion2d/trajectory/execution.hpp"
+TEST(Polynomial, ContinuousHeldExecutionAndConservativeSweep)
+{
+  TranslationState a,b,c; b.position={1,1}; b.velocity={.5,0}; c.position={2,0};
+  PolynomialTrajectory curve({interpolateQuintic(a,b,1),interpolateQuintic(b,c,1)});
+  TimedTrajectory t{curve,200000000,.4};
+  EXPECT_LT(sampleHeldTrajectory(t,0).velocity.norm(),1e-12);
+  EXPECT_LT((sampleHeldTrajectory(t,3000000000).pose.position-c.position).norm(),1e-12);
+  EXPECT_DOUBLE_EQ(sampleHeldTrajectory(t,3000000000).pose.yaw,.4);
+  const double begin=.93,end=1.07;
+  const double bound=trajectoryAccelerationBound(curve,begin,end);
+  const auto p0=curve.sample(begin).position,p1=curve.sample(end).position;
+  for(int i=0;i<=100;++i) {
+    const double s=i/100., local=begin+(end-begin)*s;
+    EXPECT_LE(curve.sample(local).acceleration.norm(),bound+1e-12);
+    EXPECT_LE((curve.sample(local).position-((1-s)*p0+s*p1)).norm(),bound*(end-begin)*(end-begin)/8+1e-12);
+  }
+  EXPECT_EQ(trajectoryAccelerationBound(curve,-2,-1),0);
+  EXPECT_EQ(trajectoryAccelerationBound(curve,3,4),0);
+}

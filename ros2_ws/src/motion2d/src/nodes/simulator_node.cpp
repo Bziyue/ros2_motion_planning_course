@@ -25,6 +25,7 @@
 #include "motion2d/ros/lidar_messages.hpp"
 #include "motion2d/ros/imu_messages.hpp"
 #include "motion2d/ros/odometry_messages.hpp"
+#include "motion2d/ros/trajectory_messages.hpp"
 #include "motion2d/sim/robot_model.hpp"
 #include "motion2d/sim/sim_clock.hpp"
 #include "motion2d/sim/sensor_scheduler.hpp"
@@ -56,7 +57,7 @@ public:
     if (!std::isfinite(initial_.yaw) || !std::isfinite(command_timeout_) ||
       !std::isfinite(speed_max_) || !std::isfinite(yaw_rate_max_) ||
       command_timeout_ <= 0.0 || speed_max_ <= 0.0 || yaw_rate_max_ <= 0.0 ||
-      (model_ != "ideal" && model_ != "velocity" && model_ != "inertial" && model_ != "reference"))
+      (model_ != "ideal" && model_ != "velocity" && model_ != "inertial" && model_ != "reference" && model_ != "trajectory"))
     {
       throw std::invalid_argument("Unknown model or invalid limit/timeout; see ch04 configuration");
     }
@@ -96,6 +97,12 @@ public:
         "/command/wrench", rclcpp::QoS(1),
         [this](const geometry_msgs::msg::WrenchStamped & message) {receiveWrench(message);});
     }
+    if (model_ == "trajectory") {
+      trajectory_status_pub_ = create_publisher<std_msgs::msg::String>("/sim/trajectory_status", retained);
+      trajectory_sub_ = create_subscription<motion2d_interfaces::msg::Trajectory2D>(
+        "/plan/trajectory", 1, [this](const motion2d_interfaces::msg::Trajectory2D & m) {receiveTrajectory(m);});
+      setTrajectoryStatus("idle");
+    }
     createServices();
     publishStaticFrames();
     rememberPosition();
@@ -132,6 +139,7 @@ private:
   {
     if (stamp == clock_.nanoseconds()) {return state_;}
     const double offset = (stamp - interval_start_ns_) * 1e-9;
+    if (model_ == "trajectory" && trajectory_) {return sampleHeldTrajectory(*trajectory_,stamp);}
     if (model_ == "reference") {
       return sampleCircle(initial_, reference_radius_, reference_omega_, stamp * 1e-9);
     }
@@ -167,8 +175,8 @@ private:
 
   void readImu()
   {
-    if (model_ != "reference" && model_ != "inertial") {
-      throw std::invalid_argument("IMU requires model=reference or inertial; jumps have no physical IMU");
+    if (model_ != "reference" && model_ != "inertial" && model_ != "trajectory") {
+      throw std::invalid_argument("IMU requires model=reference, inertial or trajectory; jumps have no physical IMU");
     }
     gravity_ = declare_parameter("imu.gravity", 9.81);
     if (!std::isfinite(gravity_) || gravity_ <= 0) {
@@ -348,6 +356,34 @@ private:
     acceptHeldCommand(message.header);
   }
 
+  void setTrajectoryStatus(const std::string & status)
+  {
+    if (!trajectory_status_pub_ || status == trajectory_status_) {return;}
+    trajectory_status_ = status; std_msgs::msg::String message; message.data = status;
+    trajectory_status_pub_->publish(message);
+  }
+
+  void receiveTrajectory(const motion2d_interfaces::msg::Trajectory2D & message)
+  {
+    try {
+      auto command = fromTrajectoryMessage(message);
+      if (blocked_) {throw std::invalid_argument("collision requires reset");}
+      if (command.start_ns < clock_.nanoseconds()) {throw std::invalid_argument("start is in the past");}
+      if (trajectory_ && (clock_.nanoseconds()-trajectory_->start_ns)*1e-9 < trajectory_->curve.duration())
+      {throw std::invalid_argument("busy; ch14 executes one curve at a time");}
+      const auto first=command.curve.sample(0), last=command.curve.sample(command.curve.duration());
+      if ((first.position-state_.pose.position).norm()>1e-7 || first.velocity.norm()>1e-7 ||
+        first.acceleration.norm()>1e-7 || state_.velocity.norm()>1e-7 || state_.acceleration.norm()>1e-7 ||
+        last.velocity.norm()>1e-7 || last.acceleration.norm()>1e-7 ||
+        std::abs(wrapAngle(command.yaw-state_.pose.yaw))>1e-7)
+      {throw std::invalid_argument("continuous rest endpoints and unchanged yaw required");}
+      trajectory_=std::move(command);
+      setTrajectoryStatus("accepted");
+    } catch (const std::invalid_argument & error) {
+      setTrajectoryStatus(std::string("rejected: ")+error.what());
+    }
+  }
+
   // tick_begin
   bool advanceTick(bool single_step)
   {
@@ -373,6 +409,11 @@ private:
       next = sampleCircle(initial_, reference_radius_, reference_omega_, clock_.seconds() + dt());
       padding = reference_radius_ * reference_omega_ * reference_omega_ * dt() * dt() / 8.0;
     }
+    if (model_ == "trajectory" && trajectory_) {
+      next=sampleHeldTrajectory(*trajectory_,clock_.nanoseconds()+clock_.stepDuration().count());
+      const double t=(clock_.nanoseconds()-trajectory_->start_ns)*1e-9;
+      padding=trajectoryAccelerationBound(trajectory_->curve,t,t+dt())*dt()*dt()/8;
+    }
     pending_pose_.reset();
     if (!next.pose.position.allFinite() || !next.velocity.allFinite() ||
       !next.acceleration.allFinite() || !std::isfinite(next.pose.yaw) ||
@@ -382,6 +423,7 @@ private:
       blocked_ = true;
       clock_.setPaused(true);
       setStatus("invalid_state");
+      setTrajectoryStatus("invalid_state");
       RCLCPP_ERROR(get_logger(), "Non-finite candidate; check physical scales and reset");
       return false;
     }
@@ -389,6 +431,7 @@ private:
       blocked_ = true;
       clock_.setPaused(true);
       setStatus("collision_predicted");
+      setTrajectoryStatus("collision_predicted");
       RCLCPP_WARN(get_logger(), "Swept disk blocked; state/time frozen. Reset to begin a new trial");
       return false;
     }
@@ -398,6 +441,10 @@ private:
     interval_wrench_ = have_command_ ? wrench_command_ : Wrench2D{};
     state_ = next;
     if (single_step) {clock_.singleStep();} else {clock_.advance();}
+    if (model_ == "trajectory" && trajectory_) {
+      const double t=(clock_.nanoseconds()-trajectory_->start_ns)*1e-9;
+      setTrajectoryStatus(t<0 ? "waiting" : t<trajectory_->curve.duration() ? "executing" : "completed");
+    }
     rememberPosition();
     return true;
   }
@@ -429,6 +476,8 @@ private:
         clock_.reset();
         state_ = initialState();
         pending_pose_.reset();
+        trajectory_.reset();
+        setTrajectoryStatus("idle");
         have_command_ = false;
         velocity_command_ = VelocityCommand{};
         wrench_command_ = Wrench2D{};
@@ -574,6 +623,10 @@ private:
   VelocityCommand interval_velocity_;
   Wrench2D interval_wrench_;
   std::optional<Pose2D> pending_pose_;
+  std::optional<TimedTrajectory> trajectory_;
+  std::string trajectory_status_;
+  rclcpp::Publisher<std_msgs::msg::String>::SharedPtr trajectory_status_pub_;
+  rclcpp::Subscription<motion2d_interfaces::msg::Trajectory2D>::SharedPtr trajectory_sub_;
   VelocityCommand velocity_command_;
   Wrench2D wrench_command_;
   InertialParameters inertia_;

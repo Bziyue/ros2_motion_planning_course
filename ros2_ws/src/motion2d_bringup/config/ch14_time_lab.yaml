@@ -1,0 +1,89 @@
+# Empty-room analytic sensor experiment; no truth enters planning.
+/**:
+  ros__parameters:
+    use_sim_time: true
+    x: 0.0
+    y: 0.0
+    radius: 0.2
+    seed: 42
+    width: 20.0
+    height: 20.0
+    circle_count: 0
+    polygon_count: 0
+    size_min: 0.35
+    size_max: 1.2
+    polygon_samples: 8
+    goal_x: 8.0
+    goal_y: 8.0
+    margin: 0.05
+    require_connected: true
+    check_resolution: 0.25
+simulator:
+  ros__parameters:
+    publish_truth_tf: false
+    dt: 0.005
+    yaw: 0.4
+    start_paused: true
+    command_timeout: 0.5
+    speed_max: 1.0
+    yaw_rate_max: 1.0
+    mass: 1.0
+    inertia_z: -1.0
+    linear_drag: 0.0
+    angular_drag: 0.0
+    force_max: 2.0
+    torque_max: 0.2
+    reference_radius: 1.0
+    reference_omega: 0.4
+    lidar.enabled: true
+    lidar.backend: cpu
+    lidar.scan_model: snapshot
+    lidar.beams: 90
+    lidar.angle_min: -3.141592653589793
+    lidar.fov: 6.283185307179586
+    lidar.rate: 7.0
+    lidar.range_min: 0.05
+    lidar.range_max: 30.0
+    lidar.range_stddev: 0.0
+    lidar.noise_seed: 4242
+    lidar.visualize_beams: false
+    imu.enabled: true
+    imu.rate: 137.0
+    imu.gravity: 9.81
+    imu.gyro_stddev:
+    - 0.0
+    - 0.0
+    - 0.0
+    imu.accel_stddev:
+    - 0.0
+    - 0.0
+    - 0.0
+    imu.noise_seed: 6060
+    imu.visualize: false
+mapping:
+  ros__parameters:
+    mapping.resolution: 0.1
+    mapping.width_cells: 220
+    mapping.height_cells: 220
+    mapping.origin_x: -11.0
+    mapping.origin_y: -11.0
+    mapping.hit_probability: 0.7
+    mapping.miss_probability: 0.4
+    mapping.logodds_limit: 4.0
+planner:
+  ros__parameters:
+    corridor.enabled: true
+    corridor.merge_convex: true
+    corridor.max_extension: 0.6
+    planning.free_threshold: 35
+    planning.unknown_blocked: true
+    planning.diagonal: true
+esdf:
+  ros__parameters:
+    planning.free_threshold: 35
+    planning.unknown_blocked: true
+    esdf.gradient_stride: 10
+trajectory:
+  ros__parameters:
+    trajectory.nominal_speed: 0.4
+    trajectory.start_lead: 0.25

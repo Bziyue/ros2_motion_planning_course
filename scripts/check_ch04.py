@@ -36,7 +36,7 @@ class Probe:
         for client in (self.pause, self.step, self.reset):
             assert client.wait_for_service(timeout_sec=5), "Start ch04.launch.py first"
         active_pub = {"ideal": self.pose_pub, "velocity": self.velocity_pub,
-                      "inertial": self.wrench_pub, "reference": None}[model]
+                      "inertial": self.wrench_pub, "reference": None, "trajectory": None}[model]
         self.wait(lambda: self.pose is not None and
                   (active_pub is None or active_pub.get_subscription_count() == 1))
 

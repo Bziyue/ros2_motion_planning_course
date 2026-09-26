@@ -12,6 +12,7 @@ find_package(std_msgs REQUIRED)
 find_package(tf2_ros REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(nav_msgs REQUIRED)
+find_package(motion2d_interfaces REQUIRED)
 
 add_library(motion2d_core
   src/geometry/se2.cpp src/geometry/obstacles.cpp
@@ -23,7 +24,7 @@ add_library(motion2d_core
   src/estimation/scan_matcher.cpp src/estimation/lidar_odometry.cpp src/estimation/imu_predictor.cpp
   src/estimation/planar_ekf.cpp src/estimation/fusion_timeline.cpp src/estimation/pose_graph.cpp src/estimation/loop_closure.cpp src/estimation/keyframes.cpp
   src/planning/inflation.cpp src/planning/astar.cpp src/planning/path_simplifier.cpp src/planning/corridor.cpp
-  src/trajectory/polynomial.cpp src/trajectory/quintic.cpp)
+  src/trajectory/polynomial.cpp src/trajectory/quintic.cpp src/trajectory/execution.cpp)
 target_compile_features(motion2d_core PUBLIC cxx_std_17)
 target_compile_options(motion2d_core PRIVATE -Wall -Wextra -Wpedantic)
 target_include_directories(motion2d_core PUBLIC
@@ -93,10 +94,10 @@ target_link_libraries(world_scene_node PRIVATE motion2d_core rclcpp::rclcpp
 install(TARGETS world_scene_node DESTINATION lib/motion2d)
 
 add_executable(simulator_node src/nodes/simulator_node.cpp src/ros/lidar_messages.cpp
-  src/ros/imu_messages.cpp src/ros/odometry_messages.cpp)
+  src/ros/imu_messages.cpp src/ros/odometry_messages.cpp src/ros/trajectory_messages.cpp)
 target_compile_features(simulator_node PRIVATE cxx_std_20)
 target_compile_options(simulator_node PRIVATE -Wall -Wextra -Wpedantic)
-target_link_libraries(simulator_node PRIVATE motion2d_core rclcpp::rclcpp tf2_ros::tf2_ros
+target_link_libraries(simulator_node PRIVATE motion2d_interfaces::motion2d_interfaces__rosidl_typesupport_cpp motion2d_core rclcpp::rclcpp tf2_ros::tf2_ros
   visualization_msgs::visualization_msgs__rosidl_typesupport_cpp
   geometry_msgs::geometry_msgs__rosidl_typesupport_cpp
   rosgraph_msgs::rosgraph_msgs__rosidl_typesupport_cpp
@@ -126,7 +127,7 @@ add_executable(lidar_odometry_demo src/examples/lidar_odometry_demo.cpp)
 target_link_libraries(lidar_odometry_demo PRIVATE motion2d_core)
 install(TARGETS lidar_odometry_demo DESTINATION lib/motion2d)
 
-foreach(node lidar_odometry estimated_odometry fusion slam planner esdf)
+foreach(node lidar_odometry estimated_odometry fusion slam planner esdf trajectory)
   add_executable(${node}_node src/nodes/${node}_node.cpp src/ros/mapping_messages.cpp)
   target_compile_features(${node}_node PRIVATE cxx_std_20)
   target_compile_options(${node}_node PRIVATE -Wall -Wextra -Wpedantic)
@@ -139,6 +140,9 @@ foreach(node lidar_odometry estimated_odometry fusion slam planner esdf)
 endforeach()
 
 target_sources(planner_node PRIVATE src/ros/planning_messages.cpp)
+target_sources(trajectory_node PRIVATE src/ros/trajectory_messages.cpp)
+target_link_libraries(trajectory_node PRIVATE motion2d_interfaces::motion2d_interfaces__rosidl_typesupport_cpp
+  std_srvs::std_srvs__rosidl_typesupport_cpp)
 
 add_executable(planar_ekf_demo src/examples/planar_ekf_demo.cpp)
 target_link_libraries(planar_ekf_demo PRIVATE motion2d_core)
@@ -174,6 +178,9 @@ install(TARGETS quintic_demo DESTINATION lib/motion2d)
 
 if(BUILD_TESTING)
   find_package(ament_cmake_gtest REQUIRED)
+  ament_add_gtest(test_trajectory_messages test/test_trajectory_messages.cpp src/ros/trajectory_messages.cpp)
+  target_compile_features(test_trajectory_messages PRIVATE cxx_std_20)
+  target_link_libraries(test_trajectory_messages motion2d_core motion2d_interfaces::motion2d_interfaces__rosidl_typesupport_cpp)
   ament_add_gtest(test_polynomial test/test_polynomial.cpp)
   target_link_libraries(test_polynomial motion2d_core)
   ament_add_gtest(test_corridor test/test_corridor.cpp)

@@ -107,4 +107,94 @@ every last row/.style={after row=\bottomrule}]{data/ch14_quintic.csv}
 \item \textbf{代码 ch14-1：}完成升幂系数的一阶、二阶导数；避免重复时间缩放。
 \item \textbf{实验：}修改中间点速度，比较曲线形状与连续性；解释为何路点安全不足以证明曲线安全。
 \end{enumerate}
-ROS 消息与理想连续执行将在本章下一功能接入。
+\clearpage
+\section{把轨迹作为完整消息发送}
+\begin{lstlisting}[language=bash]
+ros2 launch motion2d_bringup ch14.launch.py
+ros2 topic pub --once /goal_pose geometry_msgs/msg/PoseStamped \
+  '{header: {frame_id: map}, pose: {position: {x: -7.5, y: -8.0}, orientation: {w: 1.0}}}'
+ros2 service call /trajectory/execute std_srvs/srv/Trigger '{}'
+ros2 topic echo /sim/trajectory_status
+\end{lstlisting}
+先等待扫描建图与目标规划成功，再调用服务。
+点击目标负责产生几何路线；调用服务将当前路线转换为一次完整执行。
+trajectory\_node 仅订阅区域连接路径、选源里程计与 TF，不读仿真真值。
+
+新增小包 motion2d\_interfaces 定义两个消息，避免在 Path 的姿态或时间字段里暗藏系数。
+\begin{center}\small
+\begin{tabular}{ll}\toprule
+Trajectory2D 字段 & 明确语义 \\\midrule
+header & 发布时间；执行坐标系固定为 odom \\
+start\_time & 仿真时钟上的绝对执行起始时刻 \\
+pieces & 非空五次分段；每段 duration、x[6]、y[6] \\
+yaw & 独立常值朝向，单位 rad \\\bottomrule
+\end{tabular}
+\end{center}
+每段系数以局部秒升幂存储；时长必须有限且为正，连接需满足 $C^2$。
+消息转换不重新采样，往返测试逐项保留系数与时长。零起始时刻就是仿真原点，不是“收到后立即执行”的特殊值。
+
+\section{把 map 路线固定到 odom}
+执行节点在当前里程计时刻查询 $^{odom}T_{map}$，转换所有路点，然后求逐点停靠轨迹。
+发布时冻结该变换，后续采样不跟随 TF 改写参考。在线重规划与回环衔接在第十九章处理。
+\lstinputlisting[language=C++,linerange={trajectory_publish_begin-trajectory_publish_end},
+  includerangemarker=false]{../ros2_ws/src/motion2d/src/nodes/trajectory_node.cpp}
+默认平均速度 0.4 m/s、最短分段 0.5 s，执行起点比发布时间晚 0.25 s。
+若路线起点与当前位置不一致，拒绝发布并等待新路线；运动中再次发送轨迹由本章执行器明确拒绝。
+服务成功表示已发布，最终接收结果看 /sim/trajectory\_status。
+
+\clearpage
+\section{理想执行也要检查整段运动}
+仿真器新增 model=trajectory，只订阅 /plan/trajectory。
+接收时检查起点与当前位姿相同，两端 $v=a=0$、yaw 不跳变、起始时刻不在过去。
+执行前静止等待，结束后静止保持；暂停冻结仿真时间，reset 清空曲线。
+这仍是指定参考的理想模型，没有质量或力上限的跟踪误差；惯性模型与控制器将在后续章节接入。
+
+位置、速度和加速度都由同一解析函数产生，传感器在自身采样时间调用它。
+为避免弯曲段越过障碍仍被接受，沿用第四章的线性插值误差上界：
+\begin{equation}
+\delta=\frac{a_{\max}\Delta t^2}{8},\qquad
+\|\ddot p(t)\|\leq\sum_{k=2}^{5}k(k-1)\|c_k\|\,t_{\max}^{k-2}.
+\end{equation}
+右式来自三角不等式，忽略系数间抵消，可能保守。跨多个分段时对每个相交片段求界再取最大值；
+将圆盘半径加上 $\delta$ 后检查端点连线的整段扫掠。该证明依赖连接处加速度连续且起终点平滑接入保持段。
+\lstinputlisting[language=C++,linerange={polynomial_sweep_begin-polynomial_sweep_end},
+  includerangemarker=false]{../ros2_ws/src/motion2d/src/trajectory/execution.cpp}
+撞击风险时保持上一个有效状态并冻结时钟，报告 collision\_predicted；不会采集未来区间的传感器样本。
+此检查使用仿真世界作为物理碰撞裁判，不向规划器提供世界几何。
+
+\section{在 RViz 与实际消息中看执行}
+/plan/trajectory\_path 是稀疏采样预览：总头记录发布时间，每个 PoseStamped 记录未来执行时间。
+真正执行始终使用完整系数；预览折线的密度不影响仿真精度。
+RViz 应显示洋红色参考、圆盘与实际轨迹；本机完成无界面 ROS 验收，GUI 限制仍见验收记录。
+
+\clearpage
+\section{观测路线和非整步时间验收}
+\begin{lstlisting}[language=bash]
+# 默认ch14在运行时
+/usr/bin/python3 scripts/check_ch14.py
+/usr/bin/python3 scripts/plot_ch14_execution.py
+# 停止上一个launch，再运行独立空房间时间实验
+ros2 launch motion2d_bringup ch14.launch.py rviz:=false \
+  config:=$PWD/ros2_ws/src/motion2d_bringup/config/ch14_time_lab.yaml
+/usr/bin/python3 scripts/check_ch14_time.py
+\end{lstlisting}
+
+\begin{figure}[!ht]
+\centering\includegraphics[width=\linewidth]{figures/ch14_execution.pdf}
+\caption{实际观测地图上执行半米路线。0.75 s 开始、2 s 结束；实测 p/v/a 与解析参考重合，
+用空心点区别采样结果与参考曲线。}
+\end{figure}
+
+第一组从真值定位的观测地图规划 $(-8,-8)\to(-7.5,-8)$ m，reset 后至 0.5 s 发布目标。
+逐步执行 340 tick，位置、速度、加速度最大误差分别约
+$1.8\times10^{-15}$ m、$3.9\times10^{-15}$ m/s、$1.4\times10^{-14}$ $\mathrm{m/s^2}$。
+这是真值理想执行的数值一致性，不是带噪 SLAM 或闭环控制性能。
+
+第二组关闭噪声，20 m 空房间、yaw=0.4 rad、90 束、137 Hz IMU 与 7 Hz 雷达。
+独立 $6\times6$ 线性方程生成两段曲线，开始、连接、结束分别为 0.203、0.661、1.298 s，
+均不对齐 5 ms tick。1.5 s 内 206 条 IMU、11 帧扫描的采样时刻和解析值通过检查；
+最大状态/IMU误差约 $7.3\times10^{-14}$，激光误差约 $4.8\times10^{-7}$ m，后者受 FLOAT32 存储影响。
+
+还检查了等待、终点保持、拒绝运动中替换、消息非法输入、输入模式隔离、reset 和穿墙曲线冻结。
+\textbf{新增练习：}如果仅把 IMU 时间戳改成正确值，却使用 tick 末端的加速度，
+为什么仍会出错？运行上述非整步实验并给出一个具体采样时刻的误差。

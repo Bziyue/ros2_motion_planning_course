@@ -12,3 +12,8 @@ g++ -std=c++17 -Iexercises/ch14/starter exercises/ch14/check_derivatives.cpp -o 
 ```
 
 评分：幂次与因子50%，单位/时间缩放30%，实验和安全解释20%。starter不影响完整演示。
+
+4. ROS时间实验：使用ch14_time_lab.yaml运行check_ch14_time.py。
+   起始.203s、连接.661s、终止1.298s均不对齐5ms tick；传感器137/7Hz。
+   解释“把IMU时间戳写对、但使用tick末状态”为什么仍错；比较解析加速度与每条消息。
+   再发送穿墙曲线，验证时间和所有传感器停在碰撞前，而不是跳过障碍继续执行。
