@@ -1,0 +1,538 @@
+\documentclass[UTF8,fontset=none,a4paper,zihao=5]{ctexart}
+\usepackage[left=21mm,right=21mm,top=21mm,bottom=20mm,headheight=22pt,footskip=11mm]{geometry}
+\usepackage{fontspec}
+\setmainfont{DejaVu Serif}
+\setsansfont{DejaVu Sans}
+\setmonofont[Scale=0.88]{DejaVu Sans Mono}
+\setCJKmainfont{Noto Serif CJK SC}
+\setCJKsansfont{Noto Sans CJK SC}
+\setCJKmonofont{Noto Sans CJK SC}
+\usepackage{amsmath,amssymb,booktabs,tabularx,array}
+\usepackage{xcolor,tikz,tcolorbox,enumitem,fancyhdr,lastpage,xurl}
+\usetikzlibrary{arrows.meta,positioning}
+\usepackage[unicode,colorlinks=true,linkcolor=tealblue,urlcolor=tealblue,
+  pdftitle={ROS 2 二维机器人运动规划：教材大纲审阅稿},
+  pdfauthor={ROS 2 Motion Planning Course}]{hyperref}
+\definecolor{navy}{HTML}{183447}
+\definecolor{tealblue}{HTML}{087F8C}
+\definecolor{ink}{HTML}{243746}
+\definecolor{muted}{HTML}{5D7280}
+\definecolor{pale}{HTML}{EFF6F7}
+\definecolor{linecolor}{HTML}{D4E4E8}
+\definecolor{amber}{HTML}{B97420}
+\color{ink}
+\linespread{1.28}
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{5pt}
+\setlength{\emergencystretch}{2em}
+\setlist[itemize]{leftmargin=1.4em,itemsep=3pt,topsep=3pt}
+\setlist[enumerate]{leftmargin=1.6em,itemsep=4pt,topsep=3pt}
+\renewcommand{\arraystretch}{1.38}
+\newcolumntype{L}[1]{>{\raggedright\arraybackslash}p{#1}}
+\newcolumntype{Y}{>{\raggedright\arraybackslash}X}
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[L]{\small\sffamily\color{muted}ROS 2 二维机器人运动规划}
+\fancyhead[R]{\small\sffamily\color{muted}v0.1 / 大纲待审阅}
+\fancyfoot[L]{\footnotesize\color{muted}章节代码与实验均为计划}
+\fancyfoot[R]{\footnotesize\color{muted}\thepage\ / \pageref*{LastPage}}
+\renewcommand{\headrulewidth}{0.4pt}
+\renewcommand{\headrule}{\hbox to\headwidth{\color{linecolor}\leaders\hrule height \headrulewidth\hfill}}
+\ctexset{section={format=\Large\sffamily\bfseries\color{navy}},
+  subsection={format=\large\sffamily\bfseries\color{tealblue}}}
+\newcommand{\code}[1]{\texttt{\detokenize{#1}}}
+\newcommand{\reviewsection}[1]{\section*{#1}\phantomsection\addcontentsline{toc}{section}{#1}}
+\newtcolorbox{notebox}[1][]{colback=pale,colframe=linecolor,boxrule=0.5pt,
+  arc=2mm,left=3mm,right=3mm,top=2mm,bottom=2mm,#1}
+\newcommand{\lesson}[8]{%
+  \begin{tcolorbox}[colback=white,colframe=linecolor,boxrule=0.6pt,arc=1.5mm,
+    colbacktitle=pale,coltitle=navy,fonttitle=\sffamily\bfseries,
+    title={#1\quad #2},left=3mm,right=3mm,top=2mm,bottom=2mm,
+    before skip=8pt,after skip=9pt]
+  \textbf{目标}\quad #3\par
+  \textbf{核心}\quad #4\par
+  \textbf{代码}\quad {\small #5}\par
+  \textbf{练习}\quad #6\par
+  \textbf{实验}\quad #7\par
+  \textbf{验收}\quad #8
+  \end{tcolorbox}}
+\begin{document}
+
+% 01 / Cover. This is a conceptual drawing, not a completed simulator.
+\begin{titlepage}
+\thispagestyle{empty}
+{\sffamily\small\color{tealblue}ROBOTICS / LEARN BY BUILDING}
+\vspace{14mm}
+
+{\sffamily\bfseries\fontsize{31}{41}\selectfont\color{navy}
+ROS 2 二维机器人\\运动规划}
+\vspace{5mm}
+
+{\sffamily\Large\color{muted}教材大纲与实现路线 · 审阅稿}
+\vspace{9mm}
+
+{\large 从一个圆盘和一束激光开始，\\
+逐步走向定位建图、轨迹优化与闭环控制。}
+\vspace{10mm}
+
+\begin{center}
+\begin{tikzpicture}[x=1cm,y=1cm]
+  \fill[pale,rounded corners=6pt] (-6.8,-2.5) rectangle (6.8,2.5);
+  \draw[linecolor,step=0.5] (-6.5,-2) grid (6.5,2);
+  \fill[navy!17,draw=navy!40] (-4.7,1.1) circle (0.65);
+  \fill[navy!17,draw=navy!40] (-1.2,0.95) -- (-0.2,1.6) -- (0.5,0.85) -- (0,-0.1) -- (-1.1,0.05) -- cycle;
+  \fill[navy!17,draw=navy!40] (3.3,-0.8) circle (0.75);
+  \fill[navy!17,draw=navy!40] (4.4,1.2) -- (5.3,1.75) -- (6,0.9) -- (5.15,0.45) -- cycle;
+  \draw[tealblue!50] (-3.5,-1) -- (-6.5,-1.75);
+  \draw[tealblue!50] (-3.5,-1) -- (-5.5,2);
+  \draw[tealblue!50] (-3.5,-1) -- (-1.1,0.05);
+  \draw[tealblue!50] (-3.5,-1) -- (0.7,-2);
+  \draw[tealblue!50] (-3.5,-1) -- (2.55,-0.8);
+  \draw[tealblue,very thick,-{Stealth[length=3mm]}]
+    (-3.5,-1) .. controls (-2,-1.7) and (0.3,-1.8) .. (1.1,-0.6)
+    .. controls (1.9,0.5) and (2.6,1.55) .. (3.8,1.6);
+  \fill[tealblue!17,draw=tealblue,line width=1.2pt] (-3.5,-1) circle (0.3);
+  \fill[tealblue] (-3.5,-1) circle (0.045);
+  \draw[tealblue,thick,-{Stealth}] (-3.5,-1) -- (-2.95,-0.9);
+  \node[font=\small\sffamily,text=muted] at (0,-2.9) {课程概念示意：圆盘 · 圆与多边形障碍 · 激光 · 轨迹};
+\end{tikzpicture}
+\end{center}
+\vspace{7mm}
+
+\begin{notebox}
+\textbf{本轮交付}\quad 仓库初始化、协作约定、20 章大纲、接口草案与本 PDF。\\
+\textbf{当前状态}\quad 大纲待审阅；ROS 节点、算法和正式教材尚未实施。
+\end{notebox}
+\vfill
+{\sffamily\color{muted}主机 ROS 2 Lyrical · C++17 / Eigen · RViz2 · XeLaTeX}\\[2mm]
+{\small\color{muted}2026 年 9 月 26 日 \hfill v0.1}
+\end{titlepage}
+\setcounter{page}{2}
+
+% 02 / Design.
+\reviewsection{先确定学习主线}
+这套课程用同一个小世界逐步增加能力。先把仿真和算法各自看清，再接通完整系统。正文解释必要数学，推导细节放到附录。
+
+\subsection*{推荐：全向圆盘，逐步加入惯性}
+用圆心描述状态，用半径描述碰撞外形。偏航角决定雷达与 IMU 坐标方向，平移与偏航先解耦。它可以作为平面机器人或无人机水平运动的教学简化，但不包含四旋翼姿态动力学。
+
+\begin{tabularx}{\linewidth}{L{28mm}YL{48mm}}
+\toprule
+\textbf{模型} & \textbf{输入与用途} & \textbf{需要讲清的限制}\\
+\midrule
+理想到点/轨迹 & 直接指定位置，或精确执行连续参考；先看规划效果 & 位置跳变不能生成有效 IMU；移动仍需检查碰撞\\
+全向运动学 & 平面速度与偏航角速度；学习积分与坐标变换 & 不解释质量和受力\\
+全向惯性 & 平面力与偏航力矩；学习制动、PD 与线性 MPC & 不能仅修改 mass 而仍直接积分加速度命令\\
+差速机器人 & $v,\omega$ 或左右轮速；作为扫地机器人附录 & 无侧向速度，需要曲率和非完整约束\\
+\bottomrule
+\end{tabularx}
+
+\begin{equation*}
+\dot p=v,\qquad m\dot v=F-c_vv,\qquad
+\dot\psi=\omega,\qquad I_z\dot\omega=\tau_z-c_\omega\omega.
+\end{equation*}
+初学阶段从零阻尼的恒力运动验证公式。质量、惯量、阻尼、输入上限都能配置；上层期望加速度通过显式控制分配换算成力。
+
+\subsection*{三条实验路线}
+\begin{itemize}
+  \item \textbf{A 规划入门：}真值里程计 + 激光观测建图 + 理想执行。
+  \item \textbf{B 控制入门：}真值里程计 + 激光观测建图 + 惯性模型 + PD/MPC。
+  \item \textbf{C 综合导航：}激光/IMU SLAM + 惯性模型 + 轨迹优化 + MPC。
+\end{itemize}
+三条路线默认都从传感器构建地图。完整世界地图只用于明确标注的 oracle 对照；SLAM 不读取真值位姿或障碍物列表。
+
+\begin{notebox}
+\textbf{主机已确认}\quad Ubuntu 26.04.1、ROS 2 Lyrical、RViz2、TeX Live 2026、Eigen 3.4.0；GPU 为 RTX 5060。当前未找到 \code{nvcc}，CUDA 安排在最后一章。本轮没有启动课程仿真或验证 RViz2 GUI。
+\end{notebox}
+\clearpage
+
+% 03 / Index.
+\reviewsection{20 章课程地图}
+\begin{tabularx}{\linewidth}{L{11mm}YL{45mm}}
+\toprule
+\textbf{章} & \textbf{主题} & \textbf{学完能看到什么}\\
+\midrule
+01 & 主机环境、ROS 2 与 RViz2 & 第一个圆盘场景\\
+02 & 二维几何、坐标、时间与接口 & 正确的 TF 和仿真时钟\\
+03 & 随机圆形与多边形障碍物 & 可复现的小世界\\
+04 & 圆盘、理想质点与受力惯性 & 加速、转动、制动\\
+05 & 均匀扫描激光雷达 CPU 模型 & 扫描光束与命中点\\
+06 & 高斯白噪声 IMU 与时间 & 噪声分布与积分漂移\\
+07 & 真值里程计、点云与栅格 & 第一张观测地图\\
+\midrule
+08 & 扫描匹配与激光里程计 & 逐帧估计位姿\\
+09 & IMU 预测与激光校正 & 连续融合里程计\\
+10 & 关键帧、回环与二维 SLAM & 闭环后的地图修正\\
+\midrule
+11 & 配置空间与 A* & 有半径的无碰撞路径\\
+12 & 二维 ESDF 与梯度 & 可查询的距离场\\
+13 & 凸安全走廊 & 可验证的自由区域\\
+14 & 五次多项式轨迹 & 连续位置、速度、加速度\\
+15 & 二维 MINCO 最小 jerk & 路点与时间优化\\
+16 & 二维 SplineTrajectory & 核心重写与上游对照\\
+\midrule
+17 & 前馈 + PD 跟踪 & 惯性机器人跟随参考\\
+18 & 线性 MPC 与约束 & 预测和输入约束生效\\
+19 & SLAM、在线重规划与导航 & 三条路线闭环比较\\
+\midrule
+20 & CUDA 激光仿真（选学） & 正确性与端到端加速实验\\
+\bottomrule
+\end{tabularx}
+\vspace{4mm}
+\begin{notebox}
+\textbf{建议先修顺序}\quad 01-07 是共同基础。可以先学 08-10，再进入规划；也可直接走真值路线学 11-16，然后补 SLAM。第 17 章的 PD 可在第 04、14 章之后先做。
+\end{notebox}
+详细文件映射、每章验收及附录范围见 \code{docs/COURSE_OUTLINE.md}。以下代码路径均为计划，算法路径相对未来的 \code{motion2d/src/}。
+\clearpage
+
+% 04 / Chapters 1-3.
+\reviewsection{第一篇 / 从主机到二维世界}
+\lesson{01}{主机环境、ROS 2 与 RViz2}
+{从新终端启动一个能解释清楚的最小场景。}
+{工作空间、node/topic、colcon、source、launch；Marker 与 Fixed Frame。基于本机 Lyrical 编写安装与检查步骤。}
+{\code{nodes/hello_scene_node.cpp}；\code{ch01.launch.py}。}
+{解释节点与话题的关系；补完圆形 Marker。}
+{改变圆盘半径、颜色、坐标，观察 RViz2 和消息。}
+{教材命令可复现，圆盘显示正确；不引入运动或 SLAM。}
+
+\lesson{02}{二维几何、坐标、时间与接口}
+{把雷达点从机体系变到世界系，读懂 TF 与时间戳。}
+{$p_w=R(\psi)p_b+t$；角度归一化；SI；map/odom/base；静态外参；唯一仿真时钟与基础 QoS。}
+{\code{geometry/se2.cpp}；\code{sim/sim_clock.cpp}。}
+{手算 90 度旋转；实现变换的逆。}
+{比较正确/错误时间戳；观察暂停时的消息和 TF。}
+{正反变换一致；每个 TF 子帧只有一个父帧；时钟与状态同步暂停。}
+
+\lesson{03}{随机圆形与多边形障碍物}
+{生成可复现、可配置的小世界。}
+{边界、圆、随机点凸包；点线距离、包含关系、圆盘碰撞；种子、起终点净空与可达性。}
+{\code{sim/world.cpp}；\code{sim/world_generator.cpp}。}
+{区分圆心与外形；补完点到线段距离。}
+{同种子重放；增加障碍密度并解释不可达场景。}
+{同参数生成同世界；拒绝退化几何；失败不偷偷重抽种子。}
+\clearpage
+
+% 05 / Chapters 4-6.
+\reviewsection{第一篇 / 机器人与传感器}
+\lesson{04}{圆盘机器人、理想质点与惯性}
+{区分几何、运动学和动力学。}
+{位置/速度/yaw；理想到点、连续参考；$m\dot v=F-c_vv$；离散积分、限幅与碰撞。}
+{\code{sim/ideal_model.cpp}；\code{sim/inertial_model.cpp}。}
+{预测相同力下不同质量的运动；补完一步积分。}
+{改变质量、步长和半径；比较加速与制动。}
+{零力/恒力符合解析解；到点执行检查扫掠碰撞；reset 不用于 IMU 实验。}
+
+\lesson{05}{均匀扫描激光雷达的 CPU 实现}
+{从一束射线推导完整二维扫描。}
+{圆心安装；射线与线段/圆求交；$\alpha_i=\alpha_0+i\Delta\alpha$；全周首末方向不重复；量程和测距噪声。}
+{\code{sim/raycast.cpp}；\code{sim/lidar_cpu.cpp}。}
+{推导 ray-circle 方程；补完最近非负交点。}
+{用 90/360/720 束观察边界细节与 CPU 耗时。}
+{墙面/圆距离与解析值一致；无回波为 $+\infty$，近距盲区及异常读数为 NaN；RViz2 显示扫描。}
+
+\lesson{06}{带高斯白噪声的 IMU}
+{认识角速度、比力、采样噪声和积分漂移。}
+{$\omega_m=\omega+b_g+n_g$；$f_m=R^\top(a-g)+b_a+n_a$；每采样标准差、协方差、时间同步。偏置先取零。}
+{\code{sim/imu.cpp}；\code{sim/sensor_scheduler.cpp}。}
+{推导坐标旋转；补完噪声方差到消息协方差的映射。}
+{静止、恒加速度和旋转；比较噪声参数与漂移。}
+{统计量符合设定；水平静止 z 比力约为 $+g$；不发布真值姿态；跳变位置不生成伪 IMU。}
+\clearpage
+
+% 06 / Chapters 7-9.
+\reviewsection{第二篇 / 从建图到融合里程计}
+\lesson{07}{真值里程计、点云与占据栅格}
+{先固定定位问题，获得规划输入基线。}
+{Odometry、扫描投影、光线清空与终点占据、log-odds；未知/自由/占据；地图分辨率。}
+{\code{mapping/scan_projection.cpp}；\code{mapping/occupancy_grid.cpp}。}
+{解释无回波与未知的区别；补完栅格光线遍历。}
+{改变分辨率与雷达噪声；观察墙厚与地图误差。}
+{只用激光与真值位姿建图；遮挡后仍未知；$+\infty$ 不产生障碍端点。}
+
+\lesson{08}{扫描匹配与激光里程计}
+{从连续扫描估计二维位姿。}
+{点到点 ICP 起步、点到线残差进阶；关联、鲁棒损失、初值、局部子图；走廊与重复几何的退化。}
+{\code{estimation/scan_matcher.cpp}；\code{estimation/lidar_odometry.cpp}。}
+{解释初值影响；补完 SE(2) 残差雅可比。}
+{比较转弯、少束数和对称场景。}
+{恢复已知点集变换；输出位姿和配准点云；不读真值。此时尚无回环。}
+
+\lesson{09}{IMU 预测与激光校正}
+{理解高频预测、低频校正的互补关系。}
+{平面 EKF；状态含位置、速度、yaw、加计/陀螺偏置；偏置先固定再放开；协方差与角残差；去畸变选做。}
+{\code{estimation/imu_predictor.cpp}；\code{estimation/planar_ekf.cpp}。}
+{推导一个状态雅可比；补完 yaw 残差归一化。}
+{对比纯激光/融合在快速转动和扫描缺失时的误差。}
+{连续估计里程计；明确共享历史带来的相关性，教学 EKF 不宣称严格统计一致。}
+\clearpage
+
+% 07 / Chapters 10-12.
+\reviewsection{第二、三篇 / 闭环 SLAM 与规划基础}
+\lesson{10}{关键帧、回环与完整二维 SLAM}
+{把局部里程计推进到带回环的地图估计。}
+{关键帧、回环候选与几何验证；SE(2) 位姿图；固定首帧；全局修正、地图重建与连续 odom。}
+{\code{estimation/loop_closure.cpp}；\code{estimation/pose_graph.cpp}。}
+{解释参考帧自由度；补完一条位姿图边残差。}
+{沿矩形闭环，对比开/关回环和误回环。}
+{显示优化前后轨迹、回环边和重建地图；仅用激光/IMU。范围为静态、小尺度二维场景。}
+
+\lesson{11}{配置空间、障碍膨胀与 A*}
+{从圆盘碰撞转为中心点的栅格路径规划。}
+{半径与安全裕量；$f=g+h$；四/八邻接；未知阻塞；禁止对角穿墙；路径简化与点击目标。}
+{\code{planning/inflation.cpp}；\code{planning/astar.cpp}。}
+{手算小网格搜索；补完邻居扩展。}
+{改变圆盘半径，观察窄门何时不可通过。}
+{路径在配置空间有效；起终点不合法/不可达有明确结果。默认真值路线，但地图来自观测。}
+
+\lesson{12}{二维 ESDF、插值与梯度}
+{让规划器查询距离及远离障碍的方向。}
+{欧氏距离变换；自由为正、占据为负；双线性插值和梯度；$d(p)\ge r+\delta$；栅格边界与离散误差。}
+{\code{mapping/distance_transform.cpp}；\code{mapping/esdf.cpp}。}
+{画圆障碍解析场；补完插值或梯度。}
+{比较分辨率、精度和计算时间。}
+{与解析值/差分核对；unknown 处理一致；原始距离场扣半径或膨胀图零阈值只选一次。}
+\clearpage
+
+% 08 / Chapters 13-15.
+\reviewsection{第三篇 / 安全区域与连续轨迹}
+\lesson{13}{二维凸安全走廊}
+{沿路径构造可验证的自由凸区域。}
+{先扩张矩形，再推广凸多边形；$A_i p\le b_i$；相邻交叠、路点分配与失败处理；配置空间整块检查。}
+{\code{planning/corridor.cpp}；\code{geometry/halfspace.cpp}。}
+{解释凸性；补完半空间包含判断。}
+{比较矩形与多边形走廊对窄通道的覆盖。}
+{整个走廊避开膨胀障碍和未知格；仅查顶点不能证明区域内部安全。}
+
+\lesson{14}{从折线到五次多项式轨迹}
+{区分路径与轨迹，得到连续的 p/v/a。}
+{$p_i(t)=\sum_{k=0}^{5}c_{ik}t^k$；端点条件、段间连续、正时长、轨迹采样；yaw 参考独立定义。}
+{\code{trajectory/quintic.cpp}；\code{trajectory/sampler.cpp}。}
+{求一维静止起终点轨迹；补完导数。}
+{改变时长，比较速度/加速度峰值与理想执行。}
+{端点和连接约束达数值容差；保存系数与时长；连通路点不自动保证曲线避障。}
+
+\lesson{15}{二维 MINCO 最小 jerk}
+{理解减少优化变量与最小控制能量的关系。}
+{$J=\int\|p^{(3)}(t)\|^2dt$；系数消元、带状求解；路点/时间梯度；时间代价、避障代价和可行性验证。}
+{\code{trajectory/minco2d.cpp}；\code{trajectory/trajectory_cost.cpp}。}
+{推导单段能量矩阵；补完一项局部梯度。}
+{比较固定时长与联合时间优化的能量、净空和轨迹。}
+{与小型密集参考解核对；梯度通过差分；记录约束残差，不把小罚值当安全证明。}
+\clearpage
+
+% 09 / Chapters 16-18.
+\reviewsection{第三、四篇 / Spline2D 与轨迹跟踪}
+\lesson{16}{SplineTrajectory 二维实现与对照}
+{在同一最小 jerk 问题上理解另一种实现组织。}
+{二维五次核心重写；块三对角、解析能量梯度、伴随传播、组合代价；Bezier 凸包；固定版本上游对照。}
+{\code{trajectory/spline2d.cpp}；\code{trajectory/spline_optimizer2d.cpp}。}
+{解释同曲线不同表示；补完块消元或一项伴随梯度。}
+{同问题比较 MINCO、本地 Spline2D、上游二维实例。}
+{边界、能量、连续性和梯度一致；测量性能；不完整复刻全部维数、阶数和 MINVO 接口。}
+
+\lesson{17}{先用前馈 + PD 跟踪}
+{看懂参考轨迹为何不等于真实运动。}
+{$F=m(a_r+K_pe_p+K_de_v)+c_vv$；位置/速度反馈、输入饱和、独立 yaw 控制和模型误差。}
+{\code{control/pd_tracker.cpp}；\code{control/command_adapter.cpp}。}
+{解释纯位置反馈的滞后；补完输入限幅。}
+{圆形/八字参考，比较质量误差、阻尼和增益。}
+{报告 RMS/最大跟踪误差、输入峰值和净空；和理想执行做同场景对照。}
+
+\lesson{18}{线性 MPC 与约束跟踪}
+{把预测模型、代价与限制写成一个 QP。}
+{状态 $[p_x,p_y,v_x,v_y]$，输入 $[F_x,F_y]$；$x_{k+1}=Ax_k+Bu_k$；误差与控制增量、走廊/速度/输入约束。}
+{\code{control/linear_mpc.cpp}；\code{control/qp_problem.cpp}。}
+{推导一步 A/B；补完一个代价或约束块。}
+{比较 PD/MPC、预测时域、控制频率和求解延迟。}
+{约束有效；不可行/超时明确制动。ESDF 非线性约束另列 SQP/NMPC 选学，yaw 暂独立控制。}
+\clearpage
+
+% 10 / Chapters 19-20 and appendices.
+\reviewsection{第四、五篇 / 完整闭环与 CUDA}
+\lesson{19}{SLAM、在线重规划与导航实验}
+{连接三条路线，分清定位、规划和控制的误差。}
+{地图快照、局部目标、ESDF/走廊更新；规划与控制分频；新旧轨迹衔接；回环、失效与制动处理。}
+{\code{planning/replanner.cpp}；\code{nodes/navigation_node.cpp}。}
+{解释误差来源；补完重规划触发。}
+{相同种子比较 A/B/C；逐步扩大观测区域。}
+{到达或明确不可达；回环不造成控制参考跳变；成功率、碰撞、ATE/RPE、跟踪误差与延迟可复现。}
+
+\lesson{20}{CUDA 激光仿真加速（选学）}
+{先保证与 CPU 一致，再讨论加速。}
+{逐束并行、几何数据布局、设备内存、最近命中归约；传输、同步、预热；可选后端与独立构建开关。}
+{\code{sim/lidar_cuda.cu}；独立 benchmark。}
+{估计束数/障碍数的工作量；补完 ray-circle 内核。}
+{改变场景规模，分别测内核和端到端耗时。}
+{关噪声逐束核对；加噪使用相同样本；小场景变慢也如实报告；无 CUDA 时主线仍可运行。}
+
+\subsection*{按需附录}
+\begin{itemize}
+  \item \textbf{数学：}SE(2)、最小二乘、协方差、雅可比、凸集、QP、数值差分。
+  \item \textbf{差速扫地机器人：}$\dot x=v\cos\psi,\ \dot y=v\sin\psi,\ \dot\psi=\omega$；轮距/轮速、曲率、非完整约束与 NMPC。
+  \item \textbf{感知与实验：}偏置随机游走、滚动扫描、丢包/延迟、动态障碍、全局重定位、rosbag2 回放和 Doxygen。
+\end{itemize}
+\clearpage
+
+% 11 / Interfaces.
+\reviewsection{接口先讲清楚，代码保持简单}
+\subsection*{三个包，按需求逐步建立}
+\begin{tabularx}{\linewidth}{L{45mm}Y}
+\toprule
+\code{motion2d} & 算法值类型、函数与小类；薄 ROS 节点\\
+\code{motion2d_bringup} & 按章节组织 launch、YAML 与 RViz2 配置\\
+\code{motion2d_interfaces} & 标准消息无法表达时才增加轨迹/距离场等接口\\
+\bottomrule
+\end{tabularx}
+不按章节复制算法，不先做插件工厂、通用调度框架或复杂继承。CPU 基线清晰后再添加优化后端。
+
+\subsection*{消息与坐标约定}
+\begin{tabularx}{\linewidth}{L{57mm}Y}
+\toprule
+\textbf{话题} & \textbf{类型与语义}\\
+\midrule
+\code{/scan} & LaserScan；laser 帧；均匀角度的二维束\\
+\code{/imu/data_raw} & Imu；imu\_link 帧；角速度与比力，无姿态\\
+\code{/ground_truth/odometry} & Odometry；world 帧；真值或评估专用\\
+\code{/odometry/estimated} & Odometry；odom 帧；连续局部估计\\
+\code{/odometry} & 唯一选源后的下游位姿入口\\
+\code{/map}、\code{/map/cloud} & OccupancyGrid / PointCloud2；map 帧\\
+\code{/goal_pose}、\code{/plan/path} & 点击目标与几何路径；map 帧\\
+\code{/plan/trajectory} & 分段时长与二维多项式系数；odom 帧\\
+\code{/command/wrench} & WrenchStamped；odom 帧的力与偏航力矩\\
+\bottomrule
+\end{tabularx}
+
+\[
+\texttt{map}\ \longrightarrow\ \texttt{odom}\ \longrightarrow\
+\texttt{base\_link}\ \longrightarrow\ \{\texttt{laser},\texttt{imu\_link}\}
+\]
+真值和估计模式互斥，每条 TF 边有唯一发布者。真值消息默认不广播机器人 TF；评估通过显式对齐显示对照轨迹。Odometry 的 pose 在父帧，twist 在子帧，必须进行速度坐标转换。
+
+\begin{notebox}
+\textbf{时间与地图边界}\quad 所有节点使用同一仿真时钟，传感器填采样时刻。SLAM 不读真值；地图修正通过 map 到 odom 的变换表达。控制执行连续 odom 中的参考，回环后重新规划并平滑衔接。
+\end{notebox}
+\clearpage
+
+% 12 / Config.
+\reviewsection{让参数的物理含义可检查}
+\subsection*{初始建议值}
+下表用于准备第一个实验，不是已经验证的精度或实时性指标。
+
+\begin{tabularx}{\linewidth}{L{48mm}L{29mm}Y}
+\toprule
+\textbf{参数} & \textbf{建议值} & \textbf{说明}\\
+\midrule
+世界大小、种子 & $20\times20$ m；42 & 圆和凸多边形各 8 个，分别保留随机流\\
+圆盘半径、质量 & 0.20 m；1.0 kg & 点状态和碰撞外形分开\\
+转动惯量 & 0.02 kg\,m$^2$ & 对应默认均匀圆盘，允许单独配置\\
+平面力、偏航力矩上限 & 2.0 N；0.2 N\,m & 平面初版按每轴限幅\\
+激光束数、频率 & 720；10 Hz & 全周扫描，量程 0.05-10 m\\
+激光测距标准差 & 0.01 m & 可设为零；基础用同一时刻 snapshot\\
+IMU 频率 & 200 Hz & 姿态不作为原始测量输出\\
+加计、陀螺标准差 & 0.05；0.005 & m/s$^2$ 与 rad/s；每轴每采样\\
+仿真、控制频率 & 200；50 Hz & 传感器采样基于仿真时刻\\
+地图分辨率、裕量 & 0.05；0.05 m & 半径之外的安全裕量独立定义\\
+\bottomrule
+\end{tabularx}
+
+\subsection*{三个容易混淆的地方}
+\begin{enumerate}
+  \item \textbf{高斯噪声：}配置每采样标准差 $\sigma$，协方差填 $\sigma^2$。噪声密度是另一种量，需要先约定采样转换。基础偏置为零，之后再讲随机游走。
+  \item \textbf{激光时间：}snapshot 的 \code{time_increment=0}；rolling 模式逐束采样，header 表示首束时刻，采完再发布。不能用一帧共同位姿冒充有运动畸变的扫描。
+  \item \textbf{碰撞保证：}ESDF 采样和软惩罚只给近似约束。凸走廊必须整体经过验证，之后控制点包含性才可约束整段曲线；半径不能重复膨胀。
+\end{enumerate}
+
+\begin{notebox}
+\textbf{扩展策略}\quad 保留 robot model、odometry source、map source、lidar backend 等配置，但首先提供三套完整、验证过的 A/B/C 预设。无效组合只给一条清楚的错误，不堆叠防御逻辑。
+\end{notebox}
+\clearpage
+
+% 13 / Delivery.
+\reviewsection{教材、代码、练习一起交付}
+\subsection*{每章采用相同的学习节奏}
+\begin{center}
+\begin{tikzpicture}[node distance=3mm,
+  stage/.style={draw=linecolor,fill=pale,rounded corners=2pt,
+    font=\small\sffamily,minimum height=9mm,inner xsep=3mm}]
+  \node[stage] (a) {看到现象};
+  \node[stage,right=of a] (b) {图示与公式};
+  \node[stage,right=of b] (c) {关键函数};
+  \node[stage,right=of c] (d) {改参数};
+  \node[stage,right=of d] (e) {练习与验收};
+  \foreach \x/\y in {a/b,b/c,c/d,d/e}
+    \draw[tealblue,-{Stealth[length=1.5mm]}] (\x) -- (\y);
+\end{tikzpicture}
+\end{center}
+每章至少一道理解/推导题、一个独立代码练习、一个参数实验。演示保持完整可运行；starter、分级提示和参考解分开，不让未完成的练习破坏演示。
+
+关键代码采用 Doxygen，说明单位、坐标、前提、公式和教材章节。正文从真实源文件摘录，避免教材与代码各自维护后发生漂移。算法验证优先解析例子、数值差分、固定种子回放和闭环指标。
+
+\subsection*{分阶段实施}
+\begin{tabularx}{\linewidth}{L{13mm}L{23mm}Y}
+\toprule
+\textbf{阶段} & \textbf{章节} & \textbf{完成标志}\\
+\midrule
+S0 & 本轮 & 仓库、规则、大纲、接口与 PDF；等待审阅\\
+S1 & 01-03 & 主机教程、最小 RViz2 场景与随机世界\\
+S2 & 04-07 & 机器人、CPU 激光、IMU、真值里程计与建图\\
+S3 & 08-10 & 激光/IMU 里程计、回环与重建地图\\
+S4 & 11-14 & A*、ESDF、走廊、五次轨迹与理想执行\\
+S5 & 15-16 & MINCO 与 Spline2D 的教学实现和数值对照\\
+S6 & 17-19 & PD/MPC、在线重规划、综合实验\\
+S7 & 20、附录 & CUDA 和选择的进阶内容\\
+\bottomrule
+\end{tabularx}
+
+\subsection*{建议本次确认的选择}
+\begin{enumerate}
+  \item 全向圆盘作为主线，差速扫地机器人作为附录。
+  \item 算法采用 C++17 / Eigen，Python 负责 launch、绘图与实验分析。
+  \item 先开展第 01-03 章；每阶段同时交付正文、代码、习题与演示。
+\end{enumerate}
+当前所有实施阶段均未开始。确认更大范围后，可以在该批准范围内连续推进。
+\clearpage
+
+% 14 / Sources and file map.
+\reviewsection{资料依据与审阅入口}
+\subsection*{原始资料}
+\begin{enumerate}
+  \item \href{https://github.com/ros-infrastructure/rep/blob/master/rep-0103.rst}{ROS REP-103}、
+    \href{https://github.com/ros-infrastructure/rep/blob/master/rep-0105.rst}{REP-105}：
+    单位、坐标轴、map/odom/base 关系及发布责任。
+  \item \href{https://github.com/ros2/common_interfaces/blob/rolling/sensor_msgs/msg/LaserScan.msg}{LaserScan}、
+    \href{https://github.com/ros2/common_interfaces/blob/rolling/sensor_msgs/msg/Imu.msg}{Imu}：
+    传感器消息原始定义；实施以主机 Lyrical 定义为准。
+  \item \href{https://github.com/ros/rosdistro/blob/master/lyrical/distribution.yaml}{ROS 2 Lyrical 发行配置}：
+    与本机软件包和环境检查交叉核对。安装文档将在实施时复核。
+  \item Wang 等，\textit{Geometrically Constrained Trajectory Optimization for Multicopters}，
+    IEEE T-RO，2022。\href{https://doi.org/10.1109/TRO.2022.3160022}{论文}与
+    \href{https://github.com/ZJU-FAST-Lab/GCOPTER}{GCOPTER 作者实现}。
+    课程只实现二维最小 jerk 所需部分。
+  \item \href{https://github.com/Bziyue/SplineTrajectory}{SplineTrajectory}：
+    用户指定参考，初次核验版本为 \code{126525e49a43b}。
+    同一最小控制能量问题上的求解、梯度与接口设计用于第 16 章。
+  \item \href{https://github.com/osqp/osqp}{OSQP}：
+    第 18 章 QP 求解器候选；实施时验证接口并锁定版本。
+\end{enumerate}
+
+\begin{notebox}
+\textbf{SplineTrajectory 的教学边界}\quad 实现固定二维五次核心，保留清晰推导并对照上游二维实例；不照搬整套库，也不保证上游性能数字会在本机复现。比较时固定问题、代价、边界、初值与容差；有短时长数值问题时单独报告。
+\end{notebox}
+
+\subsection*{仓库中的对应文档}
+\begin{tabularx}{\linewidth}{L{68mm}Y}
+\toprule
+\textbf{文件} & \textbf{用途}\\
+\midrule
+\code{README.md} & 状态、入口与本稿编译命令\\
+\code{AGENTS.md}、\code{agent.md} & 协作规范及入口\\
+\code{docs/COURSE_OUTLINE.md} & 完整大纲、先修、代码与习题映射\\
+\code{docs/INTERFACES.md} & 物理、时钟、消息、TF、参数语义\\
+\code{docs/HOST_ENVIRONMENT.md} & 本机已检测和仍未验证的事项\\
+\code{docs/REFERENCES.md} & 完整链接、版本与使用边界\\
+\code{textbook/outline.tex} & 本 PDF 的 XeLaTeX 源文件\\
+\bottomrule
+\end{tabularx}
+\vfill
+{\small\color{muted}本稿是范围与实现方案的审阅文档，不是已完成教材或性能报告。获批后按章制作实际代码、公式导读、RViz2 结果和练习。}
+\end{document}

@@ -1,0 +1,30 @@
+# ROS 2 / CMake outputs
+build/
+install/
+log/
+CMakeUserPresets.json
+compile_commands.json
+
+# Python and editor caches
+__pycache__/
+.pytest_cache/
+.venv/
+.idea/
+.vscode/
+*.swp
+
+# LaTeX intermediates; reviewed PDFs in output/pdf/ are tracked.
+*.aux
+*.fdb_latexmk
+*.fls
+*.log
+*.out
+*.synctex.gz
+*.toc
+*.xdv
+tmp/
+
+# Experiment recordings are generated, not source code.
+*.db3
+*.mcap
+results/
