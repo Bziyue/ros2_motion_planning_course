@@ -20,7 +20,8 @@ add_library(motion2d_core
   src/sim/inertial_model.cpp src/sim/reference_model.cpp src/sim/raycast.cpp src/sim/lidar_cpu.cpp
   src/sim/imu.cpp src/sim/sensor_scheduler.cpp src/mapping/scan_projection.cpp
   src/mapping/occupancy_grid.cpp src/evaluation/map_evaluation.cpp
-  src/estimation/scan_matcher.cpp src/estimation/lidar_odometry.cpp)
+  src/estimation/scan_matcher.cpp src/estimation/lidar_odometry.cpp src/estimation/imu_predictor.cpp
+  src/estimation/planar_ekf.cpp)
 target_compile_features(motion2d_core PUBLIC cxx_std_17)
 target_compile_options(motion2d_core PRIVATE -Wall -Wextra -Wpedantic)
 target_include_directories(motion2d_core PUBLIC
@@ -134,8 +135,14 @@ foreach(node lidar_odometry estimated_odometry)
   install(TARGETS ${node}_node DESTINATION lib/motion2d)
 endforeach()
 
+add_executable(planar_ekf_demo src/examples/planar_ekf_demo.cpp)
+target_link_libraries(planar_ekf_demo PRIVATE motion2d_core)
+install(TARGETS planar_ekf_demo DESTINATION lib/motion2d)
+
 if(BUILD_TESTING)
   find_package(ament_cmake_gtest REQUIRED)
+  ament_add_gtest(test_planar_ekf test/test_planar_ekf.cpp)
+  target_link_libraries(test_planar_ekf motion2d_core)
   ament_add_gtest(test_lidar_odometry test/test_lidar_odometry.cpp)
   target_link_libraries(test_lidar_odometry motion2d_core)
   ament_add_gtest(test_scan_matcher test/test_scan_matcher.cpp)

@@ -1,0 +1,4 @@
+mode,rmse,dropout_rmse,accepted,rejected,bax,bay,bg
+imu_only,6.06107,2.06224,0,0,0,0,0
+fixed_zero_bias,1.25767,0.225992,36,154,0,0,0
+estimate_bias,0.0183592,0.0381322,189,1,0.0798832,-0.0396497,0.0100375
