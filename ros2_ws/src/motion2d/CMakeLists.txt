@@ -125,7 +125,7 @@ add_executable(lidar_odometry_demo src/examples/lidar_odometry_demo.cpp)
 target_link_libraries(lidar_odometry_demo PRIVATE motion2d_core)
 install(TARGETS lidar_odometry_demo DESTINATION lib/motion2d)
 
-foreach(node lidar_odometry estimated_odometry fusion slam)
+foreach(node lidar_odometry estimated_odometry fusion slam planner)
   add_executable(${node}_node src/nodes/${node}_node.cpp src/ros/mapping_messages.cpp)
   target_compile_features(${node}_node PRIVATE cxx_std_20)
   target_compile_options(${node}_node PRIVATE -Wall -Wextra -Wpedantic)

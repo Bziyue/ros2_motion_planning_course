@@ -2,7 +2,7 @@
 
 从二维世界、圆盘机器人和模拟传感器开始，逐步学习定位建图、路径与轨迹规划、跟踪控制。教材、代码和练习按章节对应。
 
-**当前状态：第 01–10 章已完成，第 11 章配置空间与 A* 内核已实现。** 已有随机世界、四种机器人模型、CPU 激光雷达、六轴白噪声 IMU、统一传感器时间、真值建图、激光/IMU 融合与回环 SLAM。大纲提交为 `5c0c642`；每完成一个可运行、已验证的功能就单独提交，教材和练习同步更新。规划的 ROS 接入与后续轨迹控制继续实施。
+**当前状态：第 01–11 章已完成。** 已有随机世界、四种机器人模型、CPU 激光雷达、六轴白噪声 IMU、统一传感器时间、真值建图、激光/IMU 融合与回环 SLAM。大纲提交为 `5c0c642`；每完成一个可运行、已验证的功能就单独提交，教材和练习同步更新。已接入观测地图上的 A* 和 RViz 目标；后续距离场与轨迹控制继续实施。
 
 [教材 PDF](output/pdf/course.pdf) · [实施进度](docs/PROGRESS.md) · [主机验收记录](docs/VALIDATION.md)
 
@@ -23,7 +23,7 @@
 | 08 | [扫描匹配与激光里程计](chapters/ch08/README.md) | [ch08](exercises/ch08/README.md) | `ch08.launch.py` |
 | 09 | [IMU 预测与时间融合](chapters/ch09/README.md) | [ch09](exercises/ch09/README.md) | `ch09.launch.py` |
 | 10 | [关键帧回环 SLAM](chapters/ch10/README.md) | [ch10](exercises/ch10/README.md) | `ch10.launch.py` |
-| 11 | [配置空间与 A*](chapters/ch11/README.md) | [ch11](exercises/ch11/README.md) | 内核演示 `astar_demo` |
+| 11 | [配置空间与 A*](chapters/ch11/README.md) | [ch11](exercises/ch11/README.md) | `ch11.launch.py` |
 
 ~~~bash
 source /opt/ros/lyrical/setup.bash

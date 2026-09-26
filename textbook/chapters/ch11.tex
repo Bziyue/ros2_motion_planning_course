@@ -131,4 +131,79 @@ every last row/.style={after row=\bottomrule}]{data/ch11_astar.csv}
 \end{enumerate}
 \textbf{验收：}30 组 seed=1111 随机栅格与独立 Dijkstra 的最短代价一致；
 另检查已知四/八邻接距离、精确端点、同格路径、窄门、未知、外界、穿角、线段擦边/擦角与简化后安全。
-ROS 观测地图和点击目标在下一功能接入。
+下面接入 ROS 观测地图和点击目标。
+
+\clearpage
+\section{从观测地图接入 ROS 与 RViz}
+\begin{lstlisting}[language=bash]
+ros2 launch motion2d_bringup ch11.launch.py
+ros2 topic pub --once /goal_pose geometry_msgs/msg/PoseStamped \
+  '{header: {frame_id: map}, pose: {position: {x: -7.5, y: -8.0}, orientation: {w: 1.0}}}'
+ros2 topic echo /plan/status
+\end{lstlisting}
+本章默认使用 ideal 模型，机器人静止扫描；IMU 关闭，因为本章定位直接来自显式真值适配器。
+启动后等几帧观测累积，再在 RViz 的 2D Goal Pose 工具点击白色自由区域。
+工具发布到 /goal\_pose，规划器只生成几何路径；执行轨迹留到第十四章。
+目标朝向在本章忽略，未来轨迹和控制器分别处理 yaw。
+
+\begin{center}\small
+\begin{tabular}{lll}\toprule
+方向 & 接口 & 含义 \\\midrule
+输入 & /map & 仅凭观测累积的占据栅格 \\
+输入 & /odometry、TF & 当前位姿与 map/odom 关系 \\
+输入 & /goal\_pose & map 中的二维目标位置 \\
+输出 & /planning/grid & 0 自由、100 阻塞的配置空间掩码 \\
+输出 & /plan/path、/plan/status & map 折线与显式规划状态 \\\bottomrule
+\end{tabular}
+\end{center}
+规划器不订阅障碍物列表、仿真位姿或真值里程计。它使用选源后的 /odometry；
+此启动配置的定位来源仍是\textbf{真值}，地图来源则是\textbf{激光观测}。
+后续替换定位来源无需修改 A* 内核。
+
+\begin{equation}
+{}^{map}T_{base}={}^{map}T_{odom}\,{}^{odom}T_{base}.
+\end{equation}
+TF 按里程计采样时刻查询；未能获取时发布 waiting\_transform 并等待下一次尝试。
+不能把 odom 坐标直接当作 map 坐标。观测地图只接受 map 中轴对齐的栅格；
+原点含旋转时明确拒绝，不能悄悄丢掉旋转。
+
+节点用 5 Hz 定时器合并输入更新：新目标、新地图或起点移动至少 0.05 m 时重新规划。
+一次搜索始终使用同一张配置空间栅格。地图和状态保留最后一条消息，便于晚加入的 RViz 读取。
+地图掩码不是占据概率；不要把它再喂给占据建图或重复膨胀。
+\lstinputlisting[language=C++,linerange={planner_snapshot_begin-planner_snapshot_end},
+  includerangemarker=false]{../ros2_ws/src/motion2d/src/nodes/planner_node.cpp}
+
+失败状态同时发布空 Path，清除旧结果；错误地图、错误目标坐标系与变换等待也如此。
+检测到地图或里程计时间回退时清除目标，reset 后须重新发送目标。
+已知完整世界中的远目标可能可达，但如果从当前观测地图看尚被未知区域隔开，本章应报告不可达或无效目标。
+探索和局部目标选择将在第十九章处理。
+
+\clearpage
+\section{复现一条来自真实消息的路径}
+\begin{lstlisting}[language=bash]
+# Run ch11.launch.py rviz:=false in a separate terminal first.
+/usr/bin/python3 scripts/check_ch11.py
+/usr/bin/python3 scripts/plot_ch11_observed.py
+\end{lstlisting}
+检查脚本暂停、reset，再执行 100 个 5 ms 单步，固定在 0.5 s。
+默认 world/noise seed=42/4242，720 束、10 Hz、测距标准差 0.01 m。
+地图 220\,$\times$\,220 格，分辨率 0.1 m；圆盘半径 0.20 m，额外裕量 0.05 m。
+脚本保存实际 /map、/planning/grid 与 /plan/path 消息，再绘制下图。
+
+\begin{figure}[h]
+\centering\includegraphics[width=\linewidth]{figures/ch11_observed.pdf}
+\caption{默认世界左下角的局部视图。左侧灰色为未知，深色为不满足自由阈值的观测；
+右侧浅蓝含额外膨胀。红线从 $(-8,-8)$ 到 $(-7.5,-8)$ m，两侧都保持米制等比例。}
+\end{figure}
+本次得到 6872 个整格安全的自由格，简化路径含两个端点。
+机器人仍停在起点；给 $(8,8)$ m 的目标返回 invalid\_goal，错误 frame 返回
+invalid\_goal\_frame\_or\_position，两种失败都清空路径。
+还检查输入隔离、时间重置和唯一 TF 来源；独立测试用旋转 $90^\circ$、平移 $(1,2)$ m 的变换验证坐标组合。
+RViz 配置已提供，本次主机验收为无界面 ROS 运行，未将 GUI 画面列为已验收。
+
+\textbf{练习 ch11-2：}实现 pathLength，累计相邻实际坐标之间的欧氏距离。
+空路径和单点长度为零；含重复点时不要额外增加距离。
+用 3--4--5 三角形与多段折线验证，比较 A* 的 grid\_cost、真实端点折线长度与简化长度。
+
+\textbf{排查：}看不到路径时，先读 /plan/status，再检查目标 frame、观测是否足够、半径及未知策略。
+在 RViz 勾选 Configuration grid 可查看规划用的掩码。不要为了得到路径而把未知策略悄悄改为乐观。
