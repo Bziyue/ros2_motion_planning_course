@@ -1,0 +1,12 @@
+{
+  "recorded_scan": 59,
+  "recorded_imu": 1180,
+  "storage_start_s": 0.10500000000000001,
+  "storage_end_s": 6.0,
+  "max_storage_header_offset_s": 0.005,
+  "all_sensor_values_equal": true,
+  "last_odometry_s": 6.0,
+  "map_cloud_points": 537,
+  "observed_cells": 12556,
+  "rate": 0.5
+}

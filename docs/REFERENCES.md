@@ -45,3 +45,8 @@ Felzenszwalb 与 Huttenlocher，*Distance Transforms of Sampled Functions*，The
 - [NVIDIA CUDA 13.2.1官方组件清单](https://developer.download.nvidia.com/compute/cuda/redist/redistrib_13.2.1.json)：本机nvcc13.2.78、runtime13.2.75；脚本锁定各组件SHA256、保留LICENSE，不将NVIDIA二进制加入Git。
 - [CUDA C++ Programming Guide](https://docs.nvidia.com/cuda/archive/13.0.2/cuda-c-programming-guide/index.html)：线程索引、内存传输、事件计时。课程逐束求交自行编写，不复制上游代码。
 - [NVIDIA Linux安装指南](https://docs.nvidia.com/cuda/cuda-installation-guide-linux/)：按主机/编译器/驱动选择工具链；主机实测13.0.2与glibc2.43头冲突，改用官方13.2.1而非修改系统头文件。
+
+## 附录D：录制与外部工具
+
+- [rosbag2官方README](https://github.com/ros2/rosbag2#simulation-time)：仿真时间录制与播放器；主机rosbag2 0.33.3的record/play --help核对实际选项，并完成真实记录/回放。
+- [slam_toolbox官方接口说明](https://github.com/SteveMacenski/slam_toolbox#introduction)：扫描、里程计与map到odom输出，作为选做接入协议的来源。未安装、运行或引用其性能数据作为本课程实验。

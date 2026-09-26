@@ -3,7 +3,7 @@
 - A：数学回查、SE(2)/协方差/最小二乘/凸集/强凸QP，与中央差分练习；`exercises/appA`。
 - B：无滑移差速模型，左右轮速与精确圆弧积分；`exercises/appB`。
 - C：偏置随机游走独立实验，延迟/逐束畸变/复杂障碍/重定位扩展边界；`exercises/appC`。
-- 后续D补充记录回放与API文档。
+- D：传感器rosbag录制、关闭模拟器后SLAM回放与外部对照协议；`exercises/appD`。API文档随后补齐。
 
 附录用于主线之外的扩展，不改变第01–20章编号或默认全向受力模型。
 
@@ -26,3 +26,18 @@ ros2 run motion2d bias_walk_demo tmp/appC_bias
 生成单条路径path.csv与两种采样率各5000次独立试验的summary.csv。
 密度.002(rad/s)/sqrt(s)、10s终点方差理论4e-5(rad/s)²；100/200Hz实测3.87825e-5/3.99626e-5。
 该工具不自动注入主线IMU；基础参数、reset与滤波器行为不变。其余C主题为明确边界的选做设计题。
+
+## D 只回放传感器
+
+```bash
+/usr/bin/python3 scripts/run_appD.py --output tmp/my_replay
+```
+自动运行真实录制、关闭模拟器、仅估计栈半速回放、逐字段散列与地图验收；目录已存在时换一个输出名。
+结果为sensors/、summary.json和进程日志。回放已有bag：
+```bash
+ros2 launch motion2d_bringup replay_slam.launch.py rviz:=true
+# Another terminal, with the same ROS_DOMAIN_ID and sourced workspace:
+ros2 bag play tmp/my_replay/sensors --clock 200 --rate 0.5
+```
+停止所有其他模拟器/时钟；bag只含/scan和/imu/data_raw，启动文件提供本课程重合的静态外参。
+主机验证为无界面，不宣称新的RViz画面已验收。外部SLAM对照为设计练习，必须记录其实际输入/版本/预算。

@@ -1,0 +1,75 @@
+\chapter{记录、回放与外部工具}
+\begin{notebox}
+\textbf{目标}\quad 关闭模拟器后，仅凭记录的激光和 IMU 重新生成里程计与观测地图。\\
+\textbf{先修}\quad 第 06、09、10 章；终端已 source 主机 ROS 与课程工作空间。
+\end{notebox}
+\section{传感器时间与文件时间是两件事}
+rosbag2 保存消息及存储时间戳。传感器 header.stamp 表示采集时刻；
+录制器收到消息时，还会记录当时看到的时钟值。
+使用仿真时间录制，避免把从零开始的传感器时刻与系统日历时间混用。
+\begin{lstlisting}[language=bash]
+# With one course simulator already running:
+ros2 bag record --use-sim-time -o tmp/my_sensors \
+  --topics /scan /imu/data_raw
+# Ctrl+C closes the bag; then stop the simulator and old estimators.
+ros2 bag info tmp/my_sensors
+\end{lstlisting}
+只录制两类观测，使重新运行的估计器自己计算 TF 与地图。
+原始姿态和地图不是 SLAM 输入，记录全部话题再一起回放会混入旧结果或引入发布者冲突。
+消息内部的 frame、采集时间、协方差与噪声样本均应保留。
+
+\section{谁来发布时钟与变换}
+\begin{lstlisting}[language=bash]
+# Terminal A, no simulator in this launch:
+ros2 launch motion2d_bringup replay_slam.launch.py rviz:=true
+# Terminal B:
+ros2 bag play tmp/my_sensors --clock 200 --rate 0.5
+\end{lstlisting}
+播放器拥有唯一 /clock；所有估计节点使用仿真时间。
+半速播放改变消息到达的墙钟速度，不能把 IMU 积分步长也乘二。
+录制时采用的每条消息采集时间仍是滤波器的时间依据。
+
+此启动文件复用第 10 章雷达里程计、融合、估计里程计适配和 SLAM 四个节点。
+估计适配器独占 odom 到 base\_link，SLAM 独占 map 到 odom；
+两个静态发布器只提供圆心重合、朝向一致的 laser 与 imu\_link 外参。
+它们适用于本课程的记录，不代表真实传感器不需要外参标定。
+RViz 预期显示重建地图、点云和估计轨迹；本机此次验收使用无界面模式。
+
+\clearpage
+\section{做一次真正的录制与回放验收}
+在仓库根目录运行下面的脚本；输出目录中的 sensors 不应已存在。
+\begin{lstlisting}[language=bash]
+/usr/bin/python3 scripts/run_appD.py --output tmp/my_replay
+\end{lstlisting}
+脚本在独立 ROS 域内先启动暂停的 reference 模型，等待录制器订阅两类传感器后运行六秒，
+关闭录制器与模拟器，再启动仅含估计的栈并半速回放。
+使用第 10 章参数：720 束、10 Hz 雷达，200 Hz 白噪声 IMU，seed=42 的随机世界。
+
+本机 rosbag2 0.33.3 实测记录了 59 帧激光、1180 帧 IMU，存储时间从 0.105 到 6.000 s。
+早期等待首个时钟/订阅建立的样本没有进入记录；因此不能用“六秒乘频率”替代文件计数。
+存储时刻与采集时刻最大相差 0.005 s，录制器使用最近收到的 /clock；
+这些不是新的物理采样时间，回放保留 header。
+
+回放所有消息的字段值与记录一致，最后里程计时刻为 6.000 s；
+观测地图有 12556 个已观测格，累计点云 537 点。
+检查还确认估计器不订阅真值、模拟器已停止、估计 TF 边存在且播放器只有一个时钟。
+这些指标验证回放链路，不用于宣称 SLAM 精度、回环能力或不同系统性能。
+
+\paragraph{一个容易误判的检查}
+CDR 序列化有对齐填充字节，重新编码时这些字节未必相同。
+本脚本将解码后的每个字段转为固定次序的数据表示再求散列，包含 stamp、frame、量测和协方差。
+它检查量测语义一致，不要求无意义的填充字节一致；NaN 和无回波编码也保留。
+
+\section{与现有二维 SLAM 对照的接入练习}
+例如接入 slam\_toolbox 时，先按其版本文档准备扫描、标定外参及所要求的里程计 TF。
+若外部算法只使用雷达而课程算法融合 IMU，应分别列出传感器与先验差异，
+不能把两者结果当作同输入下的纯算法比较。
+禁止用真值里程计帮助一个系统，再隐藏这个条件。
+
+在同一 bag 上串行运行两个系统，避免争抢 TF；记录版本、参数、初值、回放速率、计算预算、
+失败次数和第 19 章定义的 ATE/RPE。地图质量只在已观测区域评估。
+本附录提供接入协议，外部 SLAM 的安装和对照是选做实验，本机未宣称已运行。
+
+\paragraph{练习}
+appD-1 从含时钟、TF、地图和真值的话题列表中选出两类传感器，缺少 IMU 时应明确失败。
+再说明为什么重放旧 map 到 odom 会使“重新建图”实验失去意义。
