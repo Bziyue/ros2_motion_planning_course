@@ -244,3 +244,106 @@ $\|F(t)\|\le\max_k\|B_k\|$；对力变化率同理。细分收紧的是\textbf{�
 \item \textbf{实验：}将 force\_planning\_demo 的质量从 1 改到 3，再把细分深度从 0 改到 5，
 记录上界与密集采样峰值。上界应不小于采样峰值，不能用密集采样替代上界。
 \end{enumerate}
+
+\clearpage
+\section{阿克曼起停轨迹：分开几何与时间}\label{sec:ackplan}
+不能直接将全向 MINCO 的任意曲线交给阿克曼车。本节使用第04章模型，固定路点位置与朝向，
+优化正的切向长度和段时长。几何路径仍是五次多项式，复用第14章的端点插值：
+\begin{equation}
+\begin{aligned}
+q_i(0)&=p_i, &q_i(1)&=p_{i+1},\\
+q_i'(0)&=\ell_i e_i, &q_i'(1)&=\ell_{i+1}e_{i+1},\\
+q_i''(0)&=0, &q_i''(1)&=0.
+\end{aligned}
+\end{equation}
+其中 $e_i=(\cos\psi_i,\sin\psi_i)^T$，$\ell_i>0$。连接处共享朝向；几何端点二阶导数为零，
+所以端点转角为零。实际时间进度取
+\begin{equation}
+u=h(r)=10r^3-15r^4+6r^5,\qquad r=t/T,\qquad p(t)=q(h(t/T)).
+\end{equation}
+$h'(0)=h'(1)=h''(0)=h''(1)=0$，每段都从静止平滑起步、静止结束。
+这是一种容易理解的起停规划，不是连续高速过弯的完整最优控制器。
+$q'(u)$ 在整个区间内仍须非零；切向长度为正只保证端点，不能替代整段检查。
+
+用第04章映射对 $q',q'',q'''$ 求几何量 $n_g,a_g,\kappa,\delta,\delta'_g$。
+令 $d=\dot u,e=\ddot u$，物理量为
+\begin{align}
+s&=n_gd,& \dot s&=a_gd^2+n_ge,\\
+F&=m(a_gd^2+n_ge)+cn_gd,& r_\delta&=\delta'_g d,\\
+\dot\psi&=\psi'_g d,& a_\perp&=a_{\perp,g}d^2.
+\end{align}
+几何朝向、曲率和转角保持不变。即使 $d=0$，这些公式仍能使用已保存的几何路径：
+\lstinputlisting[language=C++,linerange={ackermann_warp_begin-ackermann_warp_end},
+ includerangemarker=false]{../ros2_ws/src/motion2d/src/trajectory/ackermann_trajectory.cpp}
+\textbf{边界：}这条规划路线只做前进、逐段停车；没有倒车支路、动态障碍预测，
+也不接受运动中的任意新参考。A* 只提供几何初值，不能证明小车一定能通过每个弯。
+
+\clearpage
+\section{从小车的物理限制反传到路径}
+对速度、纵向力、转角、转向速率、侧向加速度使用与第15章相同的归一化立方铰链代价。
+先通过时间变换反传，再通过几何平坦映射反传：
+\begin{equation}
+\bar z_{\rm physical}\ \longrightarrow\ (\bar z_g,\bar d,\bar e)
+\ \longrightarrow\ (\bar q',\bar q'',\bar q''')\ \longrightarrow\ (\bar C,\bar\ell,\bar T).
+\end{equation}
+例如 $\bar F$ 给出 $\bar a_g\mathrel{+}=m d^2\bar F$，
+$\bar n_g\mathrel{+}=(me+cd)\bar F$。
+固定归一化节点 $r$ 时，$u=h(r)$ 不随 $T$ 变，而
+$\partial d/\partial T=-d/T$，$\partial e/\partial T=-2e/T$。
+因此本节的直接时长链与第15章按秒表示多项式的链不同：
+\lstinputlisting[language=C++,linerange={ackermann_cost_reverse_begin-ackermann_cost_reverse_end},
+ includerangemarker=false]{../ros2_ws/src/motion2d/src/trajectory/ackermann_trajectory.cpp}
+不是把两种表示的时间偏导相加，否则会重复计数。几何系数对端点切向长度的导数
+来自五次 Hermite 插值，例如对左端速度的系数向量为 $(0,1,0,-6,8,-3)^T$。
+长度取 $\ell=e^\eta$，时长取 $T=0.1+e^\tau$，最后再应用指数链式法则。
+
+本节用小型 BFGS 优化这些变量。它不是 MINCO 的另一种名字：
+固定朝向与非完整约束改变了可调参数。正向模型、反向偏导和端点插值分别保留清晰的函数。
+后续若引入新的曲线表示，仍可复用同一个物理映射及梯度。
+
+\textbf{练习 ch16-3：}固定几何路径和 $r$，推导 $\partial F/\partial T$，完成
+starter 目录中的 \code{warp_force.hpp}。分别指出惯性项与阻尼项的时长缩放次方。
+\begin{lstlisting}[language=bash,numbers=none]
+g++ -std=c++17 -Iexercises/ch16/starter \
+  exercises/ch16/check_warp.cpp -o /tmp/ch16_warp
+/tmp/ch16_warp
+\end{lstlisting}
+
+\clearpage
+\section{先验证能转弯，再决定是否减速}
+\code{certifyAckermann} 将几何 Bézier 控制点递归二分，在每个小区间求导数凸包。
+首先检查所有位置控制点在对应的已验证圆盘配置空间走廊内。
+再沿该小段弦方向 $e_c$ 取
+$n_{\min}=\min_i e_c^TV_i>0$，证明整段切向非零；$n_{\max}=\max_i\|V_i\|$。
+
+叉积与点积是双线性的，故枚举速度/加速度控制点对，可得到整段
+$|[q',q'']|\le H$、$|q'^Tq''|\le B$；速度/jerk 控制点对给出
+$|[q',q''']|\le H'$。于是
+\begin{align}
+ |\kappa|&\le H/n_{\min}^3,\\
+ |\kappa'_g|&\le H'/n_{\min}^3+3HB/n_{\min}^5.
+\end{align}
+进度导数有全局界 $d\le1.875/T$、$|e|\le10/(\sqrt3 T^2)$。
+组合这些界得到速度、力、转角、转向速率和侧向加速度的\textbf{连续充分上界}。
+它可能比实际峰值保守，尤其是转向速率的分母用下界 1；不能把认证失败直接解释为
+数学上绝对无解。算法会明确报告“不获认证”。
+
+\begin{enumerate}
+\item 优化器先收敛，再查位置、切向和转角；任何一项不获认证就拒绝曲线。
+\item 几何已通过而动力学界过大时，每次将时长乘 1.2，最多尝试20次，并重新认证。
+\item 只有全部通过才返回可执行曲线。输出 retiming\_steps，明确最终时间含保守减速，
+不将它冒充优化器的原始最优解。
+\end{enumerate}
+转角取决于路径曲率；延长 $T$ 不会降低它。因此没有“转不过弯就一直减速”的回退。
+没有实现的倒车或绕行搜索也不会被全向位置跳变代替。
+
+\textbf{运行：}
+\begin{lstlisting}[language=bash,numbers=none]
+ros2 run motion2d ackermann_planning_demo tmp/ackermann_planning
+\end{lstlisting}
+默认从 $(0,0,0)$ 到 $(2,0.3,0)$，起终点静止；控制跟踪见下一章。
+边界与走廊是这个离线实验显式提供的输入，不声称它来自未知环境探索。
+
+\textbf{实验：}把最大转角设得很小，确认认证拒绝且不返回执行曲线。
+再保持几何不变增加时长，比较转角不变、动态界降低。
+阅读 continuous bounds 测试，核对密集采样只用于交叉检查上界，没有被称为连续证明。

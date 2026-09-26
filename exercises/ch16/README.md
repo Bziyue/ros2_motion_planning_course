@@ -18,3 +18,6 @@ g++ -std=c++17 -I/usr/include/eigen3 -Iexercises/ch16/starter exercises/ch16/che
 
 ROS实验：`scripts/check_ch16.py`逐tick独立计算接收到的系数对应p/v/a。
 理解：map到odom的刚性变换为什么仅c0加平移？让候选过期/发送非法目标/reset，确认不能执行旧候选。
+
+5. EXERCISE(ch16-3)：固定几何路径与归一化时间，求阿克曼纵向力的时长偏导。`g++ -std=c++17 -Iexercises/ch16/starter exercises/ch16/check_warp.cpp -o /tmp/ch16_warp`，运行后梯度应与中央差分一致（1e-9）。参考解在 solutions，提示见 hints.md。
+6. 实验：运行 `ros2 run motion2d ackermann_planning_demo tmp/ackermann_planning`，比较 retiming 前后转角不变、动态界降低。尝试不兼容的终点朝向/窄走廊，要求明确失败，不能使用全向到点回退。

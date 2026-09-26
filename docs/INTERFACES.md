@@ -341,9 +341,15 @@ replay_slam只消费传感器bag，播放器为唯一时钟；启动文件仅提
 
 `omniForward/omniBackward` 使用 odom 中的 v/a/jerk 和独立 yaw 导数，输出水平力、力变化率、偏航力矩及解析偏导。正向不饱和。位置优化器保持 yaw 常数，只优化平移。
 `TrajectoryCostConfig::dynamics` 与 `TrajectoryLimits::dynamics` 可选；缺省不改变旧课程。启用时 `certifyBezier` 也要求连续力/力变化率界通过；规划范数限值与仿真每轴力限值不同。
-ROS planner/navigation 参数前缀 `planning.dynamics`，mass/linear_drag 必须匹配植物模型，force_max (N)/force_rate_max (N/s) 为验证限值，软目标取85%。统一模型配置后续提供。
+ROS planner/navigation 参数前缀 `planning.dynamics`，mass/linear_drag 必须匹配被控模型，force_max (N)/force_rate_max (N/s) 为验证限值，软目标取85%。统一模型配置后续提供。
 
 ### 阿克曼核心模型
 
 `AckermannState` 为后轴中点 pose、signed speed (m/s)、steering (rad)；`AckermannInput` 为 force (N)、steering_rate (rad/s)。后轴点同时是保守碰撞圆盘中心，laser/imu 将共点；半径应按需要包络车身。与前述圆盘中心语义一致，但不再暗指车身几何中心。
 `ackermannForward` 接收世界/odom中位置的一至三阶导数，仅定义前进且切向非零的局部支路；近零时明确报错。`ackermannBackward` 是解析VJP。被控模型可过零/倒车；目前对应规划只使用前进支路。没有侧滑、独立yaw力矩或横移控制输入。
+
+### 阿克曼轨迹与规划
+
+`AckermannPiece` 分开 `geometry`（q(u)，duration必须=1）与真实 `duration`；`AckermannTrajectory` 每段用五次进度停止起步。端点几何二阶导数为0、切向非零，连接处位置/朝向一致。不要按秒直接读取几何系数，也不要将它伪装成旧 `Trajectory2D`。
+`planAckermann` 只返回收敛且通过连续充分界的曲线；保守延时次数单独记录。检查固定走廊必须先通过 `regionIsFree`，认证函数不能替外部构造者证明世界安全。
+`trackAckermann` 使用后轴位姿、有符号速度、转向角及平坦参考，输出 N 与 rad/s。它是局部跟踪器；不解决任意零速横向停车误差。ROS编码器/选源将在接入功能中实现。

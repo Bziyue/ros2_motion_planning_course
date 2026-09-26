@@ -138,3 +138,49 @@ RViz 预期为八字参考、圆盘轨迹与观测地图；本机本轮仅验收
 \paragraph{练习 ch17-2}
 补全机体速度到 odom 的旋转；用 yaw=$\pi/2$、机体系速度 $(0.2,0.3)$ m/s 验算。
 实验暂停后等待墙钟 1 s，确认参考没有新增；再仅推进 /clock，观察超时制动。
+
+\clearpage
+\section{补充：阿克曼前馈与局部反馈}\label{sec:acktrack}
+小车需要纵向力和转向角速度，不能使用全向的两个平移力。
+从第16章曲线取参考 $s_r,\dot s_r,\delta_r,\dot\delta_r$，测量后轴位姿、纵向速度和转角。
+转角来自显式转向编码器接口，而不是从零速里程计倒算。
+令 $e$ 为当前前向单位向量，$e_\perp$ 为左向，$\tilde p=p_r-p$：
+\begin{align}
+F&=m\{\dot s_r+k_p e^T\tilde p+k_v(e^Tv_r-s)\}+cs,\\
+\delta_d&=\delta_r+k_\psi\operatorname{wrap}(\psi_r-\psi)
+ +\operatorname{atan2}(k_y e_\perp^T\tilde p,|s|+s_0),\\
+r_\delta&=\dot\delta_r+k_\delta(\delta_d-\delta).
+\end{align}
+$s_0>0$ 平滑低速反馈；它不用于篡改平坦映射的分母。控制器不在测量速度上重新求逆，
+因此可以从静止起步。实际命令仍经过纵向力、转向速率和下一 tick 转角限制。
+\lstinputlisting[language=C++,linerange={ackermann_tracking_begin-ackermann_tracking_end},
+ includerangemarker=false]{../ros2_ws/src/motion2d/src/control/ackermann_tracker.cpp}
+
+这是参考附近的局部跟踪律，不是任意朝向下的全局停车控制器。
+尤其在终点，单纯纵向修正不能消除任意横向误差。
+规划需要保留足够的碰撞及执行器余量；发生明显偏离时应停止试验并重新规划。
+第18章原有线性全向 MPC 也不能换一个模型名就控制小车；阿克曼的 NMPC 属于后续扩展。
+
+\clearpage
+\section{阿克曼换道实验与模型匹配}
+\begin{figure}[!ht]
+\centering\includegraphics[width=\linewidth]{figures/ackermann_tracking.pdf}
+\caption{真实算法输出的起停换道：虚线参考与受力积分轨迹几乎重合。
+横向几何采用相同单位长度，下面分别显示纵向力和前轮转角。}
+\end{figure}
+
+默认 $m=1$ kg、$c=0.15$ kg/s、$L=0.3$ m，规划上限依次为速度0.7 m/s、力1 N、
+转角0.5 rad、转向速率0.7 rad/s、侧向加速度0.8 m/s$^2$；反馈执行器保留更大的上限。
+本次优化收敛后做了2次保守减速，最终时长约7.327 s。
+力连续上界约0.535 N、转角界0.190 rad、转向速率界0.443 rad/s。
+
+离线反馈与积分都用0.005 s，模型参数一致，无观测噪声或延迟；峰值位置误差约0.000171 m。
+这是核对前馈、导数和闭环接口的基线，不代表实际传感器下也有同样精度。
+从仓库根目录生成数据和图：
+\begin{lstlisting}[language=bash,numbers=none]
+ros2 run motion2d ackermann_planning_demo tmp/ackermann_planning
+/usr/bin/python3 scripts/plot_ackermann.py
+\end{lstlisting}
+\textbf{练习：}仅把控制器中的质量估计调成真实值的1.3倍，保留被控模型和同一参考，
+比较误差、峰值力及饱和次数。再关闭前馈做对照；每次只改一个因素。
+对转向轴也做类似实验，观察为什么只有位置终点看起来正确并不能验证全程姿态。

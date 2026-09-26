@@ -25,6 +25,7 @@ add_library(motion2d_core
   src/estimation/scan_matcher.cpp src/estimation/lidar_odometry.cpp src/estimation/imu_predictor.cpp
   src/estimation/planar_ekf.cpp src/estimation/fusion_timeline.cpp src/estimation/pose_graph.cpp src/estimation/loop_closure.cpp src/estimation/keyframes.cpp
   src/planning/inflation.cpp src/planning/astar.cpp src/planning/path_simplifier.cpp src/planning/corridor.cpp src/planning/replanner.cpp
+  src/control/ackermann_tracker.cpp src/trajectory/ackermann_trajectory.cpp
   src/trajectory/polynomial.cpp src/trajectory/quintic.cpp src/trajectory/execution.cpp src/trajectory/reference_schedule.cpp src/trajectory/banded_lu.cpp src/trajectory/minco2d.cpp src/trajectory/trajectory_cost.cpp
   src/optimization/bfgs.cpp src/trajectory/trajectory_optimizer.cpp src/trajectory/spline2d.cpp src/trajectory/bezier_bounds.cpp src/control/pd_tracker.cpp src/control/tracking_reference.cpp src/control/linear_mpc.cpp src/optimization/box_qp.cpp)
 target_compile_features(motion2d_core PUBLIC cxx_std_17)
@@ -53,6 +54,10 @@ if(MOTION2D_ENABLE_CUDA)
   target_link_libraries(lidar_cuda_benchmark PRIVATE motion2d_cuda CUDA::cudart_static)
   install(TARGETS lidar_cuda_benchmark DESTINATION lib/motion2d)
 endif()
+
+add_executable(ackermann_planning_demo src/examples/ackermann_planning_demo.cpp)
+target_link_libraries(ackermann_planning_demo PRIVATE motion2d_core)
+install(TARGETS ackermann_planning_demo DESTINATION lib/motion2d)
 
 add_executable(ackermann_demo src/examples/ackermann_demo.cpp)
 target_link_libraries(ackermann_demo PRIVATE motion2d_core)
@@ -266,6 +271,8 @@ install(TARGETS bias_walk_demo DESTINATION lib/motion2d)
 
 if(BUILD_TESTING)
   find_package(ament_cmake_gtest REQUIRED)
+  ament_add_gtest(test_ackermann_planning test/test_ackermann_planning.cpp)
+  target_link_libraries(test_ackermann_planning motion2d_core)
   ament_add_gtest(test_ackermann test/test_ackermann.cpp)
   target_link_libraries(test_ackermann motion2d_core)
   ament_add_gtest(test_force_planning test/test_force_planning.cpp)

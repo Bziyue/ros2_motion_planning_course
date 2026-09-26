@@ -480,7 +480,7 @@ $\|F\|$ 是水平合力，不是四旋翼总推力；不能直接加上 $mg$ 后
 停在原地时全向圆盘的这个映射依然有效。
 
 \textbf{运行与练习 ch04-5。}重新构建后运行
-\code{ros2 run motion2d flatness\_demo}；默认结果为 $F=(1.04,-0.37)$ N。
+\code{ros2 run motion2d flatness_demo}；默认结果为 $F=(1.04,-0.37)$ N。
 推导 $J=\frac12\|F\|^2$ 对加速度的梯度，再完成练习：
 \begin{lstlisting}[language=bash,numbers=none]
 # From repository root; change starter to solutions for the reference.
@@ -563,7 +563,7 @@ ros2 run motion2d ackermann_demo
 \clearpage
 \section{零速奇异性与反向梯度}
 上页公式在 $n=0$ 时不能使用。给分母加一个小数会掩盖奇异性，还可能在停车处恢复错误的
-朝向和转角。本课程的直接平坦映射明确拒绝近零切向量；植物模型本身则可以正常停车、起步。
+朝向和转角。本课程的直接平坦映射明确拒绝近零切向量；被控模型本身则可以正常停车、起步。
 倒车时必须另选有符号速度支路，不能直接把前进的 atan2 公式照搬过去。
 
 第16章的起停规划保留一条正则几何曲线 $q(u)$，满足 $q'(u)\ne0$，再用
