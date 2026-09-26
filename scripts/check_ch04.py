@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Exercise chapter 04 through ROS, including tick boundaries and failed motion."""
+import argparse
 import math
 import time
 import rclpy
@@ -11,7 +12,7 @@ from std_srvs.srv import SetBool, Trigger
 
 class Probe:
     """Small synchronous experiment driver; the simulator still owns /clock."""
-    def __init__(self):
+    def __init__(self, model="ideal"):
         self.node = rclpy.create_node("check_ch04")
         self.pose = None
         self.velocity = None
@@ -24,12 +25,14 @@ class Probe:
         self.node.create_subscription(String, "/sim/status",
                                       lambda m: setattr(self, "status", m.data), qos)
         self.pose_pub = self.node.create_publisher(PoseStamped, "/command/pose", 1)
+        self.velocity_pub = self.node.create_publisher(TwistStamped, "/command/velocity", 1)
         self.pause = self.node.create_client(SetBool, "/sim/pause")
         self.step = self.node.create_client(Trigger, "/sim/step")
         self.reset = self.node.create_client(Trigger, "/sim/reset")
         for client in (self.pause, self.step, self.reset):
             assert client.wait_for_service(timeout_sec=5), "Start ch04.launch.py first"
-        self.wait(lambda: self.pose is not None and self.pose_pub.get_subscription_count() == 1)
+        active_pub = self.pose_pub if model == "ideal" else self.velocity_pub
+        self.wait(lambda: self.pose is not None and active_pub.get_subscription_count() == 1)
 
     def wait(self, predicate, timeout=5):
         end = time.monotonic() + timeout
@@ -60,6 +63,14 @@ class Probe:
     def stamp(self):
         return self.pose.header.stamp.sec + self.pose.header.stamp.nanosec * 1e-9
 
+    def command_velocity(self, vx, vy, omega=0.0, frame="odom"):
+        message = TwistStamped()
+        message.header.frame_id = frame
+        message.twist.linear.x, message.twist.linear.y = float(vx), float(vy)
+        message.twist.angular.z = float(omega)
+        self.velocity_pub.publish(message)
+        self.spin()
+
 
 def check_ideal(probe):
     assert probe.call(probe.reset, Trigger.Request()).success
@@ -89,13 +100,46 @@ def check_ideal(probe):
 
 
 def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--model", choices=("ideal", "velocity"), default="ideal")
+    args = parser.parse_args()
     rclpy.init()
-    probe = Probe()
+    probe = Probe(args.model)
     try:
-        check_ideal(probe)
+        (check_ideal if args.model == "ideal" else check_velocity)(probe)
     finally:
         probe.node.destroy_node()
         rclpy.shutdown()
+
+
+def check_velocity(p):
+    assert p.call(p.reset, Trigger.Request()).success
+    p.wait(lambda: p.stamp() == 0.0)
+    assert p.pose_pub.get_subscription_count() == 0, "Inactive pose input must not be subscribed"
+    p.command_velocity(10, 0, 2)
+    assert p.stamp() == 0.0 and p.pose.pose.position.x == -8.0
+    for _ in range(10):
+        assert p.call(p.step, Trigger.Request()).success
+    p.wait(lambda: math.isclose(p.stamp(), .05))
+    assert math.isclose(p.pose.pose.position.x, -7.95, abs_tol=1e-10)
+    assert p.velocity.twist.linear.x == 1.0 and p.velocity.twist.angular.z == 1.0
+    x0, y0 = p.pose.pose.position.x, p.pose.pose.position.y
+    p.command_velocity(.5, 0, frame="base_link")
+    assert p.call(p.step, Trigger.Request()).success
+    assert math.isclose(p.pose.pose.position.x - x0, .0025 * math.cos(.05), abs_tol=1e-10)
+    assert math.isclose(p.pose.pose.position.y - y0, .0025 * math.sin(.05), abs_tol=1e-10)
+    for _ in range(100):
+        assert p.call(p.step, Trigger.Request()).success
+    p.wait(lambda: p.status == "command_timeout")
+    stopped = (p.pose.pose.position.x, p.pose.pose.position.y)
+    for _ in range(5):
+        assert p.call(p.step, Trigger.Request()).success
+    assert stopped == (p.pose.pose.position.x, p.pose.pose.position.y)
+    assert p.velocity.twist.linear.x == p.velocity.twist.linear.y == 0.0
+    assert p.call(p.reset, Trigger.Request()).success
+    assert p.call(p.step, Trigger.Request()).success
+    assert p.pose.pose.position.x == -8.0
+    print("PASS velocity: input isolation, pause, norm/yaw limits, body frame, timeout and reset")
 
 
 if __name__ == "__main__":

@@ -7,3 +7,5 @@ ch04-1：
 3. 无碰撞需要距离严格大于两半径之和；等号是接触。
 
 参考答案在 solutions，正式演示不依赖 starter。
+
+ch04-2：odom 的速度方向不会随 yaw 改变。位置增加 v*dt，yaw 增加 omega*dt 后复用 wrapAngle。机体系恒速度的圆弧公式是扩展阅读，不是本题要求。

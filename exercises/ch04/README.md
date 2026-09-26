@@ -14,3 +14,13 @@ g++ -std=c++17 -I/usr/include/eigen3 -Iros2_ws/src/motion2d/include \
 ~~~
 
 用 solutions 替换 starter 检查参考解。评分要求：穿越、相切、刚好分离、原地不动四类都正确，不只检查端点。提示见 [hints.md](hints.md)。
+
+4. 代码题 ch04-2：完成 velocity_step.hpp 的 odom 系速度积分。检查位置、时间单位与跨越 pi 的 yaw。
+5. 实验题：速度模式下分别发 odom 与 base_link 的同一速度。转向后两者的轨迹为什么不同？停止发送，观察 command_timeout；暂停 2 秒后单步，超时依据墙钟还是模拟时间？
+
+~~~bash
+g++ -std=c++17 -I/usr/include/eigen3 -Iros2_ws/src/motion2d/include \
+  -Iexercises/ch04/starter exercises/ch04/check_velocity.cpp \
+  ros2_ws/src/motion2d/src/geometry/se2.cpp -o /tmp/ch04_velocity
+/tmp/ch04_velocity
+~~~

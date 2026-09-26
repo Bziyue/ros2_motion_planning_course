@@ -24,3 +24,5 @@ simulator:
     yaw: 0.0
     start_paused: false
     command_timeout: 0.5  # seconds of simulated time, not wall time
+    speed_max: 1.0        # translational norm limit, m/s (velocity mode)
+    yaw_rate_max: 1.0     # absolute yaw rate limit, rad/s (velocity mode)

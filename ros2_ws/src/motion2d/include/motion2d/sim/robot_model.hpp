@@ -20,4 +20,29 @@ struct State2D
  *  @pre The caller has validated the pose and checked the entire swept disk.
  */
 State2D idealPose(const Pose2D & target);
+
+/** @brief Held planar velocity (m/s) and yaw rate (rad/s); body_frame selects axes. */
+struct VelocityCommand
+{
+  Eigen::Vector2d velocity = Eigen::Vector2d::Zero();
+  double yaw_rate = 0.0;
+  bool body_frame = false;
+};
+
+/** @brief Limit translational norm and absolute yaw rate, preserving direction.
+ *  @pre Finite command and positive finite limits, in m/s and rad/s.
+ */
+VelocityCommand limitVelocity(VelocityCommand command, double speed_max, double yaw_rate_max);
+
+/** @brief Exact constant-command kinematic step, including body-frame circular arcs.
+ *  @param dt Positive interval (s).
+ *  @details Command transitions can jump velocity; do not use this mode for IMU fusion.
+ */
+State2D stepVelocity(const State2D & state, const VelocityCommand & command, double dt);
+
+/** @brief Conservative radius padding for a curved kinematic step (m).
+ *  @details Linear-interpolation error is bounded by max|a|*dt^2/8.
+ *  For a body-frame command max|a|=|yaw_rate|*|velocity|; odom motion is straight.
+ */
+double velocitySweepPadding(const VelocityCommand & command, double dt);
 }  // namespace motion2d

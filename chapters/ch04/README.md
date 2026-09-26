@@ -1,6 +1,6 @@
 # 第 04 章：机器人模型
 
-先修 01-03。机器人中心状态包含位置、速度、加速度、yaw、角速度和角加速度，平移导数在 odom 系，全部使用 SI 单位。当前本章第一项功能是理想到点；速度和惯性模型会分别追加。
+先修 01-03。机器人中心状态包含位置、速度、加速度、yaw、角速度和角加速度，平移导数在 odom 系，全部使用 SI 单位。已实现理想到点与速度模型；受力惯性另作独立功能。
 
 ## 运行理想到点
 
@@ -30,6 +30,22 @@ ros2 topic pub --once /command/pose geometry_msgs/msg/PoseStamped \
 - 检查失败时状态和时间停在上一个接受的 tick，状态为 `collision_predicted`，圆盘变红；本次试验结束，reset 后继续。没有把撞入障碍的状态推回去，也不假装模拟了接触后的运动。
 - `radius=0` 是几何质点。RViz2 用直径 0.04 m 的小点保持可见，该点不参与碰撞。
 - `/sim/pose`、`/sim/velocity`、`/sim/acceleration` 为调试用真值；后续 SLAM 不订阅它们。姿态跳变不能产生物理有效的 IMU。
+
+## 速度模式
+
+~~~bash
+ros2 launch motion2d_bringup ch04.launch.py model:=velocity
+ros2 topic pub -r 20 /command/velocity geometry_msgs/msg/TwistStamped \
+  "{header: {frame_id: base_link}, twist: {linear: {x: 0.5}, angular: {z: 0.3}}}"
+~~~
+
+两个命令在分别加载环境的终端执行。该模式只订阅 /command/velocity，RViz2 的位姿目标不驱动它。odom 表示固定方向的平移速度；base_link 表示随圆盘朝向旋转的速度。默认平移速度模长不超过 1 m/s，角速度绝对值不超过 1 rad/s。
+
+命令在模拟时间中保持，默认 0.5 s 未刷新则切为零速度（tick 边界判定），报告 command_timeout；暂停不会消耗有效期。非零时间戳的有效期从消息时间算起，零时间戳从接收的模拟时刻算起。重置会清空命令。惯性模型以后超时归零的是力，不能把此处的瞬时停下照搬过去。
+
+odom 速度的平移是直线；机体系恒速度和角速度用精确圆弧积分。碰撞将圆弧到弦的最大偏差上界 |omega|*|v|*dt²/8 加到半径上，再检查胶囊；这是保守检查，可能拒绝本来安全的窄缝。命令切换时速度仍可跳变，因此不用于 IMU 融合教学。
+
+运行 `/usr/bin/python3 ../scripts/check_ch04.py --model velocity` 核对输入隔离、限速、机体系转换、超时和重置。
 
 ## 读代码与验收
 

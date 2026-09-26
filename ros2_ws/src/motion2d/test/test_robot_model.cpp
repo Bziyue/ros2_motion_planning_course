@@ -43,3 +43,48 @@ TEST(SweptDisk, StationaryAndRectangleBoundary)
   EXPECT_TRUE(sweptDiskIsFree(world, {2, 0}, {3, 0}, 0));  // Disjoint collinear edges.
   EXPECT_FALSE(sweptDiskIsFree(world, {1, 0}, {2, 0}, 0));
 }
+
+TEST(VelocityModel, WorldVelocityAndYawWrap)
+{
+  State2D state;
+  state.pose = {{1, 2}, kPi - .1};
+  const auto next = stepVelocity(state, {{-1, 2}, 1, false}, .2);
+  EXPECT_NEAR(next.pose.position.x(), .8, 1e-12);
+  EXPECT_NEAR(next.pose.position.y(), 2.4, 1e-12);
+  EXPECT_NEAR(next.pose.yaw, -kPi + .1, 1e-12);
+}
+
+TEST(VelocityModel, BodyArcAndStraightLimit)
+{
+  State2D state;
+  const auto arc = stepVelocity(state, {{1, 0}, kPi / 2.0, true}, 1.0);
+  EXPECT_NEAR(arc.pose.position.x(), 2.0 / kPi, 1e-12);
+  EXPECT_NEAR(arc.pose.position.y(), 2.0 / kPi, 1e-12);
+  EXPECT_NEAR(arc.velocity.x(), 0, 1e-12);
+  EXPECT_NEAR(arc.velocity.y(), 1, 1e-12);
+  state.pose.yaw = kPi / 2.0;
+  const auto straight = stepVelocity(state, {{1, 0}, 1e-12, true}, .1);
+  EXPECT_NEAR(straight.pose.position.x(), 0, 1e-12);
+  EXPECT_NEAR(straight.pose.position.y(), .1, 1e-12);
+}
+
+TEST(VelocityModel, DirectionPreservingLimits)
+{
+  const auto command = limitVelocity({{3, 4}, -2, true}, 1.0, .5);
+  EXPECT_NEAR(command.velocity.x(), .6, 1e-12);
+  EXPECT_NEAR(command.velocity.y(), .8, 1e-12);
+  EXPECT_DOUBLE_EQ(command.yaw_rate, -.5);
+  EXPECT_TRUE(command.body_frame);
+}
+
+TEST(VelocityModel, PaddingCoversObstacleOnArcOffChord)
+{
+  State2D state;
+  const VelocityCommand command{{1, 0}, kPi / 2.0, true};
+  const auto next = stepVelocity(state, command, 1.0);
+  World2D world;
+  world.circles.push_back({stepVelocity(state, command, .5).pose.position, .01});
+  EXPECT_TRUE(sweptDiskIsFree(world, state.pose.position, next.pose.position, .02));
+  EXPECT_FALSE(sweptDiskIsFree(world, state.pose.position, next.pose.position,
+    .02 + velocitySweepPadding(command, 1.0)));
+}

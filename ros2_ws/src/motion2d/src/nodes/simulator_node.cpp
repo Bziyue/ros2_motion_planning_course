@@ -43,10 +43,14 @@ public:
     initial_.yaw = declare_parameter("yaw", 0.0);
     model_ = declare_parameter<std::string>("model", "ideal");
     command_timeout_ = declare_parameter("command_timeout", 0.5);
+    speed_max_ = declare_parameter("speed_max", 1.0);
+    yaw_rate_max_ = declare_parameter("yaw_rate_max", 1.0);
     if (!std::isfinite(initial_.yaw) || !std::isfinite(command_timeout_) ||
-      command_timeout_ <= 0.0 || model_ != "ideal")
+      !std::isfinite(speed_max_) || !std::isfinite(yaw_rate_max_) ||
+      command_timeout_ <= 0.0 || speed_max_ <= 0.0 || yaw_rate_max_ <= 0.0 ||
+      (model_ != "ideal" && model_ != "velocity"))
     {
-      throw std::invalid_argument("Expected model=ideal, finite yaw and positive command_timeout");
+      throw std::invalid_argument("Expected ideal/velocity model and finite positive limits/timeout");
     }
     state_ = idealPose(initial_);
     clock_.setPaused(declare_parameter("start_paused", false));
@@ -57,9 +61,15 @@ public:
     acceleration_pub_ = create_publisher<geometry_msgs::msg::AccelStamped>("/sim/acceleration", retained);
     status_pub_ = create_publisher<std_msgs::msg::String>("/sim/status", retained);
     marker_pub_ = create_publisher<visualization_msgs::msg::MarkerArray>("/visualization/robot", retained);
-    pose_sub_ = create_subscription<geometry_msgs::msg::PoseStamped>(
-      "/command/pose", rclcpp::QoS(1),
-      [this](const geometry_msgs::msg::PoseStamped & message) {receivePose(message);});
+    if (model_ == "ideal") {
+      pose_sub_ = create_subscription<geometry_msgs::msg::PoseStamped>(
+        "/command/pose", rclcpp::QoS(1),
+        [this](const geometry_msgs::msg::PoseStamped & message) {receivePose(message);});
+    } else {
+      velocity_sub_ = create_subscription<geometry_msgs::msg::TwistStamped>(
+        "/command/velocity", rclcpp::QoS(1),
+        [this](const geometry_msgs::msg::TwistStamped & message) {receiveVelocity(message);});
+    }
     createServices();
     publishStaticFrames();
     rememberPosition();
@@ -110,14 +120,50 @@ private:
     pending_pose_ = Pose2D{{p.x, p.y}, 2.0 * std::atan2(q.z, q.w)};
   }
 
+  void receiveVelocity(const geometry_msgs::msg::TwistStamped & message)
+  {
+    const auto & v = message.twist.linear;
+    const auto & w = message.twist.angular;
+    if (blocked_ || (message.header.frame_id != "odom" && message.header.frame_id != "base_link") ||
+      !freshHeader(message.header) || !std::isfinite(v.x) || !std::isfinite(v.y) ||
+      !std::isfinite(w.z) || v.z != 0.0 || w.x != 0.0 || w.y != 0.0)
+    {
+      RCLCPP_WARN(get_logger(), "Velocity rejected: expected finite planar odom/base_link command");
+      return;
+    }
+    velocity_command_ = limitVelocity(
+      {{v.x, v.y}, w.z, message.header.frame_id == "base_link"}, speed_max_, yaw_rate_max_);
+    acceptHeldCommand(message.header);
+  }
+
+  void acceptHeldCommand(const std_msgs::msg::Header & header)
+  {
+    const std::int64_t stamp = static_cast<std::int64_t>(header.stamp.sec) * 1000000000 +
+      header.stamp.nanosec;
+    command_deadline_ = (stamp == 0 ? clock_.nanoseconds() : stamp) +
+      std::llround(command_timeout_ * 1e9);
+    have_command_ = true;
+    setStatus(clock_.paused() ? "paused" : "running");
+  }
+
   // tick_begin
   bool advanceTick(bool single_step)
   {
     if (blocked_) {return false;}
     State2D next = state_;
-    if (pending_pose_) {next = idealPose(*pending_pose_);}
+    double padding = 0.0;
+    if (have_command_ && clock_.nanoseconds() >= command_deadline_) {
+      have_command_ = false;
+      setStatus("command_timeout");
+    }
+    if (model_ == "ideal" && pending_pose_) {next = idealPose(*pending_pose_);}
+    if (model_ == "velocity") {
+      const auto command = have_command_ ? velocity_command_ : VelocityCommand{};
+      next = stepVelocity(state_, command, dt());
+      padding = velocitySweepPadding(command, dt());
+    }
     pending_pose_.reset();
-    if (!sweptDiskIsFree(world_, state_.pose.position, next.pose.position, radius_)) {
+    if (!sweptDiskIsFree(world_, state_.pose.position, next.pose.position, radius_ + padding)) {
       blocked_ = true;
       clock_.setPaused(true);
       setStatus("collision_predicted");
@@ -157,6 +203,8 @@ private:
         clock_.reset();
         state_ = idealPose(initial_);
         pending_pose_.reset();
+        have_command_ = false;
+        velocity_command_ = VelocityCommand{};
         blocked_ = false;
         trail_.clear();
         rememberPosition();
@@ -274,8 +322,10 @@ private:
   Pose2D initial_;
   State2D state_;
   std::optional<Pose2D> pending_pose_;
-  double radius_, command_timeout_;
-  bool blocked_ = false;
+  VelocityCommand velocity_command_;
+  double radius_, command_timeout_, speed_max_, yaw_rate_max_;
+  std::int64_t command_deadline_ = 0;
+  bool blocked_ = false, have_command_ = false;
   std::string model_, status_;
   std::deque<geometry_msgs::msg::Point> trail_;
   tf2_ros::TransformBroadcaster broadcaster_;
@@ -287,6 +337,7 @@ private:
   rclcpp::Publisher<std_msgs::msg::String>::SharedPtr status_pub_;
   rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr marker_pub_;
   rclcpp::Subscription<geometry_msgs::msg::PoseStamped>::SharedPtr pose_sub_;
+  rclcpp::Subscription<geometry_msgs::msg::TwistStamped>::SharedPtr velocity_sub_;
   rclcpp::Service<std_srvs::srv::SetBool>::SharedPtr pause_service_;
   rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr step_service_, reset_service_;
   rclcpp::TimerBase::SharedPtr timer_, static_timer_, marker_timer_;

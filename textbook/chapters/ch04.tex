@@ -93,6 +93,79 @@ ros2 service call /sim/pause std_srvs/srv/SetBool "{data: false}"
 reset 开始新试验：回初始状态、清空待执行命令与轨迹、仿真时间归零并暂停。
 单步推进一个 dt；恢复运行不改变 dt。墙钟定时器决定运行快慢，整数 tick 决定模拟时间。
 
+\clearpage
+\section{给速度：先分清它在哪个坐标系}
+重启场景，选用速度模型：
+\begin{lstlisting}[language=bash,numbers=none]
+ros2 launch motion2d_bringup ch04.launch.py model:=velocity
+\end{lstlisting}
+此时只订阅 \code{/command/velocity}，RViz2 的位姿目标不参与驱动。
+在另一个已加载环境的终端连续发送机体系速度：
+\begin{lstlisting}[language=bash,numbers=none]
+ros2 topic pub -r 20 /command/velocity geometry_msgs/msg/TwistStamped \
+  "{header: {frame_id: base_link}, twist: {linear: {x: 0.5}, angular: {z: 0.3}}}"
+\end{lstlisting}
+odom 系速度方向固定；base\_link 系速度会随机器人转动。同一个 $(0.5,0)$，
+前者表示一直向 odom 的 x 正方向走，后者表示一直朝圆盘的“前方”走。
+全向模型也允许 y 方向输入，这和不能横移的差速车不同。
+
+若一个时间步 h 内保持 odom 速度 u 与角速度 $\omega$，则
+\begin{equation}
+p_{k+1}=p_k+hu,\qquad
+\psi_{k+1}=\operatorname{wrap}(\psi_k+h\omega).
+\end{equation}
+若 u 在机体系，积分 $\dot p=R(\psi_k+\omega t)u$ 可得
+\begin{equation}
+p_{k+1}=p_k+h\,\operatorname{sinc}(\beta)\,R(\psi_k+\beta)u,
+\qquad \beta=\frac{\omega h}{2}.
+\end{equation}
+其中 $\operatorname{sinc}(\beta)=\sin\beta/\beta$，在零处取 1。小角度用
+$1-\beta^2/6$ 避免除以很小的数。这个式子覆盖圆弧与直线极限：
+
+\par\noindent\begin{minipage}{\linewidth}
+\lstinputlisting[language=C++,linerange={velocity_begin-velocity_end},
+  includerangemarker=false]{../ros2_ws/src/motion2d/src/sim/velocity_model.cpp}
+\end{minipage}\par
+
+\clearpage
+\section{限速、超时与圆弧安全}
+默认平移速度模长限制为 1 m/s，角速度绝对值限制为 1 rad/s。
+超出平移限制时等比例缩短向量，保留方向；不能分别限每个分量后，仍声称限制了模长。
+配置项是 \code{speed_max} 和 \code{yaw_rate_max}。
+
+命令默认在模拟时间中有效 0.5 s，到期后在 tick 边界切为零速度，
+状态为 \code{command_timeout}。暂停不会消耗有效期。零时间戳从接收时刻起算，
+非零时间戳从消息时刻起算。改变 dt 时，过期检测最多量化到一个 tick。
+由于可以瞬间改变速度，该模型依然不用于 IMU 融合；后续惯性模型需要真实制动。
+
+圆弧的中间部分不一定贴着起终点连线。设加速度模长在一个步长内不超过
+$a_{\max}$，曲线与线性插值的偏差满足
+\begin{equation}
+\|p(t)-p_{\rm chord}(t)\|
+\leq \frac{a_{\max}}{2}t(h-t)
+\leq \frac{a_{\max}h^2}{8}.
+\end{equation}
+可把它理解为线性插值的二阶误差界。机体系恒速度转弯时
+$a_{\max}=|\omega|\,\|u\|$，odom 恒速度时为零。
+因此把检查半径暂时改为 $r+a_{\max}h^2/8$，再复用直线扫掠检查，
+就把整段曲线包在胶囊内。这是保守的充分检查，可能拒绝狭窄但实际上可通过的路径。
+
+\begin{notebox}
+\textbf{为什么不能只检查两个状态？}\quad 薄墙可能位于两个 tick 之间；
+转弯时障碍也可能位于圆弧上、却不在端点连线上。测试专门构造了后一种场景，
+验证“只检查弦”会漏检，加上曲率引起的余量后能拒绝。
+\end{notebox}
+
+\textbf{代码练习 ch04-2：}补完 \path{exercises/ch04/starter/velocity_step.hpp}
+的 odom 系速度积分，并归一化 yaw。用 check\_velocity.cpp 检查负速度、时间步长和跨越 pi 的角度。
+编译时沿用本章习题 README 的命令。
+
+\textbf{实验：}在转向后分别发送 odom 与 base\_link 的同一速度，比较轨迹；
+停止发送，验证超时；暂停两秒再单步，解释为什么暂停不消耗模拟时间。
+运行下面的实际通信检查：
+\begin{lstlisting}[language=bash,numbers=none]
+/usr/bin/python3 ../scripts/check_ch04.py --model velocity
+\end{lstlisting}
 % extension_sections
 \clearpage
 \section{接口、练习与验收}

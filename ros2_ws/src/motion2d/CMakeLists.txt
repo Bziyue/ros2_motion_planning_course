@@ -14,7 +14,7 @@ find_package(tf2_ros REQUIRED)
 add_library(motion2d_core
   src/geometry/se2.cpp src/geometry/obstacles.cpp
   src/sim/sim_clock.cpp src/sim/world.cpp src/sim/world_generator.cpp
-  src/sim/ideal_model.cpp src/sim/swept_collision.cpp)
+  src/sim/ideal_model.cpp src/sim/swept_collision.cpp src/sim/velocity_model.cpp)
 target_compile_features(motion2d_core PUBLIC cxx_std_17)
 target_compile_options(motion2d_core PRIVATE -Wall -Wextra -Wpedantic)
 target_include_directories(motion2d_core PUBLIC
