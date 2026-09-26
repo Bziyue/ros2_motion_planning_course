@@ -1,110 +1,275 @@
 \chapter{让整段曲线有地方走：安全走廊}
 \begin{notebox}
-\textbf{目标}\quad 沿 A* 路径构建整块安全的凸区域，并为后续轨迹分配走廊和连接点。\\
-\textbf{先修}\quad 第 11、12 章；凸集、线段与半平面。
+\textbf{目标}\quad 从 A* 路径构造安全凸区域，理解半平面、区域相交与连接点分配。\\
+\textbf{先修}\quad 第 03 章的点积与叉积，第 11、12 章的栅格和碰撞几何。
 \end{notebox}
 
-\section{先比较矩形与凸多边形}
+\section{从一条折线到一条有宽度的通道}
+A* 提供一条能走通的折线。后面将把它变成平滑曲线，转弯处和路点之间都会发生位移。
+因此希望先沿折线圈出一些安全区域，让曲线在里面调整形状。
+这一串彼此交叠的区域就是\textbf{安全走廊}。先运行矩形与多边形的对照实验：
 \begin{lstlisting}[language=bash]
 ros2 run motion2d corridor_demo tmp/ch13_corridor
 /usr/bin/python3 scripts/plot_ch13_corridor.py
 \end{lstlisting}
-本章先使用给定栅格隔离算法，输入是已经膨胀的配置空间和原始 A* 邻格折线。
-实验路线从隔墙左下方绕到上端，再回到右下方。先得到一串相互交叠的局部矩形，
-再尝试合并成较少的凸多边形；每次合并都重新检查整个区域。
+路线从隔墙左下方绕到上端，再回到右下方。构造分三步：沿原始 A* 邻格路径扩张局部矩形，
+尝试将相邻矩形合并成凸多边形，最后从交叠区域中选连接点。
+输入是第十一章已膨胀的配置空间：自由位置表示机器人圆心可以放在那里，半径和裕量已经计入地图。
 
-\section{一个凸区域的两种表示}
-顶点表示适合画图；半空间表示适合写约束。对逆时针多边形，边从 $a_i$ 指向 $a_{i+1}$，
-内部在边的左侧。令 $e_i=a_{i+1}-a_i$，单位外法向为
+\section{用半平面表示一个凸区域}
+\subsection{“凸”为什么能帮助检查线段}
+若区域中任意两点 $a,b$ 之间的整条线段都在区域中，就称它为凸集。
+线段可写为 $p(s)=(1-s)a+sb$，其中 $0\leq s\leq1$。
+圆盘、矩形和向外鼓出的多边形都满足这个性质；有凹口的区域可能让线段穿过凹口。
+后面的构造始终保留凸性，因此检查两个端点就能判断\emph{它们之间的直线段}是否被区域包含。
+
+用顶点表示多边形很适合绘图，用每条边限定的半平面表示则更适合计算。
+设顶点按逆时针排列，边从 $a_i$ 指向 $a_{i+1}$，边向量为 $e_i=a_{i+1}-a_i$。
+内部在行进方向左侧，外法向在右侧。把 $e=(e_x,e_y)$ 顺时针转 $90^\circ$ 得到 $(e_y,-e_x)$；
+它与 $e$ 的点积为 $e_xe_y-e_ye_x=0$，确实垂直。
+再除以长度，得到单位外法向
 \begin{equation}
-n_i=\frac{(e_{iy},-e_{ix})^T}{\|e_i\|},\qquad
-b_i=n_i^Ta_i,\qquad \mathcal C=\{p\mid A p\leq b\}.
+n_i=\frac{(e_{iy},-e_{ix})^\top}{\|e_i\|},\qquad b_i=n_i^\top a_i.
 \end{equation}
-$A$ 的第 $i$ 行是 $n_i^T$，各行法向长度均为 1；故 $n_i^Tp-b_i$ 是到该边直线的带符号距离，单位 m。
-它非正表示点在此半平面中。一个点必须满足所有行，才属于整个区域。
+边上各点满足 $n_i^\top p=b_i$，内部满足 $n_i^\top p\leq b_i$。
+将每条边写成一行，就得到
+\begin{equation}
+\mathcal C=\{p\mid Ap\leq b\},\qquad
+A=\begin{bmatrix}n_1^\top\\\vdots\\n_K^\top\end{bmatrix},\quad
+b=\begin{bmatrix}b_1\\\vdots\\b_K\end{bmatrix}.
+\end{equation}
+矩阵乘法在这里就是同时计算 $K$ 个点积；不等号表示每一行都要成立。
+$A$ 为 $K\times2$，$p$ 为二维坐标，$b$ 为 $K$ 维列向量。
+
+\begin{center}
+\begin{tikzpicture}[x=1.1cm,y=1.1cm,>=Stealth]
+\fill[tealblue!10] (0,0) rectangle (4,1.8);
+\draw[navy,thick,->] (.3,0)--(3.6,0);
+\fill[navy] (.3,0) circle(2pt) node[below left]{$a_i$};
+\node[below right] at (3.6,0) {$a_{i+1}$};
+\draw[tealblue,thick,->] (2,0)--(2,-.85) node[right]{$n_i$};
+\node at (2,1.55) {内部：$n_i^\top p-b_i<0$};
+\fill[navy] (1.1,.85) circle(2pt) node[above right]{$p$};
+\draw[dashed] (1.1,.85)--(1.1,0);
+\node[left] at (1.1,.42) {$|r_i|$};
+\node at (2,-1.4) {外部：$n_i^\top p-b_i>0$};
+\end{tikzpicture}
+\end{center}
+
+\subsection{残差为何是距离，以及怎样手算}
+记 $r_i=n_i^\top p-b_i$。从 $p$ 沿法向减去 $r_i n_i$，得到
+$p_\perp=p-r_i n_i$。代回直线方程：
+\begin{equation}
+n_i^\top p_\perp-b_i=r_i-r_i\|n_i\|^2=0.
+\end{equation}
+所以 $p_\perp$ 是垂足，垂直距离为 $\|p-p_\perp\|=|r_i|$。
+$r_i$ 带有内负外正的符号，单位为 m；它量的是到\emph{边所在直线}的距离。
+这也解释了单位化的作用：若法向扩大两倍而偏移同样扩大，区域不变，但残差会扩大两倍。
+
+例如矩形顶点依次为 $(1,2),(4,2),(4,4),(1,4)$ m，则
+\begin{equation}
+A=\begin{bmatrix}0&-1\\1&0\\0&1\\-1&0\end{bmatrix},\qquad
+b=\begin{bmatrix}-2\\4\\4\\-1\end{bmatrix}.
+\end{equation}
+对 $p=(2,3)$，四行残差依次为 $-1,-2,-1,-1$ m，全部在内。
+对 $p=(4.3,3)$，右边界残差为 $.3$ m，因此在外。
+斜边也按相同规则：$(4,2)\to(7,6)$ 的边向量为 $(3,4)$，长度为 5，
+外法向为 $(.8,-.6)$，偏移为 $b=.8\times4-.6\times2=2$ m。
+
+\par\noindent\begin{minipage}{\linewidth}
 \lstinputlisting[language=C++,linerange={corridor_halfspace_begin-corridor_halfspace_end},
   includerangemarker=false]{../ros2_ws/src/motion2d/src/planning/corridor.cpp}
+\end{minipage}\par
+取模运算把末顶点接回首顶点，\code{normalized()} 做单位化，\code{A.row(i)} 存第 $i$ 条约束。
+\code{contains} 计算全部残差的最大值；最大值也不超过容差，意味着每条边都满足。
+\code{makeRegion} 同时保留顶点与半平面，供绘图与后面的轨迹优化使用。
 
-\begin{notebox}
-\textbf{已经在配置空间内}\quad 走廊容纳的是机器人圆心，输入格子的半径和安全裕量已在第十一章处理。
-这里不再次缩小一个物理半径。只有半空间约束正确且整个区域安全，才能使用后面的凸性论证。
-\end{notebox}
-公开接口为 makeRegion、regionIsFree 和 buildCorridor；结果同时保留顶点与半空间。
-凸多边形须严格凸、逆时针且非退化。练习 ch13-1 从一条边写出对应的单位外法向和偏移。
+最后验证半平面交集确实是凸的。取区域内两点 $a,c$，满足 $Aa\leq b,Ac\leq b$。于是
+\begin{equation}
+A[(1-s)a+sc]=(1-s)Aa+sAc\leq(1-s)b+sb=b.
+\end{equation}
+这里使用了 $1-s,s$ 非负。对所有行同时成立，就得到整条线段都在区域内。
 
-\clearpage
-\section{从局部矩形开始}
-对每一段原始邻格路径，取起终点所在格子的包围框。若点恰好在格线或格角上，种子包含两侧格子。
-框内每格都自由才可开始扩张，然后轮流尝试向左、右、下、上增加一条完整栅格边。
-任何新增格被阻塞，就不接受这次扩张。每侧还有局部扩展长度限制 $L$，对应最多
-$\lfloor L/\rho\rfloor$ 格；演示设置 $L=0.6$ m。
+\section{沿邻格路径扩张局部矩形}
+对每一条原始 A* 线段，先找能覆盖其两个端点的格子包围框。
+设框的整数索引为左、右、下、上 $l,r,d,u$，包含的世界坐标范围为
+\begin{equation}
+[o_x+l\rho,\ o_x+(r+1)\rho]\times
+[o_y+d\rho,\ o_y+(u+1)\rho].
+\end{equation}
+右侧的 $+1$ 来自格子的右边界。例如原点为零、$\rho=.1$ m，线段从 $(.25,.35)$ 到 $(.35,.45)$，
+种子框取列 2、3 和行 3、4，覆盖 $[.2,.4]\times[.3,.5]$ m。
+若端点恰在格线或格角上，种子包括接触到的两侧格子，保持上一章“接触也要检查”的约定。
+
+框内每格都自由才开始扩张。轮流尝试向左、右、下、上增加一条完整栅格边；
+新增条带中的格子全部自由，才更新该侧索引。
+每侧从种子起最多扩张 $\lfloor L/\rho\rfloor$ 格，$L$ 是局部扩展长度。
+向下取整保证实际新增长度不超过 $L$，例如 $L=.25$ m、$\rho=.1$ m 时最多增加两格。
+
+\par\noindent\begin{minipage}{\linewidth}
 \lstinputlisting[language=C++,linerange={corridor_rectangle_begin-corridor_rectangle_end},
   includerangemarker=false]{../ros2_ws/src/motion2d/src/planning/corridor.cpp}
-输出边界向内缩 $10^{-6}\rho$，在浮点运算下保留与阻塞格的分离。
-每条种子线段的两个端点仍须在矩形内，所有边界约定与完整区域检查一致。
-如果当前最后一个矩形已经包含下一段的两个端点，就无需重复添加。
-扩张顺序会影响形状；这不是最大面积矩形求解器，合并后的区域也不再受单个种子的扩展窗口限制。
+\end{minipage}\par
+\code{freeBox} 逐格检查新条带。\code{changed} 记录本轮是否有任何一侧移动；
+当所有方向都被障碍或扩展上限挡住时，循环结束。
+每次扩张只加入自由条带，因此原有自由矩形与新条带组成的更大矩形仍安全。
+左右方向先扩张，会改变随后上下条带的宽度；所以尝试顺序会影响最终形状。
+本章用这个局部贪心规则控制构造成本，区域大小还可通过 $L$ 调节。
 
-\section{安全顶点不足以证明区域安全}
-一个四边形的四个顶点、甚至四条边都可能自由，而小障碍被包在正中间。
-因此 regionIsFree 遍历区域包围框内的\textbf{阻塞方格}，求它们与走廊多边形的闭集交集。
-只要交集非空，就拒绝；擦角或沿边接触也算非空。
+输出边界向内缩 $10^{-6}\rho$，使矩形边界与相邻阻塞格留出数值间隔；
+随后检查原线段端点仍在内，并对整个矩形做区域碰撞检查。
+若上一个矩形已包含下一段的两个端点，凸性保证它也包含整段，可以复用该矩形。
 
-实现对多边形逐次施加方格的四个半平面约束。跨越某个边界 $n^Tp=b$ 的边段，
-设两端残差为 $\alpha=n^Tp_0-b$、$\beta=n^Tp_1-b$，交点为
+\section{怎样检查整块区域与方格相交}
+\subsection{从边界检查转向面积检查}
+看下图左侧：大矩形四角和四条边都自由，但中间包着一个阻塞方格。
+因此检查区域需要覆盖其\emph{内部}。
+实现先用走廊的包围框筛选候选阻塞格，然后计算多边形与每个闭方格的交集。
+交集只要非空，就表示这块区域包含障碍点；点接触、线接触和面积相交都属于这种情况。
+
+\begin{center}
+\begin{tikzpicture}[x=1.05cm,y=1.05cm,>=Stealth]
+\begin{scope}
+\draw[tealblue,thick,fill=tealblue!8] (0,0) rectangle (3,3);
+\fill[navy!70] (1,1) rectangle (2,2);
+\foreach \p in {(0,0),(3,0),(3,3),(0,3)} {\fill[tealblue] \p circle(2pt);}
+\node at (1.5,3.4) {自由边界包住了障碍};
+\node[white] at (1.5,1.5) {阻塞};
+\end{scope}
+\begin{scope}[xshift=5.1cm]
+\fill[tealblue!15] (0,0) rectangle (2,1);
+\fill[navy!12] (1,0) rectangle (2,3);
+\draw[tealblue,thick] (0,0) rectangle (2,1);
+\draw[navy,thick] (1,0) rectangle (2,3);
+\draw[orange!80!black,very thick,dashed] (0,0)--(2,0)--(2,3)--(1,3)--(0,1)--cycle;
+\fill[navy!70] (.35,1.3) rectangle (.65,1.6);
+\node at (1,3.4) {凸包增加了转角内侧面积};
+\node[tealblue] at (.45,.45) {$\mathcal C_1$};
+\node[navy] at (1.5,2.4) {$\mathcal C_2$};
+\end{scope}
+\end{tikzpicture}
+\end{center}
+
+\subsection{一次半平面裁剪的公式}
+方格 $[x_l,x_r]\times[y_d,y_u]$ 可以写成四个半平面：
+$x\leq x_r,-x\leq-x_l,y\leq y_u,-y\leq-y_d$。
+用其中一个半平面 $n^\top p\leq b$ 裁剪多边形时，沿每条边从 $p_0$ 走向 $p_1$。
+记两端残差 $\alpha=n^\top p_0-b,\ \beta=n^\top p_1-b$。
+在线段参数 $t$ 处，残差为
 \begin{equation}
-p_\ast=p_0+\frac{\alpha}{\alpha-\beta}(p_1-p_0).
+n^\top[p_0+t(p_1-p_0)]-b
+=\alpha+t(\beta-\alpha).
 \end{equation}
-保留半平面内的顶点与必要交点，重复四次。碰撞检查保留退化的点和线，避免漏掉接触。
-地图外部也被拒绝。检查针对整块区域，不需要靠稠密采样猜测内部是否安全。
-
-\section{只有通过验证才合并}
-把相邻矩形顶点放在一起求凸包，再调用同一个 regionIsFree。
-通过则替换成凸包，否则保留两个已有区域。转弯内侧的障碍经常导致合并失败，这是应保留的约束。
-浮点近共线顶点若不满足严格凸性，也放弃该次可选合并。
-局部矩形刻意有扩展窗口，因此在更大自由空间中，合并后可以出现六边形等非矩形区域。
-
-\clearpage
-\section{交叠区域决定连接点}
-设相邻两个走廊为 $\mathcal C_i,\mathcal C_{i+1}$，先求交集
+边跨过直线时，令它为零，得到交点
 \begin{equation}
-\mathcal I_i=\mathcal C_i\cap\mathcal C_{i+1}.
+t_* = \frac{\alpha}{\alpha-\beta},\qquad
+p_*=p_0+t_*(p_1-p_0).
 \end{equation}
-它也由凸半平面裁剪得到。这里要求\textbf{正面积}，只共用一条边或一个点不够。
-数值阈值为 $10^{-10}\rho^2$；这个阈值只排除退化交叠，实际运动余量仍受地图与半径决定。
-从交集多边形的顶点 $v_1,\ldots,v_K$ 取平均作为连接点：
-\begin{equation}
-q_i=\frac1K\sum_{k=1}^K v_k.
-\end{equation}
-这是一个容易计算的内部点，不是多边形的面积质心，也不保证最大净空。
-起点和终点采用原始请求坐标，最终 $N$ 个走廊对应 $N+1$ 个路点。
-第 $i$ 条新线段的两个端点都属于 $\mathcal C_i$，于是由凸性有
-\begin{equation}
-(1-s)q_i+s q_{i+1}\in\mathcal C_i,\qquad 0\leq s\leq1.
-\end{equation}
-这证明的是\textbf{分配后的直线段}整段包含在安全区域。
-经过相同路点的五次曲线可能向外鼓出，不能直接复用这条证明；第十六章会检查整段 Bezier 凸包。
+跨边界意味着一端内、一端外，所以分母非零，$t_*$ 在 $[0,1]$ 内。
+例如裁剪 $x\leq2$，边从 $(0,1)$ 到 $(3,2)$，有 $\alpha=-2,\beta=1$，
+因此 $t_*=2/3$，交点为 $(2,5/3)$。
 
-\section{失败时不返回半成品}
 \begin{center}\small
-\begin{tabular}{ll}\toprule
-状态 & 含义 \\\midrule
-empty\_path & 没有可用路径 \\
-unsafe\_path & 原始折线含越界、穿障或接触 \\
-blocked\_seed\_box & 线段安全，但整格种子框不可用 \\
-no\_positive\_overlap & 相邻区域没有正面积交叠 \\
-invalid\_extension & 扩展长度参数不合法 \\\bottomrule
+\begin{tabular}{lll}\toprule
+起点 $p_0$ & 终点 $p_1$ & 加入输出的点（按行进顺序）\\\midrule
+内 & 内 & $p_1$\\
+内 & 外 & $p_*$\\
+外 & 内 & $p_*,p_1$\\
+外 & 外 & 空\\\bottomrule
 \end{tabular}
 \end{center}
-失败结果的区域和路点均为空，调用方应保留明确失败状态。
-尤其不要把贪心简化后的长对角线直接拿来扩张矩形：线段可以绕过方格，包围框却可能覆盖它。
-保留原始 A* 邻格路径更适合本章构造方式；已有长线段可另行重新离散搜索。
+这里“内”包括残差等于零的边界。函数 \code{clip} 把上表合成两条判断：
+内外状态不同就加入交点，终点在内就加入终点。
+依次施加方格的四个半平面，剩下的就是两区域的交集。
+碰撞检查保留退化的点与线，从而检查到擦角和沿边接触。
+实现还将候选阻塞方格向外加 $10^{-12}$ m 的计算容差；地图外部同样视为阻塞。
 
-验证覆盖单位法向、几何包含、点/线退化交叠、内部障碍、擦边/擦角、非矩形安全凸包、
-转弯路线与不同栅格尺度。对每个最终区域验证整块无碰撞，并检查分配给它的两个端点。
-这些是地图所表达的几何证书，仍依赖观测质量与定位质量。
+\section{凸包合并为什么要重新检查}
+求两个区域顶点的凸包，可以把它们装进一个新的凸多边形，算法沿用第三章。
+凸包含有两个区域，也会填补它们之间的凹口；上图右侧的小障碍恰好落在新增部分。
+因此每次合并后都调用同一个 \code{regionIsFree}，检查整个新区域。
+通过就替换原区域，否则保留已有区域，让轨迹分成两段绕过转角。
 
-\clearpage
+矩形的 $L$ 限制只控制单个种子的局部扩张；合并可沿相邻矩形继续生长，形成六边形等区域。
+近共线点若无法满足严格凸多边形的数值条件，就跳过这一次合并。
+可以把这一步理解成：在保持已知安全通道的基础上，减少后续需要安排的轨迹段数。
+
+\section{在交叠区选择连接点}
+\subsection{交集、面积与可移动余量}
+相邻走廊为 $\mathcal C_i,\mathcal C_{i+1}$，交集
+$\mathcal I_i=\mathcal C_i\cap\mathcal C_{i+1}$ 同时满足两组半平面约束。
+仍用逐边裁剪得到它，然后要求交叠具有正面积。
+只共用一条边时，连接点只能沿这一条线活动；只共用一个点时则完全固定。
+正面积让连接点在两个方向都能作小范围调整。
+
+交叠面积可由顶点计算。对有序顶点 $v_k=(x_k,y_k)$，原点与一条有向边组成的三角形有符号面积是
+$\tfrac12(x_k y_{k+1}-y_k x_{k+1})$：叉积给出平行四边形面积，三角形再除以二。
+沿多边形边界相加时，内部重复的有向边互相抵消，剩下多边形面积，因此
+\begin{equation}
+S=\frac12\left|\sum_{k=1}^{K}(x_k y_{k+1}-y_k x_{k+1})\right|,
+\qquad v_{K+1}=v_1.
+\end{equation}
+代码要求 $S>10^{-10}\rho^2$。乘 $\rho^2$ 使阈值具有面积单位，并随格子尺度变化；
+实际可用的调整宽度还要看交叠的形状。
+
+\subsection{顶点平均为什么位于交集内部}
+本章将交集顶点的平均值作为连接点：
+\begin{equation}q_i=\frac1K\sum_{k=1}^K v_k.\end{equation}
+对交集任意一条约束 $n^\top p\leq b$，所有顶点都满足它，所以
+$n^\top q_i=K^{-1}\sum_k n^\top v_k\leq b$。
+正面积意味着顶点不会全落在同一条边线上，至少有一个顶点严格满足该行不等式；
+平均后也严格在这一行内部。对每条边都如此，连接点便落在交集内部。
+这种顶点平均计算简单，也保持了两区域的共同包含关系。
+
+例如 $\mathcal C_1=[0,2]\times[0,1.5]$、$\mathcal C_2=[1,3]\times[.5,2]$ m，
+交集是 $[1,2]\times[.5,1.5]$ m，面积为 $1\,\text{m}^2$，四顶点平均为 $(1.5,1)$ m。
+
+\begin{center}
+\begin{tikzpicture}[x=1.55cm,y=1.55cm,>=Stealth]
+\fill[tealblue!12] (0,0) rectangle (2,1.5);
+\fill[navy!12] (1,.5) rectangle (3,2);
+\fill[tealblue!27] (1,.5) rectangle (2,1.5);
+\draw[tealblue,thick] (0,0) rectangle (2,1.5);
+\draw[navy,thick] (1,.5) rectangle (3,2);
+\draw[orange!90!black,thick] (.3,.4)--(1.5,1)--(2.7,1.7);
+\fill[orange!90!black] (.3,.4) circle(2pt) node[below]{$q_0$};
+\fill[orange!90!black] (1.5,1) circle(2pt) node[below right]{$q_1$};
+\fill[orange!90!black] (2.7,1.7) circle(2pt) node[above]{$q_2$};
+\node[tealblue] at (.45,1.2) {$\mathcal C_1$};
+\node[navy] at (2.65,.8) {$\mathcal C_2$};
+\node at (1.5,-.45) {连接点 $q_1$ 同时属于两块区域};
+\end{tikzpicture}
+\end{center}
+
+\subsection{把路点与轨迹段逐一配对}
+将 $N$ 个走廊编号为 $\mathcal C_1,\ldots,\mathcal C_N$，起点记 $q_0$，终点记 $q_N$，
+内部连接点取 $q_i\in\mathcal C_i\cap\mathcal C_{i+1}$。
+这样第 $i$ 段的两个端点 $q_{i-1},q_i$ 都在 $\mathcal C_i$ 中，前面的半平面推导给出
+\begin{equation}(1-s)q_{i-1}+s q_i\in\mathcal C_i,\qquad 0\leq s\leq1.\end{equation}
+结果中的 $N$ 个区域与 $N+1$ 个路点便形成一一对应的分段路线。
+
+曲线的中间形状还取决于导数和系数。例如 $p(s)=(s,4s(1-s))$ 的端点为 $(0,0),(1,0)$，
+都在矩形 $[0,1]\times[-.2,.2]$ 内，但中点为 $(.5,1)$，已经越过上边界。
+第十四章先为路点增加时间与导数，第十六章再用 Bezier 控制点把\emph{整条曲线}包含在凸走廊中。
+
+\section{从状态判断构造停在哪一步}
+\begin{center}\small
+\begin{tabular}{ll}\toprule
+状态 & 对应步骤与含义\\\midrule
+empty\_path & 输入路径为空\\
+unsafe\_path & 原始折线越界、穿障或接触阻塞格\\
+blocked\_seed\_box & 线段可行，但其整格包围框包含阻塞格\\
+no\_positive\_overlap & 相邻区域的交叠面积不足\\
+invalid\_extension & 扩展长度需要有限且非负\\\bottomrule
+\end{tabular}
+\end{center}
+尤其要观察第三种情况：一条长对角线能从障碍旁经过，它的轴对齐包围框却可能很宽，将旁边障碍包含进来。
+原始 A* 邻格折线的种子框较小，适合这种矩形扩张方法。
+因此节点把原始路径交给走廊构造，将简化折线另作显示与比较。
+构造失败时返回状态与空结果，调用方据此重新选择目标或调整构造参数。
+
+检查实现时，可依次手算一个矩形的半平面、一个裁剪交点、一个交叠面积与连接点，
+再输入中心含障碍的区域和仅共边的区域，观察它们分别在哪一步被识别。
 \section{固定地图上的对照实验}
 \begin{figure}[h]
 \centering\includegraphics[width=\linewidth]{figures/ch13_corridor.pdf}
@@ -126,8 +291,8 @@ every last row/.style={after row=\bottomrule}]{data/ch13_corridor.csv}
 在完全相同的 A* 路径上，局部矩形为 10 个，安全凸包合并后为 3 个；总顶点数从 40 变成 19。
 两种构造的最小交叠面积都约为 $0.06\,m^2$，所以连接点没有落在仅共边的退化位置。
 
-区域变少会减少后续轨迹分段和约束的组织成本，但不代表最短路径、最小 jerk 或最大走廊体积。
-本章没有给红线分配时间，也没有直接驱动机器人。
+区域变少后，后续可以用较少的曲线段连接起终点。观察图中转角处的区域，
+解释凸包合并为什么在某些位置继续、在另一些位置停下。红线表示几何路线，下一章为每段分配运行时间。
 
 \begin{enumerate}
 \item \textbf{理解：}画一个内部含障碍的凸四边形，说明只测顶点和边会遗漏什么。
@@ -136,7 +301,6 @@ every last row/.style={after row=\bottomrule}]{data/ch13_corridor.csv}
 \item \textbf{实验：}改变局部扩展长度与合并开关，记录区域数、形状与最小交叠面积。
 保持地图、半径和路径相同，解释变化原因。
 \end{enumerate}
-\clearpage
 \section{同一观测快照上的 ROS 走廊}
 \begin{lstlisting}[language=bash]
 ros2 launch motion2d_bringup ch13.launch.py
@@ -146,9 +310,13 @@ ros2 launch motion2d_bringup ch13.launch.py
 \end{lstlisting}
 本章沿用静止机器人、真值定位与真实扫描建图；默认半径 0.2 m、裕量 0.05 m。
 RViz 的目标工具发送 map 系目标，规划器先在当前栅格上运行 A*，再把这次搜索的原始路径直接交给走廊构造。
-不通过另一个订阅回调拼接不同时刻的路径和地图。下一章才给几何路线增加时间。
+搜索与走廊构造共用同一张地图快照，因此两阶段对自由格的判断一致。
+\par\noindent\begin{minipage}{\linewidth}
 \lstinputlisting[language=C++,linerange={corridor_snapshot_begin-corridor_snapshot_end},
   includerangemarker=false]{../ros2_ws/src/motion2d/src/nodes/planner_node.cpp}
+\end{minipage}\par
+代码把搜索结果的原始 \code{path} 与本次 \code{grid} 一起传给构造器；
+随后分别发布连接点和区域边界。走廊与地图的对应关系在这一调用处建立。
 
 \begin{center}\small
 \begin{tabular}{ll}\toprule
@@ -165,15 +333,16 @@ RViz 的目标工具发送 map 系目标，规划器先在当前栅格上运行 
 每次 MarkerArray 先发 DELETEALL，再发新边框，区域数变少也不留下旧多边形。
 错误目标、搜索失败或 reset 都清空路径与边框。
 
+\clearpage
 \section{参数、观察与独立检查}
 \begin{itemize}
 \item corridor.enabled：本章开启；旧章节默认关闭。
 \item corridor.merge\_convex：是否尝试安全凸包合并。
 \item corridor.max\_extension：每侧局部扩展长度，默认 0.6 m。
 \end{itemize}
-算法直接使用 ConvexRegion 和半空间，不从显示 Marker 反解约束。
+算法直接使用 \code{ConvexRegion} 的顶点与半平面，Marker 是由这些数据生成的显示副本。
 RViz 应显示观测配置图、闭合区域轮廓及穿过交叠区的分配路线。
-本机完成了真实 ROS 消息验收；由于已记录的桌面显示限制，未宣称 GUI 目视验收。
+
 
 \begin{figure}[!ht]
 \centering\includegraphics[width=.68\linewidth]{figures/ch13_observed.pdf}
@@ -182,8 +351,10 @@ RViz 应显示观测配置图、闭合区域轮廓及穿过交叠区的分配路
 \end{figure}
 
 固定 seed=42/4242，reset 后单步至 0.5 s，目标为 $(-4,-1)$ m。
-得到 73 个原始路径点、4 个走廊；检查脚本使用独立的分离轴方法逐格验证整个多边形，
-并验证段端点、闭合边框和时间戳。随后换近目标、无效远目标并 reset，核对旧显示确实清除。
+图中路线包含 73 个原始路径点，整理为 4 个走廊。可以从消息中取一个区域，
+用第七章的分离轴方法与附近阻塞格比较，再与本章的裁剪结果核对。
+两种方法从不同角度判断相交：一种寻找分开的投影区间，另一种直接求共同部分。
 
-\textbf{新增实验：}依次发送远近两个已观测目标，记录区域数；解释为什么需要 DELETEALL。
-将目标改到未知区域，分别观察 A* 和走廊状态，不能因为上一条路径还在截图中就判断当前规划成功。
+\textbf{操作练习：}依次发送远近两个已观测目标，记录区域数；解释为什么需要 DELETEALL。
+将目标改到未知区域，分别观察 A* 和走廊状态，并确认旧路线和边框随当前结果更新。
+手算题、代码练习与实验步骤见 \path{exercises/ch13}。
