@@ -1,115 +1,276 @@
 \chapter{让 IMU 预测，让激光纠偏}
 \begin{notebox}
 \textbf{目标}\quad 在同一时间轴上估计位置、速度、航向与偏置，理解预测和校正的分工。\\
-\textbf{先修}\quad 第 06、08 章；本章逐步解释协方差和卡尔曼增益。
+\textbf{先修}\quad 第 06、08 章的 IMU 模型、方差和雅可比。
 \end{notebox}
 
-\section{先单独验证滤波器}
+\section{从一个可以控制噪声的实验开始}
 重新构建并加载工作区后，从仓库根目录运行：
 \begin{lstlisting}[language=bash,numbers=none]
 ros2 run motion2d planar_ekf_demo tmp/ch09_filter
 /usr/bin/python3 scripts/plot_ch09_filter.py
 \end{lstlisting}
-先把两个问题分开：滤波器的矩阵是否正确，真实扫描匹配能否提供可靠观测？
-这个实验只检查前者。位姿输入是从解析轨迹生成的带噪合成测量，\emph{不是激光 SLAM 验证}。
-后续在线版本才使用第八章扫描匹配的实际输出。
+这个实验从解析轨迹生成 IMU 和带噪位姿测量。我们可以指定传感器偏置，
+也可以暂停位姿测量，观察估计如何变化。先掌握融合的计算，再在本章后半部分
+将位姿测量换成第八章的扫描匹配输出。
 
-IMU 给短时间运动变化；它并不知道初始速度或全局位置。
-位姿观测虽然较慢，却可以修正累积误差，并通过时间关联帮助估计速度与偏置。
-二者噪声模型不同，不能简单把两个位置取平均。
+IMU 给出短时间内的运动变化。积分需要初始位置和速度，噪声与偏置还会不断累积。
+位姿观测的频率较低，却给出了当前位置的约束。融合的关键是两步：
+每收到 IMU 就\textbf{预测}运动；收到位姿观测后，按二者的不确定性\textbf{校正}预测。
+下面从一个数的加权平均推到八个状态的滤波器。
 
 \section{八个数描述平面状态}
 采用状态列向量
 \begin{equation}
 x=(p_x,p_y,v_x,v_y,\psi,b_{ax},b_{ay},b_g)^\top.
 \end{equation}
-$p,v$ 在 odom 系，$\psi$ 是航向；加计偏置 $b_a$ 在机体系，单位 m/s$^2$；
-陀螺偏置 $b_g$ 单位 rad/s。原始 IMU 的 orientation 字段不参与计算。
-因为机器人水平运动且 roll、pitch 为零，重力没有 x/y 分量：
+$p,v$ 在 odom 系，单位分别为 m、m/s；$\psi$ 是航向，单位 rad。
+加计偏置 $b_a$ 在机体系，单位 m/s$^2$；陀螺偏置 $b_g$ 单位 rad/s。
+偏置描述读数中缓慢变化的偏移，例如静止时陀螺持续多读了 $.01$ rad/s。
+滤波器以原始加速度和角速度为输入，orientation 字段留空。
+因为机器人水平运动且 roll、pitch 为零，重力没有 x/y 分量，由第六章的比力关系得
 \begin{equation}
-a_k=R(\psi_k)(f_{xy,k}-b_{a,k}),\quad
+a_k=R(\psi_k)(f_{xy,k}-b_{a,k}),\qquad
 \omega_k=\omega_{m,k}-b_{g,k}.
 \end{equation}
-对时长 $h$ 的一个小区间，用步首航向旋转并保持加速度，得到
-\begin{equation}
-\begin{aligned}
-p_{k+1}&=p_k+h v_k+\tfrac12 h^2a_k, &v_{k+1}&=v_k+h a_k,\\
-\psi_{k+1}&=\operatorname{wrap}(\psi_k+h\omega_k), &b_{k+1}&=b_k.
-\end{aligned}
-\end{equation}
-这是离散近似：连续转动时，区间内的 $R$ 实际也在变化。
-缩短步长可以减小该近似误差；不能把公式说成一般旋转运动的精确积分。
-当前内核接受 $0<h\leq0.1$ s，长时间缺测应报告失效而不是一步越过。
+先扣除机体系偏置，再旋转到 odom 系，才能与 $v_k$ 在同一坐标系中积分。
+在长度为 $h$ 的小区间内，取步首的 $a_k,\omega_k$ 为常数，则
+\begin{align}
+v_{k+1}&=v_k+\int_0^h a_k\,d\tau=v_k+h a_k,\\
+p_{k+1}&=p_k+\int_0^h(v_k+\tau a_k)\,d\tau
+=p_k+h v_k+\tfrac12h^2a_k,\\
+\psi_{k+1}&=\operatorname{wrap}(\psi_k+h\omega_k),\qquad b_{k+1}=b_k.
+\end{align}
+转弯时，区间内 $R(\psi)$ 会变化，所以固定 $a_k$ 是短时间近似。
+例如保持机体系加速度 $c$、角速度 $\omega$，
+$R(\psi+\omega\tau)c\approx R(\psi)c+\omega\tau R(\psi)Jc$，
+其中 $J=\left[\begin{smallmatrix}0&-1\\1&0\end{smallmatrix}\right]$ 表示转 $90^\circ$。
+被忽略的速度增量约为 $\tfrac12\omega h^2 RJc$：步长减半，这项约减为四分之一。
+当前内核使用 $0<h\leq0.1$ s；更长的 IMU 缺测由时间管理模块处理。
 
-\clearpage
-\section{不确定性如何沿着状态传播}
-协方差 $P$ 的对角项描述方差，非对角项描述两个误差的关联。
-例如位置与速度相关后，一个位置校正也能改变速度。
-令 $J=\left[\begin{smallmatrix}0&-1\\1&0\end{smallmatrix}\right]$，
-$A_\psi=R(\psi)J(f_{xy}-b_a)$。状态转移雅可比中的几个关键块为
+\section{把误差也向前传播一步}
+\subsection{协方差记录误差的大小与关联}
+记估计误差 $\epsilon=x_{\rm true}-\hat x$，在当前估计附近把它视为均值零的随机量。
+协方差的第 $(i,j)$ 项是
 \begin{equation}
-\begin{aligned}
-F_{pv}&=hI,&F_{p\psi}&=\tfrac12h^2 A_\psi,&F_{v\psi}&=h A_\psi,\\
-F_{pb_a}&=-\tfrac12h^2R,&F_{vb_a}&=-hR,&F_{\psi b_g}&=-h.
-\end{aligned}
+P_{ij}=\mathbb E[\epsilon_i\epsilon_j],\qquad P=\mathbb E[\epsilon\epsilon^\top].
 \end{equation}
-剩余对角块为单位阵。下列真实源码同时构造一步状态、$F$ 和噪声输入雅可比 $G$：
+对角项 $P_{ii}$ 是方差；非对角项描述两个误差是否经常同向变化。
+例如速度估大时，下一刻位置通常也会估大，位置和速度的误差便产生正相关。
+$P_{pv}$ 的单位为 m$^2$/s，与位置方差的 m$^2$ 不同。
+矩阵把这些关系按状态顺序放在一起，后面的位置观测就能利用它们修正速度。
+
+\subsection{逐块求状态转移的偏导}
+设 $c=f_{xy}-b_a$。第八章已推导旋转的导数，因而
+\begin{equation}
+\frac{\partial a}{\partial\psi}=R(\psi)Jc=:A_\psi,
+\qquad \frac{\partial a}{\partial b_a}=-R(\psi).
+\end{equation}
+例如 $v^+=v+ha$，对 $v,\psi,b_a$ 分别求导，得到 $I,hA_\psi,-hR$。
+$p^+=p+hv+\tfrac12h^2a$ 中同样的加速度项只需改乘 $\tfrac12h^2$；
+$\psi^+=\psi+h(\omega_m-b_g)$ 对偏置求导为 $-h$。
+按 $(p,v,\psi,b_a,b_g)$ 分块，完整雅可比为
+\begin{equation}
+F=\begin{bmatrix}
+ I&hI&\tfrac12h^2A_\psi&-\tfrac12h^2R&0\\
+ 0&I&hA_\psi&-hR&0\\
+ 0&0&1&0&-h\\
+ 0&0&0&I&0\\
+ 0&0&0&0&1
+\end{bmatrix}.
+\end{equation}
+五组的大小依次为 $2,2,1,2,1$；例如第三列第一块是 $2\times1$，
+第一行第四块是 $2\times2$，各个零块也按所在行列确定大小。
+这张分块表与源码的 \code{block<2,1>(0,4)} 等调用逐项对应。
+
+再对输入 $u=(f_x,f_y,\omega_m)$ 求导，得到 $8\times3$ 矩阵
+\begin{equation}
+G=\begin{bmatrix}
+\tfrac12h^2R&0\\ hR&0\\ 0&h\\0&0\\0&0
+\end{bmatrix}.
+\end{equation}
+这里仍使用五组状态行块，输入列块大小为 $2,1$。
+输入加速度增加一点，会同时改变位置和速度；输入角速度则直接改变航向。
+
+\par\noindent\begin{minipage}{\linewidth}
 \lstinputlisting[language=C++,linerange={imu_predict_begin-imu_predict_end},
   includerangemarker=false]{../ros2_ws/src/motion2d/src/estimation/imu_predictor.cpp}
+\end{minipage}\par
 
-设本次采样的测量方差为
-$\Sigma_u=\operatorname{diag}(\sigma_{ax}^2,\sigma_{ay}^2,\sigma_g^2)$，则
+\subsection{从误差乘积得到协方差传播}
+用 $\Phi(x,u)$ 表示刚才的一步积分，传感器读数满足 $u_m=u_{\rm true}+n$。
+真实状态与预测之差，按一阶泰勒展开为
 \begin{equation}
-P^-_{k+1}=F_kP^+_kF_k^\top+G_k\Sigma_u G_k^\top+Q_b.
+\epsilon^+\approx\Phi(\hat x+\epsilon,u_m-n)-\Phi(\hat x,u_m)+w_b
+\approx F\epsilon-Gn+w_b,
 \end{equation}
-第六章配置的是\textbf{每采样}标准差，所以例如速度方差增量为 $h^2\sigma_a^2$，
-位置与速度的互协方差增量为 $\tfrac12 h^3\sigma_a^2$。
-不能直接套用连续白噪声密度的 $h\sigma_a^2$ 公式。
-
-偏置固定零时，最后三个状态及其协方差保持零。
-开启 estimate\_bias 后，偏置初始标准差默认为 $(.05,.05,.01)$；
-另设随机游走标准差 $\sigma_b=(.0005,.0005,.0001)$，它们是每 $\sqrt{\rm s}$ 的量。
-因此 $Q_b$ 只在偏置对角块添加 $h\operatorname{diag}(\sigma_b^2)$。
-这描述缓慢变化的不确定性，不等于模拟器一定注入了随机游走。
-
-\clearpage
-\section{一次位姿校正为什么也能改变速度}
-观测向量 $z=(p_x^{\rm obs},p_y^{\rm obs},\psi^{\rm obs})$，$H$ 只选择状态中的位置和航向。
-创新、创新协方差与增益为
+$w_b$ 表示这一步偏置的随机变化。设已有状态误差、本次采样噪声和偏置变化相互独立、均值为零。
+将上式乘以自己的转置并取期望，交叉项例如
+$\mathbb E[\epsilon n^\top]=\mathbb E[\epsilon]\mathbb E[n^\top]=0$，于是
 \begin{equation}
-r=z-Hx^-,\qquad S=HP^-H^\top+R_z,\qquad K=P^-H^\top S^{-1}.
+P^-_{k+1}=F_kP^+_kF_k^\top+G_k\Sigma_uG_k^\top+Q_b.
 \end{equation}
-$r$ 的航向分量必须用 wrap 归一化。例如预测 $179^\circ$、观测 $-179^\circ$，
-应校正约 $2^\circ$，而非 $-358^\circ$。\textbf{练习 ch09-1} 补完 yaw\_residual.hpp；
-程序检查跨界、多圈及恰好 $\pi$ 的边界。
+上标 $-$ 表示校正前，$+$ 表示校正后；$\Sigma_u=\mathbb E[nn^\top]$，
+$Q_b=\mathbb E[w_bw_b^\top]$。噪声项的两个负号相乘为正。
 
-代码使用线性方程求解，不显式求逆。先检查 $r^\top S^{-1}r\leq16.3$，
-不满足则拒绝本次校正。门限只能检查观测与当前模型是否相容，无法判定哪一方一定正确。
-若模型漏掉了真实偏置，过小的 $P$ 反而会让它拒绝正常观测。
-
-接受时 $x^+=x^-+Kr$。为减少数值误差对协方差的破坏，采用 Joseph 形式：
+看一维加速度噪声 $n_a$ 就能核对时间的幂次：
+$\delta p=-\tfrac12h^2n_a$，$\delta v=-hn_a$，所以
 \begin{equation}
-P^+=(I-KH)P^-(I-KH)^\top+K R_z K^\top.
+\Delta P_{pp}=\tfrac14h^4\sigma_a^2,\quad
+\Delta P_{pv}=\tfrac12h^3\sigma_a^2,\quad
+\Delta P_{vv}=h^2\sigma_a^2.
 \end{equation}
+第六章配置的是每采样标准差，这些幂次来自同一个样本在整段时间内保持。
+例如 $h=.1$ s、$\sigma_a=.2$ m/s$^2$，三项分别为
+$10^{-6}$ m$^2$、$2\times10^{-5}$ m$^2$/s、$4\times10^{-4}$ m$^2$/s$^2$。
+
+开启 \code{estimate_bias} 时，偏置的初始标准差默认为 $(.05,.05,.01)$。
+为容纳缓慢变化，采用随机游走增量
+$w_{b,i}=\sigma_{b,i}\sqrt h\,\xi_i$，$\xi_i$ 为独立标准正态数。
+于是 $\operatorname{Var}(w_{b,i})=h\sigma_{b,i}^2$：将时段分成两半后，两段方差仍可相加为同一结果。
+默认 $\sigma_b=(.0005,.0005,.0001)$，单位为相应偏置单位除以 $\sqrt{\rm s}$。
+滤波器据此在 $Q_b$ 的偏置对角块加入 $h\operatorname{diag}(\sigma_b^2)$。
+这给出了它愿意容纳的偏置变化速度；实验中的实际偏置另由传感器配置决定。
+
+\lstinputlisting[language=C++,linerange={ekf_covariance_begin-ekf_covariance_end},
+  includerangemarker=false]{../ros2_ws/src/motion2d/src/estimation/planar_ekf.cpp}
+偏置固定零模式把偏置初值、对应协方差和随机游走都置零。
+这样偏置没有可调整的不确定性，后续增益的偏置行也为零。
+
+\section{从加权平均推导卡尔曼增益}
+\subsection{先估计一个位置数值}
+设预测位置为 $\hat p^-$，预测误差方差为 $P$；新观测为 $z=p_{\rm true}+\nu$，
+测量误差方差为 $R_z$。取校正量为两者之差的 $k$ 倍：
+\begin{equation}
+\hat p^+=\hat p^-+k(z-\hat p^-).
+\end{equation}
+若 $k=0$ 就完全保留预测，$k=1$ 就采用观测。由
+$\epsilon^+=p_{\rm true}-\hat p^+=(1-k)\epsilon^--k\nu$，
+在两项误差独立时，校正后的方差为
+\begin{equation}
+P^+=(1-k)^2P+k^2R_z.
+\end{equation}
+让它最小，对 $k$ 求导并令其为零：
+\begin{equation}
+-2(1-k)P+2kR_z=0\quad\Longrightarrow\quad k=\frac{P}{P+R_z}.
+\end{equation}
+二阶导数 $2(P+R_z)>0$，所以这是最小值。
+预测越不确定，越愿意向观测移动；观测越不确定，移动越少。
+例如预测 $0$ m、标准差 $.2$ m，观测 $.3$ m、标准差 $.1$ m，
+$P=.04,R_z=.01$，故 $k=.8$，校正位置为 $.24$ m。
+代回方差得 $.008$ m$^2$，标准差约 $.0894$ m。
+注意输入公式的是标准差的平方。
+
+\begin{center}
+\begin{tikzpicture}[x=18cm,y=1cm,>=Stealth]
+\draw[->] (-.025,0)--(.36,0) node[right]{位置/m};
+\draw[navy,thick] (0,-.13)--(0,.13);
+\node[above,text=navy] at (0,.2) {预测 $0$};
+\draw[tealblue,thick] (.30,-.13)--(.30,.13);
+\node[above,text=tealblue] at (.30,.2) {观测 $.30$};
+\fill[navy] (.24,0) circle (2pt);
+\node[below] at (.24,-.2) {校正 $.24$};
+\draw[->,thick] (0,-1.05)--(.24,-1.05) node[midway,below] {$k(z-\hat p^-)=.24$ m};
+\end{tikzpicture}
+\end{center}
+
+\subsection{让同一观测修正多个状态}
+位姿观测 $z=(p_x^{\rm obs},p_y^{\rm obs},\psi^{\rm obs})^\top$ 从八维状态中选择位置和航向：
+\begin{equation}
+H=\begin{bmatrix}1&0&0&0&0&0&0&0\\0&1&0&0&0&0&0&0\\0&0&0&0&1&0&0&0\end{bmatrix},
+\qquad z=Hx_{\rm true}+\nu.
+\end{equation}
+把“观测减预测”称为\textbf{创新} $r$。在航向差很小的局部角度表示中，
+\begin{equation}
+r=z-H\hat x^-=H\epsilon^-+\nu,\qquad
+S=\mathbb E[rr^\top]=HP^-H^\top+R_z.
+\end{equation}
+$r$ 的航向分量先做 wrap。例如预测 $179^\circ$、观测 $-179^\circ$，
+校正方向为 $+2^\circ$。\textbf{代码练习 ch09-1：}补完 \path{starter/yaw_residual.hpp}。
+
+设状态第 $i$ 项采用行向量 $k_i$ 加权，$\hat x_i^+=\hat x_i^-+k_ir$。
+它的误差平方期望是
+\begin{align}
+\mathbb E[(\epsilon_i^--k_ir)^2]
+&=P^-_{ii}-2k_i\mathbb E[r\epsilon_i^-]+k_i S k_i^\top,\\
+\mathbb E[\epsilon^- r^\top]&=P^-H^\top.
+\end{align}
+展开二次项，利用 $S$ 对称，对 $k_i$ 各分量求导得到
+$2k_iS-2(P^-H^\top)_{i,:}=0$。将八行放在一起，便是
+\begin{equation}
+KS=P^-H^\top,\qquad K=P^-H^\top S^{-1},\qquad
+\hat x^+=\hat x^-+Kr.
+\end{equation}
+$K$ 有八行三列，表达三个观测残差分别如何修正八个状态。
+代码通过解 $SK^\top=HP^-$ 求出增益，使用第八章介绍的 LDL$^\top$ 分解。
+
+\subsection{位置观测如何修正速度：一次手算}
+只考虑一维位置和速度，步长 $.1$ s，忽略本步过程噪声，取
+\begin{equation}
+F=\begin{bmatrix}1&.1\\0&1\end{bmatrix},\quad
+P_0=\begin{bmatrix}.01&0\\0&1\end{bmatrix},\quad
+P^-=FP_0F^\top=\begin{bmatrix}.02&.1\\.1&1\end{bmatrix}.
+\end{equation}
+乘法中的 $.1$ 来自“速度误差乘以时间成为位置误差”。
+只测位置，$H=[1\ 0]$，测量方差为 $.01$ m$^2$，则
+\begin{equation}
+S=.02+.01=.03,\qquad K=\frac1{.03}\begin{bmatrix}.02\\.1\end{bmatrix}
+=\begin{bmatrix}2/3\\10/3\end{bmatrix}.
+\end{equation}
+若位置残差为 $.03$ m，位置增加 $.02$ m，速度同时增加 $.1$ m/s。
+速度增益单位为 s$^{-1}$。类似地，连续预测会建立偏置与位置、航向之间的关联，
+后续观测便能修正偏置。充分的运动变化和持续的位姿观测有助于区分这些误差来源。
+
+\subsection{校正后还剩多少不确定性}
+代入 $r=H\epsilon^-+\nu$，校正后误差为
+\begin{equation}
+\epsilon^+=(I-KH)\epsilon^--K\nu.
+\end{equation}
+按前面的方法乘转置、取期望，得到 Joseph 形式
+\begin{equation}
+P^+=(I-KH)P^-(I-KH)^\top+KR_zK^\top.
+\end{equation}
+两个加项各自都是误差变换后的协方差。任意向量 $d$ 满足
+$d^\top P d=\mathbb E[(d^\top\epsilon)^2]\geq0$，称为半正定；
+保留这种乘积相加的形式有助于减少浮点运算破坏非负方差的问题。
+算完后再取 $(P+P^\top)/2$ 消除微小的不对称舍入误差。
+
 \lstinputlisting[language=C++,linerange={ekf_correct_begin-ekf_correct_end},
   includerangemarker=false]{../ros2_ws/src/motion2d/src/estimation/planar_ekf.cpp}
+在刚才的位置速度例子中，代入可得
+$P^+_{pp}=.00667$、$P^+_{pv}=.03333$、$P^+_{vv}=.66667$，三项都比校正前减小。
+本章称为扩展卡尔曼滤波（EKF），是因为旋转使状态预测成为非线性函数；
+$F,G$ 用当前估计附近的一阶展开传播误差。
 
-$K$ 的速度、偏置行通常并不为零，因为此前预测已经建立了互协方差。
-这就是只有位置/航向观测仍能间接校正其他状态的原因。没有运动变化或长期缺少外部观测时，
-这些量也可能很难区分；算法不能凭空产生可观测性。
+\subsection{用不确定性衡量一次残差}
+位置用米、航向用弧度，直接相加平方会混淆量纲。
+若 $S$ 为对角阵，归一化残差大小为
+\begin{equation}
+q=\frac{r_x^2}{S_{xx}}+\frac{r_y^2}{S_{yy}}+\frac{r_\psi^2}{S_{\psi\psi}}.
+\end{equation}
+每一项都是“残差除以对应标准差”再平方，例如 $r_x=.2$ m、$\sqrt{S_{xx}}=.1$ m 时贡献为 4。
+若各分量相关，使用完整二次型 $q=r^\top S^{-1}r$。
+可以将对称正定矩阵写成 $S=U\Lambda U^\top$：$U$ 的列为相互垂直的单位特征向量，
+$\Lambda$ 放对应正特征值，含义与第八章的主方向相同。
+令 $\tilde r=U^\top r$，则 $q=\sum_i\tilde r_i^2/\lambda_i$，
+即转到互不相关的方向后分别按方差归一化。
+实际只需求解 $Sy=r$，再算 $r^\top y$。
 
-\begin{notebox}
-\textbf{教学模型的边界}\quad 激光局部地图和当前估计共享历史，观测不是严格独立的。
-固定 $R_z$ 也只是可解释的测量尺度。这里的 EKF 不宣称严格统计一致，
-更不能用很小的协方差数字证明定位准确。
-\end{notebox}
+默认配置在 $q>16.3$ 时跳过这次校正。它筛选的是相对于当前预测过大的残差。
+若实际存在偏置，而模型把偏置固定为零且 $P$ 很小，正常观测也可能被筛掉。
+因此要同时观察轨迹误差、接受次数和创新大小，再调整模型及噪声参数。
+在线扫描匹配使用的局部地图含有历史扫描，当前观测与过去估计之间有信息关联。
+本章用固定 $R_z$ 表示位姿测量尺度，可通过重复实验中实际残差的变化来选择参数；
+同一批历史信息的重复使用会让简单的独立噪声模型低估不确定性。
 
 \section{偏置与一秒缺测实验}
 合成轨迹为 $p=(\sin(0.6t),\;0.5[1-\cos(0.6t)])$ m、$\psi=0.6t$ rad。
 使用 200 Hz IMU、10 Hz 位姿观测、20 s 时长，4 到 5 s 不提供位姿校正。
 同一组噪声输入同时送给三个滤波器；seed=9090。
 加计偏置为 $(.08,-.04)$ m/s$^2$，陀螺偏置为 $.01$ rad/s，滤波器没有收到这些答案。
-初始速度先验为零、标准差 1 m/s；实际初速不为零，因此纯 IMU 还包含初速不可知的误差。
+初始速度先验为零、标准差 1 m/s。对轨迹求导有
+$v=(.6\cos(.6t),.3\sin(.6t))$ m/s，所以实际初速为 $(.6,0)$ m/s。
+仅这个初速差就会产生约 $.6t$ m 的位置误差；IMU 积分需要靠后续位姿观测逐渐找回初速。
 
 \clearpage
 \begin{figure}[t]
@@ -117,24 +278,26 @@ $K$ 的速度、偏置行通常并不为零，因为此前预测已经建立了�
 \caption{合成位姿传感器实验。上图纵轴为对数，灰带表示停止位姿校正；下图虚线只用于评估注入的偏置。}
 \end{figure}
 \begin{center}\small
-\pgfplotstabletypeset[col sep=comma,string type,
+\pgfplotstabletypeset[col sep=comma,
 columns={mode,rmse,dropout_rmse,accepted,rejected},
-columns/mode/.style={column name=模式,string replace*={imu_only}{仅 IMU},
+columns/mode/.style={column name=模式,string type,string replace*={imu_only}{仅 IMU},
   string replace*={fixed_zero_bias}{偏置固定零},string replace*={estimate_bias}{估计偏置}},
-columns/rmse/.style={column name=全程 RMSE/m,fixed,precision=4,string type=false},
-columns/dropout_rmse/.style={column name=缺测段 RMSE/m,fixed,precision=4,string type=false},
+columns/rmse/.style={column name=全程 RMSE/m,fixed,precision=4},
+columns/dropout_rmse/.style={column name=缺测段 RMSE/m,fixed,precision=4},
 columns/accepted/.style={column name=接受},columns/rejected/.style={column name=拒绝},
 every head row/.style={before row=\toprule,after row=\midrule},
 every last row/.style={after row=\bottomrule}]{data/ch09_filter.csv}
 \end{center}
 表中误差统计全部 4000 个 IMU 时刻，接受/拒绝计数只针对低频位姿校正。
 偏置固定零时，模型误差积累并触发大量拒绝；启用偏置估计后，本例全程位置 RMSE 约 0.0184 m。
-这说明模型与置信度需要匹配，不意味着启用偏置状态在所有场景都更好。
+从上图的对数纵轴读取误差时，$10^{-2}$ 到 $10^{-1}$ 表示增大十倍，
+与 $10^{-1}$ 到 $10^0$ 的竖直间距相同。灰带内停止校正后，三个模型的差别更加明显：
+偏置估得越准，短时间积分中的系统性误差越小。若传感器偏置确实为零，
+可关闭偏置估计，观察减少待估变量后的表现。
 
-\textbf{练习与验收：}手推 $F_{v\psi}$；完成角度残差练习；把注入偏置改为零后复跑，
-再把观测标准差减半，比较误差及拒绝数。测试还核对常加速度解析解、$F/G$ 中心差分、
-互协方差、离群点拒绝以及长时间更新后的协方差对称性与半正定性。
-下面接入真实扫描匹配输出，单独验证在线时间处理。
+\textbf{实验练习：}把注入偏置改为零后复跑，再把观测标准差减半。
+减半标准差相当于把测量方差降为四分之一；用增益公式预测曲线会怎样变化，
+再比较全程与缺测段误差、接受与拒绝次数。
 
 \clearpage
 \section{校正发生在采样时刻，不是收到消息时}
@@ -166,17 +329,34 @@ ros2 launch motion2d_bringup ch09.launch.py rviz:=false
 \lstinputlisting[language=C++,linerange={fusion_replay_begin-fusion_replay_end},
   includerangemarker=false]{../ros2_ws/src/motion2d/src/estimation/fusion_timeline.cpp}
 
-FusionTimeline 保存一个校正锚点及有限 IMU 队列。激光观测早于最近 IMU 时才可处理；
+\code{FusionTimeline} 保存一个校正锚点及有限 IMU 队列。
+锚点包含状态和协方差：回到旧时刻时，位置、速度、航向、偏置及它们的不确定性一起恢复。
+激光观测早于或等于最新 IMU 时刻时可以处理；
 晚于它则由 ROS 节点排队等待。延迟观测校正后，重放到最新 IMU 时刻。
-默认历史窗口 2 s，超出窗口的旧观测报告 laser\_too\_old，不伪造为“当前测量”。
+默认历史窗口 2 s，超出窗口的旧观测报告 laser\_too\_old，等待下一帧仍在窗口内的观测。
 校正必须按激光采样顺序处理，重复帧不重复吸收信息。
 
-\textbf{近似边界：}一步内固定航向；被激光时刻切开的同一 IMU 样本在协方差传播中近似独立。
-缩小步长能改善均值积分，但不代表噪声模型严格一致。
+例如队列已到 21 ms，而 10 ms 激光刚到：从上次校正锚点重放到 10 ms，
+在这个时刻校正，再依次重放 $10\to14\to21$ ms，恢复到队列末端。
+$7\to10$ 和 $10\to14$ ms 都使用 7 ms 的 IMU，14 ms 之后才使用 14 ms 的样本。
 
-\textbf{练习 ch09-2：}补完 held\_duration.hpp，求预测区间与一个 IMU 保持区间的交集。
+把同一采样保持区间切成两段，也影响噪声计算。若同一加速度噪声 $n$ 保持了
+$h_1+h_2$，速度误差为 $n(h_1+h_2)$，方差是
+\begin{equation}
+\sigma_a^2(h_1+h_2)^2
+=\sigma_a^2(h_1^2+h_2^2+2h_1h_2).
+\end{equation}
+当前逐步传播将两段当作独立输入，累加前两项；遗漏的交叉项来自“同一个噪声被用了两次”。
+这是每采样噪声配合拆分积分时需要注意的相关性。
+可在进阶练习中保存当前样本噪声与状态的互协方差，将交叉项也传播下去。
 
-\clearpage
+\textbf{代码练习 ch09-2：}补完 \path{starter/held_duration.hpp}。
+预测区间 $[a,b]$ 与样本保持区间 $[c,d]$ 的重叠，必须同时晚于两个左端、早于两个右端，故
+\begin{equation}
+h_{\rm overlap}=\max(0,\min(b,d)-\max(a,c)).
+\end{equation}
+先用整数纳秒求这个长度，再换算秒；例如 $[10,21]$ ms 与 $[7,14]$ ms 重叠 4 ms。
+
 \section{高频预测与扫描位姿各走一个出口}
 \begin{center}\small
 \begin{tabular}{lll}\toprule
@@ -187,34 +367,33 @@ FusionTimeline 保存一个校正锚点及有限 IMU 队列。激光观测早于
 \texttt{/odometry} & 统一选择后的高频估计 & 跟踪控制与显示 \\\bottomrule
 \end{tabular}
 \end{center}
-为什么建图不直接订阅高频预测？同一激光时间的预测可能先到，而配准校正稍后才到。
+同一激光时间的预测可能先到，而配准校正稍后才到。
 若把先到预测立即画进地图，该帧就失去了后来的校正。第九章 launch 将 mapping 的位姿输入
 重映射到专用的扫描位姿流；配准或 EKF 拒绝的帧不入图，后续成功帧仍可继续。
 
 高频输出在每个 IMU 时刻至多发一次；晚到校正对外体现于下一次 IMU 输出，
-不会为同一采样时间反复发布 TF。这里的“连续”表示持续高频传播，不保证校正时位姿完全无跳变。
+同一采样时间只发布一次 TF。新校正可能改变随后输出的位置，因此画轨迹时仍可能看到小的修正跳变。
 当前 map 与 odom 重合；下一章让回环更新 map 到 odom，而局部 odom 保持自己的运动历史。
 
 \begin{notebox}
-\textbf{失败有明确含义}\quad 超过 0.5 s 没有接受激光，报告 laser\_stale，仍可短时传播 IMU。
+\textbf{根据传感器状态选择后续动作}\quad 超过 0.5 s 没有接受激光，报告 laser\_stale，仍可短时传播 IMU。
 相邻 IMU 间隔超过 0.1 s，则报告 imu\_gap 并失去初始化，等待新的激光起点。
-消息缺失时不能把上一位姿换一个新时间戳冒充已预测；未来控制器也不能无限使用已失效定位。
+跟踪控制器据此区分短时缺扫和 IMU 中断：前者可短时使用预测，后者需要等待重新初始化。
 \end{notebox}
 
 第一帧激光定义 odom 原点。初速先验仍为零、标准差 1 m/s，后续校正逐渐估计它；
-不能从首帧 IMU 倒推出真实初始速度。reset 清空偏置、协方差、锚点和历史；
+匀速与静止都可能给出零水平加速度，因此首帧 IMU 无法区分它们。reset 清空偏置、协方差、锚点和历史；
 两个输入分别收到新原点时，保留先到的新试验样本。操作时先暂停，等待旧 DDS 队列排空。
 
 \textbf{常见错误：}提前使用右侧 IMU；只回滚位置而没回滚速度/协方差；用最新位姿匹配旧扫描；
 把激光回环校正直接覆盖底层 odom；将过小协方差理解成高精度保证。
 
-\textbf{ROS 验收：}在实际主机管线里检查 3 s 的 601 个 IMU 时刻，得到 30 个校正扫描/地图配对，
-首帧对齐后最大位置误差约 0.0400 m，主要来自初速尚未估计的初始阶段。
-输入订阅检查确认融合器和激光里程计没有真值、几何世界或 TF 输入；暂停不生成新样本，reset 能重播扫描校正值。
-另一个独立节点实验检查非对齐的 7/10/14/17/21 ms 时刻、两种 reset 顺序、扫描过期和 IMU 中断。
-
 移除 \texttt{rviz:=false} 可显示估计轨迹、扫描点云与观测栅格。
-本次使用真实 ROS 无界面验收；由于前述主机 OpenGL 截图及 reset 缓存问题，没有把 RViz 画面列为已通过。
+让机器人经过墙角，观察两种节奏：IMU 让轨迹不断向前延伸，成功配准后新扫描才落入地图。
+暂停仿真时，采样时钟停止，曲线也应停止增加新点。
+
+\textbf{手算巩固：}在 \path{exercises/ch09} 中完成协方差传播、标量增益、
+位置速度关联、随机游走和拆分保持区间的练习。
 
 \clearpage
 \section{真实扫描：转得更快、少扫半秒}
@@ -228,7 +407,7 @@ ros2 run motion2d lidar_imu_demo tmp/ch09_fusion
 两个转速分别为 0.4 和 1.2 rad/s；真值只用来生成传感器与独立评估。
 
 \begin{figure}[h]
-\centering\includegraphics[width=\linewidth]{figures/ch09_fusion.pdf}
+\centering\includegraphics[width=.85\linewidth]{figures/ch09_fusion.pdf}
 \caption{实际射线与原始 IMU 回放，灰色区间缺扫。误差在全部可用 IMU 时刻统计，激光基线保持最新收到的位姿。}
 \end{figure}
 \begin{center}\small
@@ -243,8 +422,12 @@ every head row/.style={before row=\toprule,after row=\midrule},
 every last row/.style={after row=\bottomrule}]{data/ch09_fusion.csv}
 \end{center}
 两个转速下激光分别拒绝 4、7 帧，EKF 均无额外拒绝。融合补偿了采样间运动和交付延迟；
-这不是声称 ICP 单帧精度被提高，也不是与带预测的其他激光算法的普遍比较。
+圆周运动的线速度为 $v=r\omega$，本例半径为 1 m，所以两种速度为 $.4$ 和 $1.2$ m/s。
+仅 30 ms 延迟就对应约 $.012$ 和 $.036$ m 的运动距离；保持上一帧位姿时，
+还会叠加激光采样间隔内的位移。融合器用 IMU 传播这段运动，因而在高频评估中误差更小。
+可以先把延迟设为零，再逐渐加大，用这个数量级解释曲线的变化。
 
-\textbf{本章练习与验收：}完成两道代码练习；改变转速、延迟或缺扫时长，连同拒绝数报告误差。
-检查即时和延迟校正重放后的状态/协方差一致，历史内存有界，拒绝观测不修改当前估计。
-本章使用 snapshot 扫描；逐束扫描畸变与去畸变保留为可选进阶。
+\textbf{本章练习：}完成两道代码练习；改变转速、延迟或缺扫时长，比较误差与拒绝次数。
+
+本章一帧扫描的所有光束取自同一时刻；继续研究逐束采样时，可用本章的时间轴为每束查询位姿，补偿扫描过程中的运动。
+

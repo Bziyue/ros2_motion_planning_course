@@ -19,7 +19,7 @@ for field, label, color in [('imu_error', 'IMU only', '#c66530'),
                             ('estimated_bias_error', 'Bias estimated', '#12334a')]:
     error.semilogy(data['time'], data[field], label=label, color=color)
 error.axvspan(4, 5, color='gray', alpha=.15, label='Pose dropout')
-error.set(xlabel='Time / s', ylabel='Position error / m', title='Synthetic pose measurements (not lidar)')
+error.set(xlabel='Time / s', ylabel='Position error / m', title='Synthetic pose measurements')
 error.legend(ncol=2, fontsize=8)
 accel = fig.add_subplot(gs[1, 0])
 for field, target_value, color in [('bax', .08, '#087f8c'), ('bay', -.04, '#c66530')]:
