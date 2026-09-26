@@ -1,0 +1,62 @@
+\chapter{进阶感知：一次只增加一种误差}
+\begin{notebox}
+\textbf{已实现}\quad 独立偏置随机游走实验与统计验收。\\
+\textbf{选做设计}\quad 延迟、逐束畸变、复杂障碍与重定位；基础模拟器仍保持第 06 章语义。
+\end{notebox}
+\section{白噪声不会自己变成偏置}
+第 06 章每采样白噪声 $n_k$ 独立、零均值，其标准差直接配置。
+真实传感器还可能有随时间缓慢漂移的偏置。本附录只取一个轴，以布朗模型近似：
+\begin{equation}
+ y_k=y_k^{\rm ideal}+b_k+n_k,\quad
+ b_{k+1}=b_k+\sigma_b\sqrt{\Delta t}\,\xi_k,\quad \xi_k\sim\mathcal N(0,1).
+\end{equation}
+陀螺偏置 $b$ 的单位为 rad/s，$\sigma_b$ 为 (rad/s)/$\sqrt{\rm s}$；
+它既不是每采样白噪声标准差，也不是角速度测量的连续白噪声密度。
+从确定的初值出发，独立增量相加给出
+\begin{equation}
+ \operatorname{Var}[b(T)-b(0)]=\sigma_b^2T,\qquad Q_b=\sigma_b^2\Delta t.
+\end{equation}
+若误写成乘 $\Delta t$，固定时长的方差就变成 $\sigma_b^2T\Delta t$，
+增加采样率会错误地让偏置更稳定。第 09 章偏置状态的过程噪声也应按模型一致离散化。
+\lstinputlisting[language=C++,linerange={bias_walk_begin-bias_walk_end},
+ includerangemarker=false]{../ros2_ws/src/motion2d/src/sim/bias_walk.cpp}
+随机数由调用方传入，便于固定样本做解析检验。六轴可分别使用同一公式，
+每轴及白噪声使用独立随机流；有缓存的正态分布对象也应独立，不能只换引擎而共用其缓存。
+偏置是持久状态，每次采样保存到下一步；reset 必须同时恢复偏置初值和随机流。
+
+\section{统计的是许多终点，不是一条曲线}
+从零偏置出发，$\sigma_b=0.002$ (rad/s)/$\sqrt{\rm s}$、$T=10$ s，
+100/200 Hz 各运行 5000 条独立轨迹，比较终点无偏样本方差和理论值 $4\times10^{-5}$ (rad/s)$^2$。
+源码固定种子；改变频率时不要求每条随机轨迹重合，只要求统计分布一致。
+实际两组方差为 $3.8782\times10^{-5}$ 和 $3.9963\times10^{-5}$ (rad/s)$^2$，
+均接近理论值；这种有限样本的一致性不等于真实器件都服从该模型。
+
+\clearpage
+\begin{lstlisting}[language=bash]
+ros2 run motion2d bias_walk_demo tmp/appC_bias
+# path.csv: one path; summary.csv: independent endpoint ensembles
+\end{lstlisting}
+\begin{figure}[!ht]
+\centering\includegraphics[width=\linewidth]{figures/appC_bias.pdf}
+\caption{静止陀螺仪单轴误差的独立实验。浅色为偏置加每采样 0.004 rad/s 白噪声，
+深色偏置在相邻样本间持续存在；不能拿同一路径上的相关样本代替独立试验。}
+\end{figure}
+\paragraph{练习}
+appC-1 补全步长缩放；先检查同一单位噪声下 $\Delta t$ 增为四倍时增量加倍，再运行统计实验。
+本工具未作为主线 ROS 参数接入；若将其用于 IMU，必须同步扩展参数、reset、日志和滤波过程噪声实验。
+
+\section{进一步扩展时，先写验收边界}
+以下是选做方向，不代表基础模拟器已经具备这些功能：
+\begin{description}[style=nextline,leftmargin=0pt]
+ \item[延迟与丢包] 保留采集时间，单独安排到达时间；测试乱序、缺测、历史缓存到期。
+ 滤波器对延迟校正已有处理，但模拟器尚未自动注入网络延迟。
+ \item[逐束扫描畸变] 每束有 $t_i$，统一到参考时刻的点为
+ $p_{\rm ref}=T_{\rm ref}^{-1}T(t_i)p_i$。真实估计使用估计运动，不能读模拟真值。
+ 当前雷达为 snapshot，不能只填写 time\_increment 就称为旋转扫描。
+ \item[凹多边形] 渲染、点内判断、扫掠碰撞和最近射线交点都要一致；用凹口自由点做反例。
+ 当前随机多边形是凸多边形。
+ \item[动态障碍] 世界几何要随采集时间变化；规划还需预测与时空碰撞检查。
+ 静态距离场的正净空不保证将来安全。
+ \item[全局重定位] 局部 ICP 的初值范围有限，回环候选也不等于任意位置重定位。
+ 先设计“搬走机器人”测试，再考虑全局候选搜索、几何验证和多假设管理。
+\end{description}

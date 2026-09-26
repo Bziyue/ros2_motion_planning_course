@@ -19,7 +19,7 @@ add_library(motion2d_core
   src/sim/sim_clock.cpp src/sim/world.cpp src/sim/world_generator.cpp
   src/sim/ideal_model.cpp src/sim/differential_drive.cpp src/sim/swept_collision.cpp src/sim/velocity_model.cpp
   src/sim/inertial_model.cpp src/sim/reference_model.cpp src/sim/raycast.cpp src/sim/lidar_cpu.cpp
-  src/sim/imu.cpp src/sim/sensor_scheduler.cpp src/mapping/scan_projection.cpp
+  src/sim/imu.cpp src/sim/bias_walk.cpp src/sim/sensor_scheduler.cpp src/mapping/scan_projection.cpp
   src/mapping/occupancy_grid.cpp src/mapping/distance_transform.cpp src/mapping/esdf.cpp src/evaluation/map_evaluation.cpp
   src/estimation/scan_matcher.cpp src/estimation/lidar_odometry.cpp src/estimation/imu_predictor.cpp
   src/estimation/planar_ekf.cpp src/estimation/fusion_timeline.cpp src/estimation/pose_graph.cpp src/estimation/loop_closure.cpp src/estimation/keyframes.cpp
@@ -247,6 +247,9 @@ install(TARGETS navigation_clearance DESTINATION lib/motion2d)
 add_executable(differential_drive_demo src/examples/differential_drive_demo.cpp)
 target_link_libraries(differential_drive_demo PRIVATE motion2d_core)
 install(TARGETS differential_drive_demo DESTINATION lib/motion2d)
+add_executable(bias_walk_demo src/examples/bias_walk_demo.cpp)
+target_link_libraries(bias_walk_demo PRIVATE motion2d_core)
+install(TARGETS bias_walk_demo DESTINATION lib/motion2d)
 
 if(BUILD_TESTING)
   find_package(ament_cmake_gtest REQUIRED)
@@ -267,6 +270,8 @@ if(BUILD_TESTING)
   target_link_libraries(test_control_messages motion2d_core nav_msgs::nav_msgs__rosidl_typesupport_cpp sensor_msgs::sensor_msgs__rosidl_typesupport_cpp)
   ament_add_gtest(test_differential_drive test/test_differential_drive.cpp)
   target_link_libraries(test_differential_drive motion2d_core)
+  ament_add_gtest(test_bias_walk test/test_bias_walk.cpp)
+  target_link_libraries(test_bias_walk motion2d_core)
   ament_add_gtest(test_replanner test/test_replanner.cpp)
   target_link_libraries(test_replanner motion2d_core)
   ament_add_gtest(test_reference_schedule test/test_reference_schedule.cpp)
