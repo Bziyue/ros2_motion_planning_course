@@ -1,0 +1,100 @@
+\chapter{一束光到一圈扫描：CPU 激光雷达}\label{ch:lidar}
+\begin{notebox}
+\textbf{目标}\quad 用可手算的几何求交构建激光雷达，理解遮挡、角分辨率与测距误差。\\
+\textbf{先修}\quad 二维向量、圆方程，以及前四章的坐标、世界与机器人模型。
+\end{notebox}
+
+\section{先让一束光碰到障碍}
+雷达安装在圆盘中心，发出一条没有宽度的射线。机器人位置与 yaw 决定射线的起点和方向。
+雷达不检测机器人自身，否则从圆心发出的光总会先碰到自己的外壳。机器人半径仍参与运动碰撞。
+
+射线用起点 o、单位方向 d 和非负距离 t 表示：
+\begin{equation}
+p(t)=o+td,\qquad \|d\|=1,\quad t\geq0.
+\end{equation}
+只有方向已归一化时，t 才直接表示米。测距求的是最近表面，不是障碍中心的距离。
+沿同一方向有多个交点时，较近表面会挡住较远表面。
+
+\begin{center}
+\begin{tikzpicture}[x=1cm,y=1cm]
+\draw[fill=tealblue!15,draw=tealblue,thick] (3,0) circle (1);
+\draw[navy,very thick] (5,-1.3)--(5,1.3);
+\draw[-{Stealth},navy,thick] (0,0)--(2,0);
+\draw[dashed,muted] (2,0)--(5,0);
+\fill[navy] (0,0) circle (.05) node[below] {$o$};
+\fill[tealblue] (2,0) circle (.06) node[above left] {最近命中};
+\fill[navy] (3,0) circle (.04) node[above] {$c$};
+\node[above] at (5,1.3) {被遮挡的墙};
+\node[below] at (1,-.35) {$t=2$ m};
+\end{tikzpicture}
+\end{center}
+
+重新构建工作空间并加载 install，先运行不依赖 ROS 回调的几何演示：
+\begin{lstlisting}[language=bash,numbers=none]
+ros2 run motion2d raycast_demo
+\end{lstlisting}
+三个距离应依次为 2、4、2 m。前两个分别是圆和墙的单独求交；最后一个在世界中取最近值。
+代码位于 \path{src/examples/raycast_demo.cpp}，这里的墙和圆都可以手算。
+
+\clearpage
+\section{射线与圆：别忘了第二个根}
+把射线代入圆心 c、半径 R 的圆方程，令 $q=c-o$、$h=q^\top d$：
+\begin{equation}
+\|o+td-c\|^2=R^2
+\ \Longrightarrow\ t^2-2ht+\|q\|^2-R^2=0.
+\end{equation}
+二维叉积 $a\times b=a_xb_y-a_yb_x$ 是一个标量。
+单位方向下，$|d\times q|$ 是圆心到射线所在直线的距离，因此
+\begin{equation}
+D=R^2-(d\times q)^2,\qquad t_\pm=h\pm\sqrt D.
+\end{equation}
+$D<0$ 时没有交点；$D=0$ 时相切，也算命中。先检查较小的根 $t_-$ 是否非负，
+否则再检查 $t_+$。两个根都负，说明圆在射线背后。圆内起点的小根为负，大根是出口；
+这有助于测试函数，但课程中的机器人应始终位于自由空间。
+
+\par\noindent\begin{minipage}{\linewidth}
+\lstinputlisting[language=C++,linerange={ray_circle_begin-ray_circle_end},
+  includerangemarker=false]{../ros2_ws/src/motion2d/src/sim/raycast.cpp}
+\end{minipage}\par
+
+没有命中返回正无穷，它与后续所有距离取最小值时自然不起作用。此处先计算真实几何，
+量程与测量噪声留给扫描层处理；不要在这个函数里混入 ROS 消息。
+
+\textbf{代码练习 ch05-1：}在 \path{exercises/ch05/starter/forward_root.hpp}
+补完根的选择。从仓库根目录运行：
+\begin{lstlisting}[language=bash,numbers=none]
+g++ -std=c++17 -Iexercises/ch05/starter \
+  exercises/ch05/check_root.cpp -o /tmp/ch05_root
+/tmp/ch05_root
+\end{lstlisting}
+先手算圆心 (3,0)、半径 1、起点 (0,0)、方向 (1,0) 的两个根；再把起点放到圆心。
+这两个例子分别检查最近回波和第二个根。
+
+\clearpage
+\section{射线与线段：平行不一定没交点}
+令线段端点为 a、b，$e=b-a$。联立 $o+td=a+ue$，分别取叉积可得
+\begin{equation}
+t=\frac{(a-o)\times e}{d\times e},\qquad
+u=\frac{(a-o)\times d}{d\times e}.
+\end{equation}
+只有 $t\geq0$ 且 $0\leq u\leq1$ 才命中线段，而不只是命中它所在的直线。
+当分母接近零时不能继续做除法：平行但不共线则无交点；共线时将端点投影到射线上，
+检查投影区间是否与 $[0,+\infty)$ 相交，取重叠部分的最近点。
+
+\par\noindent\begin{minipage}{\linewidth}
+\lstinputlisting[language=C++,linerange={ray_segment_begin-ray_segment_end},
+  includerangemarker=false]{../ros2_ws/src/motion2d/src/sim/raycast.cpp}
+\end{minipage}\par
+
+世界求交 \code{raycastWorld} 遍历所有圆、所有多边形边，以及矩形边界的四条边，
+对得到的非负距离取最小值。这样自然处理遮挡，不依赖障碍物存储顺序。
+算法复杂度随表面数线性增长；先保留这个清楚的 CPU 基准，后续再讨论加速。
+
+\textbf{验收与实验：}运行 \code{colcon test --packages-select motion2d}。
+几何测试覆盖圆相切、背向、线段端点、平行与共线、矩形角点、遮挡和刚体变换不变性。
+把演示的圆移到墙后，预测最近命中；反转射线方向，解释距离为何改变。
+
+\begin{notebox}
+这里的浮点容差面向课程的米制小场景。它用于避免接近平行时除以极小数，
+不是任意坐标尺度下的精确几何谓词。无效几何应在世界生成边界拒绝。
+\end{notebox}
