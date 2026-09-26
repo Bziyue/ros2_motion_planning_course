@@ -51,3 +51,18 @@ colcon test-result --verbose
 通信脚本验证默认的 8+8 个障碍、边界、圆盘尺寸、共享起点和唯一时钟。改了参数后按实验目标检查，不应继续用默认值断言。
 
 将 seed 改为 43 重启，再把两个 count 改为 20。保留每次 seed、参数、是否可达与日志净空；不要只展示成功场景。习题见 [ch03](../../exercises/ch03/README.md)。
+
+## 本机退出问题
+
+本机 RViz2 在一次较长演示结束时出现退出码 -11，运行中显示和消息检查正常。随后独立启动和多次整组关闭均未复现，尚不能确定原因。launch 已避免在 Ctrl-C 关闭过程中重复触发关闭事件，但不把这个改动当作 RViz2 崩溃已被根治的证据。
+
+需要分开观察进程时，在工作空间的两个已加载 ROS 环境的终端分别运行：
+
+~~~bash
+# 终端 1
+ros2 launch motion2d_bringup ch03.launch.py rviz:=false
+# 终端 2
+rviz2 -d src/motion2d_bringup/rviz/ch03.rviz --ros-args -p use_sim_time:=true
+~~~
+
+先关闭独立的 RViz2，再停止终端 1。退出故障不会被列成算法或 ROS 通信验证成功；具体观察见 [验收记录](../../docs/VALIDATION.md)。

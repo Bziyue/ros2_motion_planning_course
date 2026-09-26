@@ -12,6 +12,8 @@ from launch_ros.actions import Node
 
 def world_exited(event, context):
     """Propagate a failed world as a failed launch, rather than an empty scene."""
+    if context.is_shutdown:
+        return []  # Ctrl-C already shuts down the whole launch.
     if event.returncode != 0:
         raise RuntimeError(f"World node failed with exit {event.returncode}; inspect its error above")
     return [EmitEvent(event=Shutdown(reason="World node exited"))]

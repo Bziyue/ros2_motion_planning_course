@@ -49,6 +49,10 @@ colcon test-result --verbose
 
 本机 RViz2 的 TF 显示插件在时间回退后退出曾崩溃。ch02 默认改用 map 和 base_link 两个 Axes 显示；重新测试 reset、恢复和退出成功。此记录仅描述本机观察，未归因到未核实的上游缺陷。
 
+ch03 在一次约 10 分钟的演示后关闭时，RViz2 仍出现一次退出码 -11，世界与坐标节点正常退出。用 GDB 独立启动的两次退出，以及原始 launch 的三次终端 Ctrl-C 复测均正常，未取得崩溃栈，根因仍未确定。随后在 world_exited 中加了 is_shutdown 判断，避免关闭过程中再发关闭事件；这只修正重复关闭，不宣称已经根治该偶发问题。[ch03 说明](../chapters/ch03/README.md) 给出独立启动 RViz2 的命令，便于分开关闭和继续诊断。
+
+退出事件去重后，再次连续运行三次真实伪终端 Ctrl-C 实验，三个进程均正常退出、launch 返回 0；无效起点的无界面启动仍返回 1。
+
 ## 固定种子与障碍密度
 
 直接调用课程同一 generateWorld 实现，除下表的 seed、circle_count、polygon_count 外均为默认参数：20×20 m，机器人半径 0.20 m，margin=0.05 m，检查分辨率 0.25 m。
