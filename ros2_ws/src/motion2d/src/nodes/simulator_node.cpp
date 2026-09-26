@@ -49,12 +49,21 @@ public:
     if (!std::isfinite(initial_.yaw) || !std::isfinite(command_timeout_) ||
       !std::isfinite(speed_max_) || !std::isfinite(yaw_rate_max_) ||
       command_timeout_ <= 0.0 || speed_max_ <= 0.0 || yaw_rate_max_ <= 0.0 ||
-      (model_ != "ideal" && model_ != "velocity" && model_ != "inertial"))
+      (model_ != "ideal" && model_ != "velocity" && model_ != "inertial" && model_ != "reference"))
     {
-      throw std::invalid_argument("Expected ideal/velocity/inertial model and positive limits/timeout");
+      throw std::invalid_argument("Unknown model or invalid limit/timeout; see ch04 configuration");
     }
     if (model_ == "inertial") {readInertia();}
-    state_ = idealPose(initial_);
+    if (model_ == "reference") {
+      reference_radius_ = declare_parameter("reference_radius", 1.0);
+      reference_omega_ = declare_parameter("reference_omega", .4);
+      if (!std::isfinite(reference_radius_) || reference_radius_ <= 0 ||
+        !std::isfinite(reference_omega_))
+      {
+        throw std::invalid_argument("Reference radius must be positive, omega finite");
+      }
+    }
+    state_ = initialState();
     clock_.setPaused(declare_parameter("start_paused", false));
     const auto retained = rclcpp::QoS(1).reliable().transient_local();
     clock_pub_ = create_publisher<rosgraph_msgs::msg::Clock>("/clock", 1);
@@ -71,7 +80,7 @@ public:
       velocity_sub_ = create_subscription<geometry_msgs::msg::TwistStamped>(
         "/command/velocity", rclcpp::QoS(1),
         [this](const geometry_msgs::msg::TwistStamped & message) {receiveVelocity(message);});
-    } else {
+    } else if (model_ == "inertial") {
       wrench_sub_ = create_subscription<geometry_msgs::msg::WrenchStamped>(
         "/command/wrench", rclcpp::QoS(1),
         [this](const geometry_msgs::msg::WrenchStamped & message) {receiveWrench(message);});
@@ -116,6 +125,12 @@ private:
       throw std::invalid_argument("dt must be in [1e-6, 1] seconds");
     }
     return std::chrono::nanoseconds(std::llround(dt * 1e9));
+  }
+
+  State2D initialState() const
+  {
+    return model_ == "reference" ? sampleCircle(initial_, reference_radius_, reference_omega_, 0.0) :
+           idealPose(initial_);
   }
 
   bool freshHeader(const std_msgs::msg::Header & header) const
@@ -204,6 +219,10 @@ private:
       next = stepInertial(state_, command, inertia_, dt());
       padding = inertialSweepPadding(state_, command, inertia_, dt());
     }
+    if (model_ == "reference") {
+      next = sampleCircle(initial_, reference_radius_, reference_omega_, clock_.seconds() + dt());
+      padding = reference_radius_ * reference_omega_ * reference_omega_ * dt() * dt() / 8.0;
+    }
     pending_pose_.reset();
     if (!next.pose.position.allFinite() || !next.velocity.allFinite() ||
       !next.acceleration.allFinite() || !std::isfinite(next.pose.yaw) ||
@@ -254,7 +273,7 @@ private:
       [this](const std_srvs::srv::Trigger::Request::SharedPtr,
         std_srvs::srv::Trigger::Response::SharedPtr response) {
         clock_.reset();
-        state_ = idealPose(initial_);
+        state_ = initialState();
         pending_pose_.reset();
         have_command_ = false;
         velocity_command_ = VelocityCommand{};
@@ -380,6 +399,7 @@ private:
   Wrench2D wrench_command_;
   InertialParameters inertia_;
   double radius_, command_timeout_, speed_max_, yaw_rate_max_;
+  double reference_radius_ = 1.0, reference_omega_ = .4;
   std::int64_t command_deadline_ = 0;
   bool blocked_ = false, have_command_ = false;
   std::string model_, status_;

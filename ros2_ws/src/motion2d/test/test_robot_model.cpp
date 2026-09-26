@@ -206,3 +206,37 @@ TEST(InertialModel, RejectInvalidPhysicalParameters)
   p.linear_drag = -1;
   EXPECT_THROW(validateInertialParameters(p), std::invalid_argument);
 }
+
+TEST(ReferenceModel, QuarterCircleWithRotatedInitialPose)
+{
+  const Pose2D initial{{1, -2}, kPi / 2};
+  const auto state = sampleCircle(initial, 2, .4, kPi / .8);
+  EXPECT_NEAR((state.pose.position - Eigen::Vector2d{-1, 0}).norm(), 0, 1e-12);
+  EXPECT_NEAR((state.velocity - Eigen::Vector2d{-.8, 0}).norm(), 0, 1e-12);
+  EXPECT_NEAR((state.acceleration - Eigen::Vector2d{0, -.32}).norm(), 0, 1e-12);
+  EXPECT_NEAR(state.pose.yaw, -kPi, 1e-12);
+  EXPECT_DOUBLE_EQ(state.yaw_rate, .4);
+}
+
+TEST(ReferenceModel, AnalyticDerivativesMatchFiniteDifferences)
+{
+  const Pose2D initial{{2, -3}, .7};
+  const double t = 1.2, eps = 1e-4;
+  const auto state = sampleCircle(initial, 1.3, .6, t);
+  const auto before = sampleCircle(initial, 1.3, .6, t - eps);
+  const auto after = sampleCircle(initial, 1.3, .6, t + eps);
+  EXPECT_LT(((after.pose.position - before.pose.position) / (2 * eps) - state.velocity).norm(), 1e-8);
+  EXPECT_LT(((after.velocity - before.velocity) / (2 * eps) - state.acceleration).norm(), 1e-8);
+}
+
+TEST(ReferenceModel, PeriodicStateAndMovingInitialCondition)
+{
+  const auto start = sampleCircle({}, 1, .4, 0);
+  const auto end = sampleCircle({}, 1, .4, 2 * kPi / .4);
+  EXPECT_NEAR((start.pose.position - end.pose.position).norm(), 0, 1e-12);
+  EXPECT_NEAR((start.velocity - end.velocity).norm(), 0, 1e-12);
+  EXPECT_NEAR((start.acceleration - end.acceleration).norm(), 0, 1e-12);
+  EXPECT_DOUBLE_EQ(start.velocity.x(), .4);
+  EXPECT_NEAR(start.acceleration.y(), .16, 1e-12);
+  EXPECT_NEAR(wrapAngle(end.pose.yaw - start.pose.yaw), 0, 1e-12);
+}

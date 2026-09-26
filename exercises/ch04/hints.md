@@ -15,3 +15,5 @@ ch04-3：
 1. 输入是已限幅的力，不是加速度。a=F/m，角加速度=torque/inertia_z。
 2. 无阻尼且步内恒力时，位置增加旧速度乘 dt，再加 a*dt²/2；先用新速度更新位置会多走一段。
 3. yaw 也有相同的二次项。最后更新速度、角速度，保存加速度，并归一化 yaw。
+
+ch04-4：theta=omega*t，所以对 sin(theta)/cos(theta) 求时间导数还要乘 omega。加速度模长为 r*omega²；改变 omega 的正负不改变这个模长。

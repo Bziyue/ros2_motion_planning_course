@@ -79,7 +79,7 @@
 
 - **目标**：区分几何外形、运动学和动力学；先手动移动，再观察加速与制动。
 - **内容/公式**：位置、速度、yaw、角速度；理想到点与连续理想轨迹；速度积分；`m v_dot = F - c_v v`；时间离散；力/力矩限幅；碰撞事件与试验停止。
-- **已实现代码**：声明 `include/motion2d/sim/robot_model.hpp`；`sim/ideal_model.cpp`、`sim/velocity_model.cpp`、`sim/inertial_model.cpp`、`sim/swept_collision.cpp`；`nodes/simulator_node.cpp`。连续参考轨迹执行在第 14 章接入。
+- **已实现代码**：声明 `include/motion2d/sim/robot_model.hpp`；`sim/ideal_model.cpp`、`sim/velocity_model.cpp`、`sim/inertial_model.cpp`、`sim/reference_model.cpp`、`sim/swept_collision.cpp`；`nodes/simulator_node.cpp`。本章连续参考为解析圆，任意分段多项式参考在第 14 章接入。
 - **练习**：预测相同力下两种质量的加速度；补完一步积分；比较时间步长与制动距离。
 - **验收**：零力与恒力实验符合解析结果；改变半径影响碰撞；理想位置跳转检查扫过的圆盘，不允许跨过障碍。真正 reset/瞬移明确开始新试验并清理缓存，不用于 IMU 实验。
 

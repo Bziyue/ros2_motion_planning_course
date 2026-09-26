@@ -89,4 +89,17 @@ State2D stepInertial(const State2D & state, const Wrench2D & command,
  */
 double inertialSweepPadding(const State2D & state, const Wrench2D & command,
   const InertialParameters & parameters, double dt);
+
+/**
+ * @brief Sample an ideal circular reference with mutually consistent p/v/a/yaw.
+ * @param initial Pose at time zero; initial velocity is radius*omega along its x axis.
+ * @param radius Path-circle radius (m), distinct from the robot's collision radius.
+ * @param omega Signed reference angular frequency (rad/s).
+ * @param time Time since the trial began (s).
+ * @pre Finite inputs, radius > 0, time >= 0.
+ * @details This is prescribed ideal motion, not force-limited tracking. In axes
+ * aligned with initial yaw, displacement is (r*sin(omega*t), r*(1-cos(omega*t))).
+ * Derivatives are analytic; resetting starts a new already-moving trial.
+ */
+State2D sampleCircle(const Pose2D & initial, double radius, double omega, double time);
 }  // namespace motion2d

@@ -37,3 +37,12 @@ g++ -std=c++17 -I/usr/include/eigen3 -Iros2_ws/src/motion2d/include \
 ~~~
 
 参考解仍用 solutions 替换 starter。评分要求包括平移与偏航，不能只让位置通过。自动惯量取 m*r²/2；r=0 时请显式给正惯量，不能拿零做除数。
+
+9. 代码题 ch04-4：对连续理想圆轨迹的速度求导，补齐 reference_acceleration.hpp。注意链式法则中的第二个 omega；这是初始朝向轴下的分量，旋转到 odom 后才发布。
+10. 实验题：用 reference 模式跑一圈，验证初末 p/v/a 一致。把 reference_omega 翻倍，速度与加速度分别怎样变化？为什么初始速度不为零，却仍可称为连续运动？
+
+~~~bash
+g++ -std=c++17 -I/usr/include/eigen3 -Iexercises/ch04/starter \
+  exercises/ch04/check_reference.cpp -o /tmp/ch04_reference
+/tmp/ch04_reference
+~~~

@@ -36,8 +36,9 @@ class Probe:
         for client in (self.pause, self.step, self.reset):
             assert client.wait_for_service(timeout_sec=5), "Start ch04.launch.py first"
         active_pub = {"ideal": self.pose_pub, "velocity": self.velocity_pub,
-                      "inertial": self.wrench_pub}[model]
-        self.wait(lambda: self.pose is not None and active_pub.get_subscription_count() == 1)
+                      "inertial": self.wrench_pub, "reference": None}[model]
+        self.wait(lambda: self.pose is not None and
+                  (active_pub is None or active_pub.get_subscription_count() == 1))
 
     def wait(self, predicate, timeout=5):
         end = time.monotonic() + timeout
@@ -114,14 +115,16 @@ def check_ideal(probe):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--model", choices=("ideal", "velocity", "inertial"), default="ideal")
+    parser.add_argument("--model", choices=("ideal", "velocity", "inertial", "reference"), default="ideal")
     parser.add_argument("--mass", type=float, default=1.0,
                         help="Expected inertial mass; assumes radius=.2 and automatic inertia")
     args = parser.parse_args()
     rclpy.init()
     probe = Probe(args.model)
     try:
-        if args.model == "inertial":
+        if args.model == "reference":
+            check_reference(probe)
+        elif args.model == "inertial":
             check_inertial(probe, args.mass)
         else:
             (check_ideal if args.model == "ideal" else check_velocity)(probe)
@@ -194,6 +197,27 @@ def check_inertial(p, mass):
     assert p.call(p.step, Trigger.Request()).success
     assert p.pose.pose.position.x == -8.0 and p.velocity.twist.linear.x == 0.0
     print(f"PASS inertial mass={mass}: input isolation, limits, torque, coast, braking and reset")
+
+
+def check_reference(p):
+    assert p.call(p.reset, Trigger.Request()).success
+    p.wait(lambda: p.stamp() == 0.0)
+    assert p.pose_pub.get_subscription_count() == p.velocity_pub.get_subscription_count() == 0
+    assert p.wrench_pub.get_subscription_count() == 0
+    assert math.isclose(p.velocity.twist.linear.x, .4)
+    assert math.isclose(p.acceleration.accel.linear.y, .16)
+    p.spin(.2)
+    assert p.stamp() == 0.0
+    for _ in range(100):
+        assert p.call(p.step, Trigger.Request()).success
+    assert math.isclose(p.stamp(), .5)
+    assert math.isclose(p.pose.pose.position.x, -8 + math.sin(.2), abs_tol=1e-10)
+    assert math.isclose(p.pose.pose.position.y, -8 + 1 - math.cos(.2), abs_tol=1e-10)
+    assert math.isclose(p.velocity.twist.linear.x, .4 * math.cos(.2), abs_tol=1e-10)
+    assert math.isclose(p.acceleration.accel.linear.x, -.16 * math.sin(.2), abs_tol=1e-10)
+    assert p.call(p.reset, Trigger.Request()).success
+    assert p.pose.pose.position.x == -8.0 and math.isclose(p.velocity.twist.linear.x, .4)
+    print("PASS reference: analytic p/v/a, moving initial condition, pause, ticks and reset")
 
 
 if __name__ == "__main__":

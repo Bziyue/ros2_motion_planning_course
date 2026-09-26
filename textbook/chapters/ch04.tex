@@ -70,12 +70,12 @@ ros2 topic pub --once /command/pose geometry_msgs/msg/PoseStamped \
 \lstinputlisting[language=C++,linerange={ideal_begin-ideal_end},
   includerangemarker=false]{../ros2_ws/src/motion2d/src/sim/ideal_model.cpp}
 \end{minipage}\par
-位置在一个 tick 中改变，不代表机器人以一个有限速度完成了运动。速度和加速度字段为
-未使用的零值；不能对这种跳变做差分，再把结果称为模拟 IMU。平滑轨迹执行将在轨迹章节加入。
+理想到点没有有限的运动速度。这里的零导数表示未使用，不能用位置跳变的差分模拟 IMU。
+需要连续运动时，使用本章后面的解析圆参考。
 
 \begin{figure}[ht]
 \centering
-\includegraphics[width=.78\linewidth]{figures/ch04_ideal_rviz.png}
+\includegraphics[width=.72\linewidth]{figures/ch04_ideal_rviz.png}
 \caption{实际 RViz2 画面：世界、圆盘与已接受的移动轨迹。}
 \end{figure}
 
@@ -316,6 +316,67 @@ m / kg & dt / s & 1 s 位移 / m & 1 s 末速 / (m/s) & 同速制动距离 / m\\
 
 \textbf{拓展实验：}把 linear\_drag 改为 0.5 kg/s，从有速度的状态撤去力，
 画出速度随时间的衰减，与 $v_0e^{-c_vt/m}$ 比较。不要用瞬时速度模式代替这个试验。
+\clearpage
+\section{连续理想参考：给后续传感器一条平滑轨迹}
+还有一种常用实验：先给定一条连续轨迹，让机器人完美执行，单独研究传感器和定位。
+这里从解析圆轨迹开始，不引入尚未需要的轨迹消息和优化器：
+\begin{lstlisting}[language=bash,numbers=none]
+ros2 launch motion2d_bringup ch04.launch.py model:=reference
+\end{lstlisting}
+reference 自动运行，不订阅外部位置、速度或力命令。它是理想参考执行，不验证力限幅可行性；
+几何碰撞仍然要检查。轨迹半径 \code{reference_radius} 默认 1 m，
+与机器人碰撞半径 radius 是两个参数；角频率 \code{reference_omega} 默认 0.4 rad/s。
+
+令初始位姿为 $(p_0,\psi_0)$，$R_0=R(\psi_0)$、$\theta=\Omega t$，选择
+\begin{align}
+p(t)&=p_0+R_0
+ \begin{bmatrix}r_c\sin\theta\\r_c(1-\cos\theta)\end{bmatrix},\\
+v(t)&=R_0r_c\Omega
+ \begin{bmatrix}\cos\theta\\\sin\theta\end{bmatrix},&
+a(t)&=R_0r_c\Omega^2
+ \begin{bmatrix}-\sin\theta\\\cos\theta\end{bmatrix},\\
+\psi(t)&=\operatorname{wrap}(\psi_0+\theta),&
+\omega(t)&=\Omega.
+\end{align}
+因此速度模长是 $r_c|\Omega|$，加速度模长是 $r_c\Omega^2$。
+三个平移量来自同一个解析参考，不需要通过差分位置猜测加速度：
+
+\par\noindent\begin{minipage}{\linewidth}
+\lstinputlisting[language=C++,linerange={reference_begin-reference_end},
+  includerangemarker=false]{../ros2_ws/src/motion2d/src/sim/reference_model.cpp}
+\end{minipage}\par
+
+\clearpage
+\section{运动中的初始条件与导数核对}
+这个圆参考在 t=0 就有非零速度。默认起点仍为 $(-8,-8)$，
+初速度是 0.4 m/s，加速度模长为 0.16 m/s$^2$。
+reset 恢复的是这个运动中的初始条件，开始新试验；它没有模拟“从静止瞬间加速到 0.4 m/s”。
+后续 IMU 积分实验也要明确初始速度、偏航等先验，不能把这些已知条件隐藏起来。
+
+碰撞余量取 $r_c\Omega^2h^2/8$。默认场景可以走完一圈；换大轨迹半径或换 seed 后，
+若参考穿过障碍，仍会冻结试验。理想执行并不授予穿越障碍的能力。
+
+\begin{figure}[ht]
+\centering
+\includegraphics[width=.83\linewidth]{figures/ch04_reference_rviz.png}
+\caption{默认场景中完整圆参考的局部放大。圆盘与朝向随参考运动，轨迹不由规划器计算。}
+\end{figure}
+
+\textbf{如何验证导数？}\quad 除了检查四分之一圈的手算值，测试还使用中心差分
+\begin{equation}
+v(t)\approx\frac{p(t+\epsilon)-p(t-\epsilon)}{2\epsilon},\qquad
+a(t)\approx\frac{v(t+\epsilon)-v(t-\epsilon)}{2\epsilon}.
+\end{equation}
+用它核对解析函数，而不拿差分结果驱动 IMU。测试还比较整圈前后的 p/v/a。
+实际离散 tick 未必恰好落在周期终点，应与相同采样时刻的解析值比较。
+
+\textbf{代码练习 ch04-4：}补完 \path{exercises/ch04/starter/reference_acceleration.hpp}，
+对速度求时间导数，注意链式法则中的第二个 $\Omega$。再把角频率翻倍，
+验证速度翻倍、加速度变为四倍。命令与验收入口：
+\begin{lstlisting}[language=bash,numbers=none]
+/usr/bin/python3 ../scripts/check_ch04.py --model reference
+\end{lstlisting}
+
 \clearpage
 \section{接口、练习与验收}
 本章默认 dt=0.005 s。位姿输入接受 odom/map；map 可用是因为本章二者重合。

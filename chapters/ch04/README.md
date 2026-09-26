@@ -1,6 +1,6 @@
 # 第 04 章：机器人模型
 
-先修 01-03。机器人中心状态包含位置、速度、加速度、yaw、角速度和角加速度，平移导数在 odom 系，全部使用 SI 单位。本章已实现理想到点、速度控制与受力惯性，三个功能分别提交。
+先修 01-03。机器人中心状态包含位置、速度、加速度、yaw、角速度和角加速度，平移导数在 odom 系，全部使用 SI 单位。本章的理想到点、速度控制、受力惯性、连续理想参考分别提交。
 
 ## 运行理想到点
 
@@ -94,6 +94,19 @@ make -C textbook
 
 LaTeX 的 pgfplots 直接读取这份 C++ 实验 CSV 绘图，不需要 Python 绘图依赖。
 
+## 连续理想参考
+
+~~~bash
+ros2 launch motion2d_bringup ch04.launch.py model:=reference
+/usr/bin/python3 ../scripts/check_ch04.py --model reference
+~~~
+
+第二行在另一个已加载环境的终端执行，会重置试验。reference 不订阅外部控制命令，直接采样预设的解析圆轨迹；它是完美执行基线，未检查力限幅可行性。机器人碰撞半径仍为 radius，轨迹圆半径是 reference_radius（默认 1 m），角频率 reference_omega 默认为 0.4 rad/s。
+
+以初始朝向的坐标轴表示位移，theta=omega*t 时为 r*(sin(theta),1-cos(theta))。位置、速度、加速度由同一条曲线解析求得，再旋转到 odom；yaw=initial_yaw+theta，角速度为 omega。初始位置仍是 (-8,-8)，但初始速度已经是 0.4 m/s；reset 恢复的是这个运动中的初始条件，不伪造从静止突然加速的过程。
+
+全程使用曲线扫掠余量 r*omega²*dt²/8。碰撞、暂停、单步和 reset 的语义与其他模式一致。此模式的平滑 p/v/a 可供第 06 章模拟 IMU；任意分段多项式参考和跟踪控制在后续轨迹章节接入，不在这里预建消息或插件框架。
+
 ## 读代码与验收
 
 | 入口 | 职责 |
@@ -102,6 +115,7 @@ LaTeX 的 pgfplots 直接读取这份 C++ 实验 CSV 绘图，不需要 Python �
 | sim/ideal_model.cpp | 理想位姿赋值，清除未使用的导数 |
 | sim/velocity_model.cpp | 恒速度直线/圆弧、速度限制 |
 | sim/inertial_model.cpp | 力/力矩限幅、质量与阻尼的解析离散 |
+| sim/reference_model.cpp | 连续理想圆轨迹的解析 p/v/a 与 yaw |
 | sim/swept_collision.cpp | 连续直线扫掠几何 |
 | nodes/simulator_node.cpp | 命令、唯一时钟、TF、状态与轨迹显示 |
 | ros/world_parameters.hpp（include 下） | 显示与碰撞共用参数读取 |
