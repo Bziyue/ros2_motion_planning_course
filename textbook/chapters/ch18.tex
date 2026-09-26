@@ -1,115 +1,335 @@
 \chapter{线性 MPC 与约束跟踪}
 \begin{notebox}
-\textbf{目标}\quad 将受力模型、参考轨迹和线性约束写成 QP；只执行本次有效解的第一步。\\
-\textbf{先修}\quad 第 04、13、14、17 章；yaw 仍使用独立前馈 + PD。
+\textbf{目标}\quad 从逐步预测建立二次规划，理解力、速度和走廊约束；手算一次求解器迭代，再观察滚动控制。\\
+\textbf{先修}\quad 第 04 章精确积分、第 13 章凸走廊、第 17 章受力跟踪。
 \end{notebox}
-\section{把连续模型积分成预测矩阵}
-\begin{lstlisting}[language=bash]
+\section{先计划几步，再执行一步}
+PD 根据当前误差决定输入。\textbf{模型预测控制}（Model Predictive Control，MPC）还会考虑未来一段参考：
+尝试一串力，预测它们将把机器人带到哪里，再选择误差较小且满足限制的一串。
+实际只执行第一条力；下一次收到状态后重新预测，这就是\textbf{滚动时域}。
+\begin{lstlisting}[language=bash,numbers=none]
 ros2 run motion2d mpc_demo tmp/ch18_mpc
 /usr/bin/python3 scripts/plot_ch18_mpc.py
 \end{lstlisting}
-取 $x=[p_x,p_y,v_x,v_y]^\top$、$u=[F_x,F_y]^\top$，控制间隔为 $h$。
-在一步内保持力不变，令 $\lambda=c_v/m$，$e=e^{-\lambda h}$，
-$g=(1-e)/\lambda$，$f=(h-g)/\lambda$，则
+本章优化全向惯性模型的平移力，yaw 沿用第 17 章的独立前馈与 PD。
+控制间隔为 $h$，预测 $N$ 步，前瞻时间是 $Nh$。例如 $N=20,h=0.02$ s，只看到未来 0.4 s。
+
+\begin{center}\begin{minipage}{\linewidth}\makeatletter\def\@captype{figure}\makeatother
+\centering
+\begin{tikzpicture}[x=2cm,y=1cm,>=Stealth]
+\foreach \k in {0,1,2,3} {\fill[navy] (\k,0) circle[radius=1.3pt];\node[above] at(\k,0) {$x_{\k}$};}
+\foreach \k in {0,1,2} {\draw[->,thick,tealblue] (\k+.12,0)--(\k+.88,0) node[midway,below] {$u_{\k}$};}
+\node[left] at(-.2,0) {当前预测};
+\draw[tealblue,very thick] (0,-.85)--(1,-.85) node[midway,below] {执行 $u_0$};
+\foreach \k in {1,2,3,4} {\fill[navy] (\k,-2) circle[radius=1.3pt];}
+\foreach \k in {1,2,3} {\draw[->,thick,muted] (\k+.12,-2)--(\k+.88,-2);}
+\node[left] at(.8,-2) {重新测量};\node[below] at(1,-2.04) {$x_{\rm new}$};
+\node[below] at(2.5,-2) {从新状态计算下一串力};
+\draw[->,muted] (1,-1.15)--(1,-1.87);
+\end{tikzpicture}
+\caption{三步预测的滚动过程。下次预测从实际测量状态出发，原预测的后两条力用于提供求解初值。}
+\end{minipage}\end{center}
+
+\section{一步预测来自连续动力学的积分}
+取状态 $x=(p_x,p_y,v_x,v_y)^T$，输入 $u=(F_x,F_y)^T$，位置和速度均在 odom 系。
+一步内保持力不变，称为\textbf{零阶保持}（ZOH）。先对一个轴积分：
+\[
+ \dot v+\lambda v=F/m,\qquad\lambda=c_v/m.
+\]
+两边乘 $e^{\lambda t}$，左边成为 $d(e^{\lambda t}v)/dt$。
+从 0 积分到 $h$，再乘 $e^{-\lambda h}$，得到
+\[
+ v(h)=e^{-\lambda h}v(0)+\frac{1-e^{-\lambda h}}{m\lambda}F.
+\]
+对这一速度再积分一次，位置为
+\[
+ p(h)=p(0)+\frac{1-e^{-\lambda h}}{\lambda}v(0)
+ +\frac{1}{m\lambda}\left(h-\frac{1-e^{-\lambda h}}{\lambda}\right)F.
+\]
+记 $e_h=e^{-\lambda h}$、$g=(1-e_h)/\lambda$、$f=(h-g)/\lambda$，两个轴并排写成
 \begin{equation}
  x_{k+1}=Ax_k+Bu_k,\qquad
- A=\begin{bmatrix}I&gI\\0&eI\end{bmatrix},\qquad
- B=\begin{bmatrix}(f/m)I\\(g/m)I\end{bmatrix}.
+ A=\begin{bmatrix}I&gI\\0&e_hI\end{bmatrix},\qquad
+ B=\begin{bmatrix}(f/m)I\\(g/m)I\end{bmatrix}.\label{eq:mpczoh}
 \end{equation}
-$\lambda\to0$ 时 $g=h,f=h^2/2$。小阻力应使用第 04 章的稳定极限，避免两个相近数相减。
-linearInertialModel 复用精确积分器的基向量响应来提取 A/B；输入取力限内的幅值后归一化。
-控制与仿真共用动力学，测试另核对零阻力解析值。
+$I$ 为 $2\times2$ 单位矩阵；$g$ 的单位是 s，$f$ 为 s$^2$，所以 $Bu$ 同时产生米和米每秒的变化。
+由 $e^{-\lambda h}=1-\lambda h+(\lambda h)^2/2+\cdots$，可见
+$g\to h,f\to h^2/2$，恢复无阻力的匀加速积分。
+代码的 \code{linearInertialModel} 复用第 04 章精确积分器：依次输入单位状态，输出就是 $A$ 的各列；
+从零状态输入单位力，输出就是 $B$ 的各列。若力上限低于 1 N，则用较小幅值并按比例除回，保留线性响应。
 
-重复代入 N 步，将未来状态和力依次堆叠为 $X=[x_1;\ldots;x_N]$、$U=[u_0;\ldots;u_{N-1}]$：
-\begin{equation}
- X=S_xx_0+S_uU,\qquad (S_x)_k=A^k,\qquad
- (S_u)_{k,j}=\begin{cases}A^{k-1-j}B,&0\leq j<k,\\0,&j\geq k.\end{cases}
-\end{equation}
-预测步数与预测时间不同：$N=20,h=0.02$ s 只看未来 0.4 s。
-位置与速度均在 odom，力单位 N。
+\section{把两步展开，再推广到多步}
+将式\eqref{eq:mpczoh}重复代入：
+\begin{align*}
+ x_1&=Ax_0+Bu_0,\\
+ x_2&=A(Ax_0+Bu_0)+Bu_1=A^2x_0+ABu_0+Bu_1,\\
+ x_3&=A^3x_0+A^2Bu_0+ABu_1+Bu_2.
+\end{align*}
+越早施加的力，越多次经过后续状态转移 $A$。把所有未来状态和输入竖直堆叠，三步例子为
+\[
+ \underbrace{\begin{bmatrix}x_1\\x_2\\x_3\end{bmatrix}}_X
+ =\underbrace{\begin{bmatrix}A\\A^2\\A^3\end{bmatrix}}_{S_x}x_0+
+ \underbrace{\begin{bmatrix}B&0&0\\AB&B&0\\A^2B&AB&B\end{bmatrix}}_{S_u}
+ \underbrace{\begin{bmatrix}u_0\\u_1\\u_2\end{bmatrix}}_U.
+\]
+一般的 $S_x$ 为 $4N\times4$，$S_u$ 为 $4N\times2N$。第 $k$ 个状态由前 $k$ 条输入影响，
+后面的输入尚未发生，故 $S_u$ 的右上方为零块。
+\code{predictionMatrices} 每一轮把上一行块乘 $A$，再在新输入对应列放入 $B$，正对应上面的展开。
+这种把状态用输入表示、只优化 $U$ 的做法称为\textbf{凝聚}。
 
-\section{跟踪、前馈和输入变化组成一个二次型}
-未来参考在 $t+h,\ldots,t+Nh$ 采样，前馈力 $U_r$ 由 $\hat m a_r+\hat c_vv_r$ 堆叠。
-令 $D$ 为主对角 I、下一条块对角 $-I$ 的差分矩阵，$d=[u_{\rm previous};0;\ldots]$，代价为
+\subsection{贯穿本章的两步数值例子}
+为便于手算，先只保留一个轴，取 $m=1$ kg、$c_v=0,h=1$ s、$N=2$，初始位置、速度为零。
+此时
+\[
+ A=\begin{bmatrix}1&1\\0&1\end{bmatrix},\quad
+ B=\begin{bmatrix}1/2\\1\end{bmatrix},\quad
+ AB=\begin{bmatrix}3/2\\1\end{bmatrix}.
+\]
+所以 $p_1=u_0/2,v_1=u_0$，$p_2=3u_0/2+u_1/2,v_2=u_0+u_1$。
+例如输入 $(u_0,u_1)=(0.4,0.2)$ N，得到 $p_1=0.2$ m、$p_2=0.7$ m；
+第二步位置中，两条力的系数分别为 $3/2$ 和 $1/2$；相同大小的力，提前施加会产生更大的位置变化。
+
+\section{从平方误差展开出二次规划}
+\subsection{三种代价分别在意什么}
+参考状态 $X_r$ 在未来 $t+h,\ldots,t+Nh$ 取样。
+同一组参考还生成前馈力 $U_r$，每块为 $\hat m a_r+\hat c_vv_r$。
+设 $E=S_xx_0-X_r$，则预测误差为 $E+S_uU$。
+给每步的位置与速度分别设权重，放在对角矩阵 $\bar Q$ 中，约定 $\|z\|_Q^2=z^TQz$。
+若 $Q=\operatorname{diag}(40,40,2,2)$，一项就是 $40(e_x^2+e_y^2)+2(e_{v_x}^2+e_{v_y}^2)$。
+权重按不同物理量的尺度选取；相加的是经过权重换算的代价。
+
+希望力接近前馈，还希望相邻输入变化较小。用上一拍实际力 $u_{-1}$，定义
+\[
+ D=\begin{bmatrix}I&0&0\\-I&I&0\\0&-I&I\end{bmatrix},\quad
+ d=\begin{bmatrix}u_{-1}\\0\\0\end{bmatrix},\quad
+ DU-d=\begin{bmatrix}u_0-u_{-1}\\u_1-u_0\\u_2-u_1\end{bmatrix}.
+\]
+总目标为
 \begin{equation}
- J=\|S_xx_0+S_uU-X_r\|_{\bar Q}^2+
- r\|U-U_r\|^2+s\|DU-d\|^2.
+ J=(E+S_uU)^T\bar Q(E+S_uU)+r\|U-U_r\|^2+s\|DU-d\|^2.\label{eq:mpccost}
 \end{equation}
-$\bar Q$ 每步对位置与速度分别加权；$r>0$ 使力的二次型正定。
-写成 $\tfrac12U^TPU+q^TU+\mathrm{const}$ 后，
+$r>0$ 控制力偏离前馈的代价，$s\geq0$ 控制输入增量代价。
+$d$ 记录实际已施加的力，包括限幅或制动后的值，这样第一项增量才反映机器人真正经历的输入变化。
+
+\subsection{逐项收集二次项和一次项}
+第一项展开为
+\[
+ U^TS_u^T\bar Q S_uU+2U^TS_u^T\bar Q E+E^T\bar Q E.
+\]
+力项展开为 $rU^TU-2rU^TU_r+rU_r^TU_r$；增量项同理。
+把只依赖参考和当前状态的常数放到一起，得到标准\textbf{二次规划}（QP）目标
 \begin{align}
- P&=2(S_u^T\bar Q S_u+rI+sD^TD),\\
- q&=2\{S_u^T\bar Q(S_xx_0-X_r)-rU_r-sD^Td\}.
+ J&=\tfrac12U^TPU+q^TU+\text{常数},\\
+ P&=2(S_u^T\bar Q S_u+rI+sD^TD),\label{eq:mpchessian}\\
+ q&=2(S_u^T\bar Q E-rU_r-sD^Td).
 \end{align}
-上一拍必须用\textbf{实际施加的力}，包括制动输入；不能用旧参考或未限幅请求替代。
+因 $P$ 对称，对第 $i$ 个变量求导，$U_iU_j$ 的两种位置各贡献一次，故 $\nabla_U J=PU+q$。
+对任意非零方向 $w$，
+\[
+ w^TPw=2\{\|S_uw\|_{\bar Q}^2+r\|w\|^2+s\|Dw\|^2\}>0.
+\]
+这叫 $P$ \textbf{正定}：沿任意非零方向，目标都有向上的曲率。因此可行的凸约束问题具有唯一最小值。
+无约束时令梯度为零，直接解 $PU=-q$。
 
-\clearpage
-\section{把约束按行装进矩阵}
-求解器的统一形式为 $l\leq C U\leq u$，这里 C 是约束矩阵，避免与动力学 A 混淆。
-分别堆叠以下线性行：
-\begin{itemize}
-\item 力：$-F_{\max}\leq U_i\leq F_{\max}$；两个方向独立。
-\item 变化率：$-\dot F_{\max}h\leq DU-d\leq\dot F_{\max}h$，单位 N。
-\item 速度：从 $S_xx_0+S_uU$ 取出各步速度，限制两个分量。
-\item 走廊：每步选择已验证的配置空间凸区，代入 $H_kp_k\leq b_k$。
-\end{itemize}
-输入 N 个凸区与 N 个预测状态一一对应；区域已经考虑圆盘半径，不再膨胀一次。
-这些约束只限制预测节点，不证明节点之间、定位误差下或跟踪偏离后的连续安全。
-ESDF 是非线性距离场，若直接加入非线性约束，就需要另讲 SQP/NMPC，不能继续称作此处的线性 QP。
+\subsection{手算最优的两条力}
+继续两步例子，只罚位置误差，两个目标位置都是 1 m，前馈设为零，取 $r=1,s=0$。
+逐项写出
+\[
+ J=(u_0/2-1)^2+(3u_0/2+u_1/2-1)^2+u_0^2+u_1^2.
+\]
+展开后应得到
+\[
+ P=\begin{bmatrix}7&3/2\\3/2&5/2\end{bmatrix},\qquad q=\begin{bmatrix}-4\\-1\end{bmatrix}.
+\]
+两条线性方程为 $7u_0+1.5u_1=4$、$1.5u_0+2.5u_1=1$。
+消元得到 $u_0=34/61$ N、$u_1=4/61$ N，对应 $p_1=17/61$ m、$p_2=53/61$ m。
+即使没有硬约束，最优位置也未必精确等于 1 m：目标同时在权衡位置误差与用力大小。
+
+\section{把每项约束改写成输入的不等式}
+统一写成 $l\leq CU\leq u$；这里 $u$ 是上界向量，单步输入仍写 $u_k$。
+代码 \code{BoxQp::A} 存放本节的 $C$，与动力学矩阵 $A$ 是不同对象。
+\begin{enumerate}
+\item \textbf{力限：}用单位矩阵行取出 $U_i$，两侧为 $\pm F_{\max}$。
+\item \textbf{变化率：}约束平均变化率 $|(u_k-u_{k-1})/h|\leq\dot F_{\max}$，等价于
+$d-\dot F_{\max}h\leq DU\leq d+\dot F_{\max}h$。
+\item \textbf{速度限：}令 $S_{u,v,k}$ 表示 $S_u$ 中取第 $k$ 步速度的两行，$v_k^0$ 为 $S_xx_0$ 中对应项。
+由 $v_k=v_k^0+S_{u,v,k}U$，得到上下界 $\pm v_{\max}-v_k^0$。
+\item \textbf{走廊：}第 $k$ 步位置为 $p_k=p_k^0+S_{u,p,k}U$，区域 $H_kp_k\leq b_k$ 变成
+$H_kS_{u,p,k}U\leq b_k-H_kp_k^0$。这一组行的下界设为 $-\infty$。
+\end{enumerate}
+走廊使用第 13 章已按机器人半径构造的配置空间区域，每一步状态对应一个区域。
+速度和力都按坐标分量限制，例如 $|v_x|,|v_y|\leq1$ m/s 允许对角方向速度范数达到 $\sqrt2$ m/s。
+ESDF 距离本身随位置非线性变化；将它放入预测优化时，需要进一步使用局部线性化或非线性求解。
+
+两步例子的力上限若收紧为 0.4 N，无约束的 $u_0=34/61$ 会超限。
+固定 $u_0=0.4$，对 $u_1$ 求导：$1.5(0.4)+2.5u_1-1=0$，得到 $u_1=0.16$ N。
+此时第一分量梯度为 $7(0.4)+1.5(0.16)-4=-0.96$，目标还希望继续增加 $u_0$，但上界挡住了这一方向。
+这就是\textbf{活跃约束}：最优点恰好位于该约束边界上。
+
+\par\noindent\begin{minipage}{\linewidth}
 \lstinputlisting[language=C++,linerange={mpc_condense_begin-mpc_condense_end},includerangemarker=false]{../ros2_ws/src/motion2d/src/control/linear_mpc.cpp}
+\end{minipage}\par
+代码前 $2N$ 行放力，中间 $2N$ 行留给速度，接着 $2N$ 行放增量；\code{extra} 是各步走廊的半空间总行数。
+\code{free} 表示零输入下的预测 $S_xx_0$，\code{target} 是 $X_r$。
+这样可从每一个矩阵块追溯到一种物理约束。
 
-\section{看得懂的 ADMM 求解器}
-本课程独立实现小型稠密正定 QP 求解器，不调用 OSQP 库。
-它采用分裂变量 z 将线性系统求解与区间投影分开，主要参考
-\href{https://osqp.org/docs/solver/index.html}{OSQP 官方算法说明}，省去稀疏排序、自动缩放和抛光等工程功能。
-\lstinputlisting[language=C++,linerange={qp_admm_begin-qp_admm_end},includerangemarker=false]{../ros2_ws/src/motion2d/src/optimization/box_qp.cpp}
-这里 solve 使用缓存的 LDLT 分解；每 25 次迭代按归一化残差调整 $\rho$，变化足够大时重新分解。
-只有原始残差 $CU-z$ 与对偶残差 $PU+q+C^Ty$ 均满足绝对/相对容差才返回 solved。
-默认容差均为 $10^{-5}$、最多 1500 次；无约束测试对照解析解 $-P^{-1}q$。
+\section{ADMM：交替处理目标与区间}
+\subsection{先把线性关系和简单边界分开}
+本章的稠密求解器采用 ADMM（交替方向乘子法）。把 $z=CU$ 单独保存，问题变为
+\[
+ \min_{U,z}\ \tfrac12U^TPU+q^TU,\qquad CU-z=0,\qquad l\leq z\leq u.
+\]
+引入向量 $y$ 来累计等式偏差，并对偏差增加二次惩罚：
+\[
+ L_\rho(U,z,y)=\tfrac12U^TPU+q^TU+y^T(CU-z)+\tfrac\rho2\|CU-z\|^2.
+\]
+$\rho>0$ 决定当前迭代对等式偏差的重视程度。
+如果某一行 $CU$ 总比 $z$ 大，就增加该行的 $y$；下一次最小化中的 $y^TCU$ 会推动这一行减小。
+这给出了乘子更新的直观含义。
 
-\clearpage
-\section{失败状态与短时域的边界}
-成功后仅施加 $u_0$；下一次重读状态、重建 QP。
-上次成功 U 左移一块、重复尾块，作为本次初值；失败立即清空热启动并生成新的限幅阻尼力。
-稠密构建、分解和迭代适合本章小问题，不承诺硬实时。
-\begin{center}\small
-\begin{tabular}{lp{9cm}}\toprule
-状态 & 可得结论\\\midrule
-solved & 残差在设定容差内；不是连续碰撞或闭环稳定性证明\\
-primal\_infeasible & 上下界矛盾，或找到近似归一化不可行证书\\
-max\_iterations & 给定迭代数内没收敛；不能因此断言问题不可行\\
-time\_limit & 迭代间检查到墙钟预算用完；当前迭代可超出预算\\
-numerical\_failure & 非有限迭代；不能继续使用该输入序列\\\bottomrule
+\subsection{一步解线性方程，一步逐项裁剪}
+第 $j$ 次迭代先固定 $z^j,y^j$，最小化 $L_\rho$ 关于 $U$ 的部分。
+代码还加上 $\sigma\|U-U^j\|^2/2$，让本次更新带一个较小的近端项。
+把梯度设为零：
+\[
+ PU^{j+1}+q+C^Ty^j+\rho C^T(CU^{j+1}-z^j)+\sigma(U^{j+1}-U^j)=0.
+\]
+收集未知量得到
+\begin{equation}
+ (P+\sigma I+\rho C^TC)U^{j+1}
+ =\sigma U^j-q+C^T(\rho z^j-y^j).\label{eq:admmu}
+\end{equation}
+左边正定，可用第 16 章介绍的 $LDL^T$ 分解。矩阵不变时缓存分解，之后每次只做代入求解。
+达到固定点时 $U^{j+1}=U^j$，近端项为零，所以它调节的是迭代过程。
+
+接着固定新 $U$，对 $z$ 的部分配方：
+\[
+ -y^Tz+\tfrac\rho2\|CU-z\|^2
+ =\tfrac\rho2\|z-(CU+y/\rho)\|^2+\text{与 $z$ 无关的项}.
+\]
+在区间 $[l_i,u_i]$ 内找离给定值最近的数，区间内保留原值，区间外取最近端点。
+因此
+\begin{align}
+ z^{j+1}&=\operatorname{clip}(CU^{j+1}+y^j/\rho,l,u),\label{eq:admmz}\\
+ y^{j+1}&=y^j+\rho(CU^{j+1}-z^{j+1}).\label{eq:admmy}
+\end{align}
+三个式子交替处理二次目标、区间边界和等式偏差，使 $CU$ 与 $z$ 逐渐一致。
+这种线性系统与区间投影的分工可参考
+\href{https://osqp.org/docs/solver/index.html}{OSQP 官方算法说明}；本章代码将其写成便于跟读的小型稠密实现。
+
+\subsection{一维手算：最优点被上界挡住}
+考虑 $\min \tfrac12U^2-2U$，约束 $-1\leq U\leq1$。
+无约束极小值是 2，受限后为 1。为方便分数运算，取 $\rho=\sigma=1$，从 $U^0=z^0=y^0=0$ 开始。
+式\eqref{eq:admmu}化为 $U^{j+1}=(U^j+2+z^j-y^j)/3$。
+\begin{center}
+\begin{tabular}{crrr}\toprule
+迭代 & $U$ & $z$ & $y$\\\midrule
+1 & $2/3$ & $2/3$ & $0$\\
+2 & $10/9$ & $1$ & $1/9$\\
+3 & $4/3$ & $1$ & $4/9$\\\bottomrule
 \end{tabular}
 \end{center}
-不可行证书满足 $C^Tv\approx0$ 且 $u^Tv_++l^Tv_-<0$；非有限单侧边界不能参与错误的有限乘积。
-无效外部维度或非正定代价直接报错；示例对超时和迭代不足分别验收。
-制动仍只保证力限幅，\textbf{不保证输入变化率、停止路径或失去观测后的速度准确性}。
+第二步的 $U$ 已超上界，$z$ 被裁到 1，乘子开始增加。
+中间的 $U$ 是迭代量，控制器等待收敛再使用它。最后 $U=z=1,y=1$，正好抵消目标梯度 $U-2=-1$。
 
-\paragraph{一个可复现的不可行例子}
-测试用 1 kg、阻力 0.15、力限 0.8 N、变化率 0.8 N/s，$h=0.1$ s、$N=12$，
-走廊右边界 $x=0.3$ m，却让代价追逐 $x_r=1$ m。
-前几次 QP 都满足各自节点约束，第八次则不可行。
-独立检查每一步所能用的最小 x 力 $\max(-F_{\max},u_{\rm previous}-j\dot F_{\max}h)$，
-即使这样尽早减力，第 12 步仍到约 0.30618 m，超过边界。
-有限时域末端还带着速度，下一次多看到一步时便发现来不及停。
-终端安全集合、可停车参考和约束收紧是进一步方法；本章不宣称已实现递归可行性保证。
+\section{用残差判断何时停止}
+等式偏差称为\textbf{原始残差}：$r_p=CU-z$。
+另一个残差检查目标梯度与约束反馈是否平衡：
+\[
+ r_d=PU+q+C^Ty.
+\]
+可从式\eqref{eq:admmu}在固定点处直接得到 $r_d=0$。
+在上述一维最优点，目标希望向右，$y=1$ 给出的边界作用恰好平衡它；若只看 $r_p$，
+初始 $U=z=0$ 也满足等式，却还没有达到最优。
 
-\paragraph{练习与独立检查}
-\begin{enumerate}
-\item 推导一步 A/B 的零阻力极限，并核对 kg、N、m/s 的单位。
-\item \textbf{ch18-1：}补全输入差分矩阵；解释为什么首块要减上一拍实际输入。
-\item 显式滚动积分并计算各项代价，用中心差分核对凝聚后梯度 $PU+q$。
-\item 固定参考比较 PD/MPC、预测长度和控制频率；记录失败次数、实际变化率与求解耗时，不能只画误差。
-\end{enumerate}
+实现使用最大分量绝对值 $\|z\|_\infty=\max_i|z_i|$，分别要求
+\begin{align*}
+ \|r_p\|_\infty&\leq\varepsilon_a+\varepsilon_r\max(\|CU\|_\infty,\|z\|_\infty),\\
+ \|r_d\|_\infty&\leq\varepsilon_a+\varepsilon_r\max(\|PU\|_\infty,\|q\|_\infty,\|C^Ty\|_\infty).
+\end{align*}
+绝对项处理接近零的量，相对项让允许误差随数值尺度增长。
+默认 $\varepsilon_a=\varepsilon_r=10^{-5}$、$\rho=0.1,\sigma=10^{-6}$，最多迭代 1500 次。
+
+\par\noindent\begin{minipage}{\linewidth}
+\lstinputlisting[language=C++,linerange={qp_admm_begin-qp_admm_end},includerangemarker=false]{../ros2_ws/src/motion2d/src/optimization/box_qp.cpp}
+\end{minipage}\par
+代码的 \code{result.x} 是 $U$，\code{p.A} 是 $C$。每 25 次迭代，把原始和对偶残差分别除以各自对应量的尺度，
+得到 $\eta_p,\eta_d$，再尝试 $\rho_{\rm new}=\rho\sqrt{\eta_p/\eta_d}$。
+原始残差偏大时增大一致性惩罚；对偶残差偏大时反向调节。
+实现把除数与残差下限设为 $10^{-12}$，把 $\rho$ 限制在 $[10^{-5},10^5]$，
+只有变化超过五倍才重新分解。这是减少额外分解的调节规则。
+
+\subsection{如何说明约束互相矛盾}
+考虑最简单的 $U\geq1$ 和 $U\leq0$，两条约束显然无法同时成立。
+把它们写成 $C=(1,1)^T$、$l=(1,-\infty)^T$、$u=(+\infty,0)^T$。
+取 $v=(-1,1)^T$，有 $C^Tv=0$；将第一条下界乘 $-1$，第二条上界乘 $+1$ 并相加，得到 $0\leq-1$ 的矛盾。
+
+一般地，令 $v_+=\max(v,0),v_-=\min(v,0)$ 按分量定义。
+若有可行 $U$，对正分量用上界、负分量用下界，则
+\[
+ v^TCU\leq u^Tv_++l^Tv_-.
+\]
+因此如果找到 $C^Tv=0$ 且右侧小于零，就会得到同样的矛盾。
+这个 $v$ 称为\textbf{不可行证书}。实现用相邻乘子之差归一化后，按 $10^{-7}$ 容差检查这两个条件；
+只使用符号实际选中的有限边界。证书反映约束矛盾，迭代次数耗尽则反映当前计算过程尚未收敛。
+
+\section{滚动执行与控制状态}
+成功解出一串输入后只施加第一块 $u_0$。
+下一次求解的初值把上次序列左移一块，并重复最后一块，例如 $(u_0,u_1,u_2)$ 变为 $(u_1,u_2,u_2)$。
+这称为\textbf{热启动}，利用相邻控制时刻的问题通常相近这一特点。
+\begin{center}\small
+\begin{tabular}{lp{9cm}}\toprule
+状态 & 含义与下一步处理\\\midrule
+solved & 两种残差均达到容差；执行首条力并保存预测\\
+primal\_infeasible & 上下界直接矛盾或找到不可行证书；检查参考、走廊与当前速度\\
+max\_iterations & 迭代预算耗尽；查看残差、数值尺度和问题条件\\
+time\_limit & 迭代间的墙钟检查达到预算；查看求解耗时\\
+numerical\_failure & 迭代出现非有限值；检查模型、尺度和输入\\\bottomrule
+\end{tabular}
+\end{center}
+未得到成功解时，清除热启动并计算第 17 章的限幅阻尼制动。
+制动输入按其自身公式产生，其变化量仍需单独观察；恢复求解后，把这一条实际制动力作为 $u_{-1}$。
+
+\subsection{为什么当前可行，下一次仍可能来不及停车}
+一个短例子就能说明。单轴无阻力，$m=1$ kg，$h=0.1$ s，$N=1$，
+当前 $p=0,v=1$ m/s，$|F|\leq1$ N，前方位置上界为 0.15 m。
+即使使用最大制动 $F=-1$ N，第一步也要走
+\[
+ p_1=0+1(0.1)-\tfrac12(0.1)^2=0.095\text{ m},\qquad v_1=0.9\text{ m/s}.
+\]
+第一步满足上界，因此当前问题可行。继续最大制动，下一步却为
+\[
+ p_2=0.095+0.9(0.1)-\tfrac12(0.1)^2=0.18\text{ m}>0.15\text{ m}.
+\]
+任何更大的力都会走得更远，故下一次一步预测已经不可行。
+根本原因是机器人最初的停车距离为 $v^2/(2a_{\max})=0.5$ m。
+该式可由 $v\,dv/dp=-a_{\max}$ 从 $v$ 积分到零得到。
+短时域只看到暂时还在范围内，没有要求末端状态具备后续停车空间。
+增加时域能更早发现问题；进一步还可限制末端位置和速度，使末端落在可继续安全制动的状态集合内。
+
+\subsection{预测节点之间还有一段运动}
+走廊约束检查离散时刻的位置。单轴例子 $p(t)=t(1-t)$、$0\leq t\leq1$，
+对应 $v(0)=1$、恒定加速度 $-2$，两端位置都为零，中点却达到 0.25 m。
+因此对于上界 $p\leq0.1$ m，仅检查两端会漏掉中间越界。
+\begin{center}\begin{minipage}{\linewidth}\makeatletter\def\@captype{figure}\makeatother
+\centering\begin{tikzpicture}
+\begin{axis}[width=.72\linewidth,height=4.5cm,xmin=0,xmax=1,ymin=0,ymax=.28,xlabel={$t$/s},ylabel={$p$/m},grid=major]
+\addplot[tealblue,thick,domain=0:1,samples=65]{x*(1-x)};
+\addplot[navy,dashed,domain=0:1]{.1};
+\addplot[only marks,navy] coordinates {(0,0) (1,0)};
+\node[anchor=south east,font=\small] at(axis cs:.98,.21) {上界 0.1 m};
+\draw[->,navy] (axis cs:.96,.205)--(axis cs:.96,.105);
+\end{axis}\end{tikzpicture}
+\caption{端点都在走廊内，中间仍可能越界。连续检查可沿用第 14 章的步内加速度界，或第 16 章的多项式凸包界。}
+\end{minipage}\end{center}
+有定位与跟踪误差时，还需按误差尺度收紧可用空间。下一章把地图更新、轨迹检查与控制反馈连接起来。
 
 \clearpage
-\section{同一八字参考上的实测对照}
-使用第 17 章相同八字、24 s、200 Hz 物理积分、1 kg 与 0.15 kg/s 阻力，
-初始静止，yaw 使用相同 PD；本表没有通信延迟或估计噪声。
-MPC 默认位置/速度权重 40/2、力权重 0.02、增量权重 0.005；不加终端集合。
-2 N 组速度分量限 1 m/s、力变化率限 5 N/s。
-
+\section{同一参考上的控制与计算代价}
+使用第 17 章的八字参考、24 s、200 Hz 物理积分、1 kg 质量和 0.15 kg/s 阻力；
+初始静止，yaw 使用相同 PD，观测采用无噪声真值。
+MPC 位置/速度权重为 40/2，力权重 0.02、增量权重 0.005。
+每轴力限 2 N、速度限 1 m/s、力变化率限 5 N/s。
 \begin{center}\small
 \begin{tabular}{lrrrr}\toprule
 方法 & N & 控制/Hz & 位置 RMS/m & 耗时 P95/ms\\\midrule
@@ -120,68 +340,67 @@ MPC & 40 & 50 & $5.56\times10^{-6}$ & 0.4114\\
 MPC & 20 & 20 & $1.44\times10^{-5}$ & 0.0790\\\bottomrule
 \end{tabular}
 \end{center}
-所有常规组均无求解失败。耗时包含 QP 组装、分解、迭代和热启动更新，不含 ROS 或绘图；
-主机 Ryzen 7 9700X、GCC 15.2、RelWithDebInfo，未锁频或绑核。
-较长时域在此例更精确也更慢；20 Hz 组 $Nh=1$ s，与 50 Hz 的 0.4 s 不是同一个前瞻时间。
-极小误差来自准确模型与未来参考，不能照搬为真实传感器系统的性能。
 
-\begin{figure}[!ht]
+该组实验中所有求解均成功。P95 表示将各次耗时从小到大排序后，约 95\% 的样本不超过的值。
+计时包括 QP 组装、分解、迭代和热启动更新；数据来自 Ryzen 7 9700X、GCC 15.2、RelWithDebInfo 构建。
+增加 $N$ 同时扩大前瞻范围和矩阵规模，因此这里精度提高，计算也变慢。
+20 Hz、$N=20$ 看到 1 s，50 Hz、$N=20$ 只看到 0.4 s；比较频率时应同时记录 $Nh$。
+实际使用估计里程计时，可在同一参考上逐步加入观测噪声和延迟，观察它们对误差的贡献。
+\begin{center}\begin{minipage}{\linewidth}\makeatletter\def\@captype{figure}\makeatother
 \centering\includegraphics[width=\linewidth]{figures/ch18_mpc.pdf}
 \caption{将力限收紧到每轴 0.35 N。两种方法都无法紧贴原参考；MPC 还施加每轴 0.5 m/s 和 2 N/s 约束。
-它的失败会切换到制动，因此不能把整条实际输入曲线都称为满足 QP 约束。}
-\end{figure}
+求解未收敛时切换为阻尼制动，图中的实际轨迹包含这两种控制状态下的运动。}
+\end{minipage}\end{center}
 
-限力 PD 的 RMS 为 0.3533 m，MPC 为 0.4771 m；MPC 并非所有参数下都更好。
-PD 最大速度分量 0.5992 m/s；MPC 约 0.500001 m/s，后者的微小超量在数值容差量级。
-MPC 有 21 次 max\_iterations，不能据此断言不可行；制动切换导致实际最大力变化率达 35 N/s。
-其最小净空仍有 2.6933 m，但空房间的这次结果不证明任意障碍场景安全。
-完整 summary.csv 与 failures.csv 分开记录各次误差、耗时、状态及新的制动力。
+
+再把每轴力限降至 0.35 N。PD 的 RMS 为 0.3533 m，MPC 为 0.4771 m；
+这次 MPC 还施加速度分量 0.5 m/s 和力变化率 2 N/s 的限制，可用运动范围更小。
+PD 最大速度分量约 0.5992 m/s，MPC 约 0.500001 m/s，后者的尾数偏差处于求解容差量级。
+MPC 有 21 次迭代预算耗尽，切换到制动时实际力变化率峰值达到 35 N/s。
+因此比较结果时应同时绘制控制状态和输入，辨认哪些时段由优化结果控制、哪些时段在制动。
+\code{summary.csv} 保存汇总，\code{failures.csv} 保存未成功求解时的状态和制动力。
 
 \clearpage
-\section{在 ROS 中观察每次预测与失败}
-\begin{lstlisting}[language=bash]
-ros2 launch motion2d_bringup ch18.launch.py rviz:=false
-# 另一个终端；默认暂停，检查脚本会推进 12 s
+\section{在 ROS 中观察未来状态与当前输入}
+\begin{lstlisting}[language=bash,numbers=none]
+ros2 launch motion2d_bringup ch18.launch.py rviz:=true
+# Another sourced terminal; the checker advances the simulation.
 /usr/bin/python3 scripts/check_ch18.py
-# 相同配置切回第 17 章控制器：重新启动时加 controller:=pd
 \end{lstlisting}
-tracker\_node 的 control.controller 选择 pd/mpc；两者复用相同的观测时间、坐标变换、
-参考系数和物理限幅接口。MPC 预测步长取 control.rate\_hz 的倒数；默认 50 Hz、20 步。
-这些是启动参数，改 YAML 后重启；不要把参数服务接受了新值误解为已重建控制器。
-正常链路假设最近发布的限幅力已被模拟器接收，并将它用于下一次增量约束。
+启动参数 \code{controller:=pd} 可换回上一章的控制器。
+两者复用观测时间、坐标变换、参考系数和力限幅接口。
+MPC 的 $h$ 取控制频率倒数；默认 50 Hz、20 步。修改 YAML 后重启以重新构造控制器。
+下一次增量约束使用最近发布的限幅力；实验链路按模拟器已收到该力处理。
 
 \begin{center}\small
-\begin{tabular}{lp{8.5cm}}\toprule
-接口 & 用法\\\midrule
-/control/mpc\_status & MpcStatus，header 是观测时刻，status/iterations 为求解状态和次数\\
-compute\_seconds & 组装 QP、求解和热启动更新的墙钟耗时，单位 s\\
-primal/dual\_residual & 终止条件所用残差；未迭代时为正无穷\\
-max\_violation & 仅 solved 有效；失败为 NaN，不假报零违反量\\
-/control/prediction & odom 系预测位置，逐点时间是未来执行采样时刻\\\bottomrule
+\begin{tabular}{lp{8.3cm}}\toprule
+接口或字段 & 如何阅读\\\midrule
+/control/mpc\_status & 观测时刻、求解状态、迭代次数\\
+compute\_seconds & QP 组装、求解及热启动更新的墙钟耗时，单位 s\\
+primal/dual\_residual & 一致性与最优性残差；迭代前为正无穷\\
+max\_violation & 成功解的最大正约束违反量；其他状态为 NaN\\
+/control/prediction & odom 系未来位置，各点带预测执行时刻\\\bottomrule
 \end{tabular}
 \end{center}
-预测路径供 RViz 观察，实际控制仍使用力。失败发布空预测，清除热启动，输出新的限幅阻尼力；
-yaw 同时切到阻尼力矩。观测中断、过旧、暂停去重和时钟回退沿用第 17 章策略。
-默认求解墙钟预算 0.01 s；这是迭代间检查的预算，不保证整条 ROS 链路或单次分解在预算内完成。
+在 RViz 中将预测与实际轨迹同时显示：预测从当前状态向前展开，真正发给模拟器的是第一条力。
+求解未成功时预测清空，并切换到新的阻尼力与阻尼力矩。
+默认墙钟预算为 0.01 s，在迭代之间检查；单次矩阵分解和 ROS 消息处理时间也应计入控制周期的总体测量。
 
-\paragraph{主机实测}
-12 s、600 个对齐观测时刻，600 次全部 solved；位置 RMS 为 $1.148\times10^{-5}$ m、
-最大误差 $3.519\times10^{-5}$ m，yaw RMS 为 $6.52\times10^{-5}$ rad；
-最小净空 2.8000 m，组装与求解耗时 P95 为 0.234 ms。
-这是空房间、真值定位、精确模型的受力跟踪实验，不是带 SLAM 误差的导航成绩。
-检查脚本同时验证预测点数、未来时间戳、残差与暂停/reset，GUI 本轮未验收。
+可用 \code{scripts/check_mpc_failure.py} 的独立时钟实验观察预算耗尽。
 
-\paragraph{故意制造超时，检查真正发出的消息}
-在独立域使用下列启动参数：
-\begin{lstlisting}
-use_sim_time=true
-control.controller=mpc
-mpc.max_wall_seconds=1.0e-12
-\end{lstlisting}
-执行脚本 check\_mpc\_failure.py，由它提供唯一 /clock 和合成里程计。
-机体系前向速度 0.2 m/s、yaw=$\pi/2$ 时，世界系制动力应为 $(0,-0.4)$ N。
-验收 time\_limit、零迭代、空预测、NaN 违反量与这个新制动力，不只检查日志里有没有“超时”。
+设置 \code{mpc.max_wall_seconds=1.0e-12}，脚本提供机体系前向速度 0.2 m/s、yaw 为 $\pi/2$ 的里程计。
+世界系速度为 $(0,0.2)$ m/s，按 $k_b=2$ s$^{-1}$、$m=1$ kg，制动力应为 $(0,-0.4)$ N。
+对照状态、空预测和实际力消息，可以跟踪一次从求解到制动的完整切换。
 
-\paragraph{练习}
-记录 50 Hz、N=10/20/40 的 MpcStatus 耗时分位数，与核心实验区分；
-改变预算触发失败，并检查制动力时间戳和方向。再暂停仿真，确认墙钟等待不会产生新的预测点。
+\section{练习：自己装配一个小 QP}
+\begin{enumerate}
+\item 从一步积分推出 $A,B$，取 $m=2$ kg、$c_v=0,h=0.1$ s，手算四个非零标量块。
+\item 复算两步例子的 $P,q$、无约束最优力和 0.4 N 受限最优力，再逐步积分位置与速度核对。
+\item \textbf{代码 ch18-1：}补全输入差分矩阵；用 $N=3$、一轴输入 $(0.4,0.2,-0.1)$ N、上一拍 0.1 N 手算三个增量。
+\item 在两步例子中加入每步速度范围 $[-0.5,0.5]$ m/s 和终点位置上界 0.6 m，逐行写出 $C,l,u$。
+\item 继续一维 ADMM 例子的第 4 次迭代，分别计算原始、对偶残差；解释为什么两者都要检查。
+\item 给矛盾约束 $U\geq2,U\leq1$ 构造一个不可行证书，并用不等式加权相加解释它。
+\item 重现短时域停车例子，分别增加 $N$、减少初始速度，观察首次不可行的位置。对步内曲线检查解析极值。
+\item 固定参考比较 $N=10,20,40$ 与 20/50 Hz，记录误差、$Nh$、P95 耗时、控制状态和实际力变化率。
+\end{enumerate}
+分步提示与代码练习入口见 \code{exercises/ch18/README.md}。
