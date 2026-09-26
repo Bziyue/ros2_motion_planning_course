@@ -1,247 +1,375 @@
 \chapter{接通在线规划与完整导航}
 \begin{notebox}
-\textbf{目标}\quad 接续运动中的参考，再将地图、SLAM、规划和控制串成可测量的闭环。\\
-\textbf{先修}\quad 第 08--18 章；先单独验证交接，随后接入观测地图。
+\textbf{目标}\quad 将定位、地图、局部规划和跟踪连成闭环；理解未来参考接续、坐标冻结与导航误差的计算。\\
+\textbf{先修}\quad 第 08--18 章。先运行参考交接例子，再启动完整导航，最后比较不同机器人模型。
 \end{notebox}
-\section{重规划从未来交接时刻开始}
-\begin{lstlisting}[language=bash]
+\section{运动带来新观测，新观测改变下一次计划}
+前几章分别建立了传感器、估计器、地图、轨迹和控制器。
+导航把它们连接起来：机器人向前走，看见原来被遮挡的区域；新地图又改变接下来可走的路线。
+规划因此需要反复更新，而控制器在计算新计划期间仍要持续跟踪已有参考。
+
+\begin{center}\begin{minipage}{\linewidth}\makeatletter\def\@captype{figure}\makeatother
+\centering
+\begin{tikzpicture}[>=Stealth,node distance=.55cm,
+ b/.style={draw=tealblue,fill=pale,rounded corners,minimum width=2.05cm,minimum height=.85cm,align=center,font=\small}]
+\node[b] (s) {激光与 IMU};\node[b,right=of s] (m) {定位与地图};
+\node[b,right=of m] (p) {局部规划};\node[b,right=of p] (c) {跟踪控制};\node[b,right=of c] (r) {机器人};
+\draw[->] (s)--(m);\draw[->] (m)--(p);\draw[->] (p)--(c);\draw[->] (c)--(r);
+\draw[->] (r.south)--++(0,-.8)-| (s.south);
+\node[fill=white,font=\small] at(5.2,-.8) {运动改变下一帧观测};
+\node[above=.5cm of p,font=\small] (g) {地图中的目标};\draw[->] (g)--(p);
+\end{tikzpicture}
+\caption{导航的闭环关系。定位产生的当前状态同时供规划和控制使用；地图描述机器人已经观测到的空间。}
+\end{minipage}\end{center}
+每个模块使用不同的时间尺度：IMU 与动力学更新较快，激光和地图较慢，优化还需要计算时间。
+本章先解决参考如何在未来时刻平滑交接，再解释规划时使用哪一份地图，以及控制器如何接收这个计划。
+
+\section{新曲线从未来交接状态出发}
+\begin{lstlisting}[language=bash,numbers=none]
 ros2 run motion2d reference_handover_demo tmp/ch19_handover
 /usr/bin/python3 scripts/plot_ch19_handover.py
 \end{lstlisting}
-假设当前仿真时间为 $t_0$，预留一段计算和传输时间后，在 $t_s>t_0$ 切换到新曲线。
-新曲线不能从当前测量位置、零速度重新起步；应固定它的首边界为旧参考在 $t_s$ 的值：
+设现在的绝对仿真时间为 $t_0$，预留 $\Delta>0$ 的计算和传输时间，计划在 $t_s=t_0+\Delta$ 交接。
+旧曲线的绝对起点为 $t_b$，因此它在交接处的局部时间是 $\tau_s=t_s-t_b$。
+新曲线的局部时间则从零开始，首边界应设为
 \begin{equation}
- p_{\rm new}(0)=p_{\rm old}(t_s),\quad
- v_{\rm new}(0)=v_{\rm old}(t_s),\quad
- a_{\rm new}(0)=a_{\rm old}(t_s).
+ p_n(0)=p_o(\tau_s),\qquad v_n(0)=v_o(\tau_s),\qquad a_n(0)=a_o(\tau_s).\label{eq:handover}
 \end{equation}
-这样交接前仍执行旧前缀，交接后才沿新路线走。实际机器人可能偏离参考，偏差由反馈处理；
-若偏离已超出可接受范围，应制动和重新建立参考，而不是伪称仍有无缝接续。
+整体参考为 $p(t)=p_o(t-t_b)$（$t<t_s$）和 $p(t)=p_n(t-t_s)$（$t\geq t_s$）。
+从左右分别取极限，式\eqref{eq:handover}使位置及其一、二阶导数都相等，这就是 $C^2$ 接续。
+由 $F=ma+c_vv$，模型匹配时的平移前馈力也连续。
+jerk 是加速度的导数；当前边界没有匹配它，因此力的变化率可能在交接处改变。
 
-\begin{figure}[!ht]
+\subsection{在旧曲线上手算首边界}
+示例旧曲线从 $(0,0)$ 静止走到 $(2,0)$，时长 4 s。
+用第 14 章的 $h(s)=10s^3-15s^4+6s^5$，有 $p_x=2h(t/4)$。
+在绝对起点为零、$t_s=1.5$ s 时，$s=3/8$，逐项求导得到
+\[
+ p_x=2h(3/8)=0.550415\text{ m},\quad
+ v_x=\tfrac24h'(3/8)=0.823975\text{ m/s},\quad
+ a_x=\tfrac2{16}h''(3/8)=0.439453\text{ m/s}^2.
+\]
+新曲线从这组边界出发，用 4 s 转向 $(3,1)$ 并停下。
+如果只匹配位置而把新速度设成零，参考速度会跳变约 0.824 m/s；在 0.02 s 的控制间隔上，
+对应约 41.2 m/s$^2$ 的速度变化要求。保留旧参考的导数能避免这种人为突变。
+\begin{center}\begin{minipage}{\linewidth}\makeatletter\def\@captype{figure}\makeatother
 \centering\includegraphics[width=\linewidth]{figures/ch19_handover.pdf}
 \caption{在 1.5 s 交接。旧曲线原本沿 x 轴到达 (2,0)，新曲线转向 (3,1)；
 红点和竖虚线标记交接时刻。速度与加速度保持连续，jerk 不要求连续。}
-\end{figure}
+\end{minipage}\end{center}
+规划计算期间继续执行旧曲线，反馈处理实际状态相对旧参考的偏差。
+如果偏差已使现有走廊余量不足，则先制动、重新静止定位，再建立下一条参考。
+这一操作与平滑接续分别对应两种控制状态，应在状态记录和误差曲线上标出。
 
-此时 p=(0.550415,0) m、v=(0.823975,0) m/s、a=(0.439453,0) m/s$^2$。
-将新首速度简单置零，会立即产生与旧参考不匹配的速度跳变。
-ReferenceSchedule 保存一条活动参考和至多一条未来候选；末端必须静止，才能连续接到终点保持。
-这是参考调度实验，尚不以曲线平滑来声称已验证障碍或物理输入约束。
-
-\clearpage
-\section{预测未来，不等于提前切换}
-MPC 会采样未来多个时刻。如果 sample 一查到未来就移动“当前曲线”指针，
-下一次采样当前时刻时可能已经取错参考。
-因此 sample 为只读函数，按查询时刻选择活动曲线或未来候选；
-advance 只由真正推进的观测时刻调用。接口不保留过去所有曲线的历史，供当前与未来查询使用。
+\section{查询未来与推进当前是两件操作}
+MPC 在时刻 $t_0$ 就会查询 $t_0+h,\ldots,t_0+Nh$，其中可能有时刻已经越过 $t_s$。
+调度器需要按查询时间返回正确曲线，同时保留真正的当前活动曲线。
+\code{ReferenceSchedule} 保存 \code{active} 与至多一条 \code{pending}，其行为可按时间表理解：
+\begin{center}\small
+\begin{tabular}{lll}\toprule
+实际观测时刻 & 查询时刻 & 应返回的参考\\\midrule
+1.2 s & 1.3 s & 旧曲线\\
+1.2 s & 1.6 s & 未来候选，但保留旧活动曲线\\
+1.2 s & 1.2 s & 仍为旧曲线\\
+1.5 s & 1.6 s & 已交接的新活动曲线\\\bottomrule
+\end{tabular}
+\end{center}
+\code{sample} 是只读查询，\code{advance} 由实际推进的观测时刻调用，达到 $t_s$ 才把候选变成活动曲线。
+接收新曲线时，先用同一绝对起点查询旧参考，再检查首边界：
+\par\noindent\begin{minipage}{\linewidth}
 \lstinputlisting[language=C++,linerange={reference_handover_begin-reference_handover_end},includerangemarker=false]{../ros2_ws/src/motion2d/src/trajectory/reference_schedule.cpp}
-过去的起点、尚未交接时积压的第二个候选，以及不连续边界都会被拒绝。
-拒绝不能覆盖已有效的参考；reset 则显式清空活动与候选并设置新的静止锚点。
-紧急重置会中断参考导数连续性，不能将它包装为普通 C$^2$ 重规划。
+\end{minipage}\par
+三个范数分别比较位置、速度和加速度，最后还匹配固定 yaw。
+$10^{-7}$ 用于数值计算后的同一边界比较；每项保持自己的 SI 单位。
+终点 v/a 必须为零，这样到达以后可接上恒定位置保持。
+起点已经过去、第二条候选仍待交接或边界不匹配时，保留原有效计划并返回原因；
+显式 \code{reset} 则清空两条参考，把静止锚点设为新的位姿。
 
-\section{地图校正与执行参考分开}
-SLAM 回环可能改变 map 到 odom 的对齐关系。规划时冻结同一个变换，令
-$p_m=Rp_o+t$；把地图中的曲线交给控制器前，使用
+\section{规划时冻结 map 与 odom 的变换}
+回环校正改变地图与局部里程计之间的对齐。设本次规划采用
+\[
+ p_m=Rp_o+b,
+\]
+其中 $R,b$ 在本次求解和参考转换中保持固定。由 $R^TR=I$，反解并对时间求导：
 \begin{equation}
- p_o=R^T(p_m-t),\qquad v_o=R^Tv_m,\qquad a_o=R^Ta_m.
+ p_o=R^T(p_m-b),\qquad v_o=R^Tv_m,\qquad a_o=R^Ta_m.\label{eq:navframe}
 \end{equation}
-对五次系数而言，每列都旋转，只有常数项平移；区域的所有顶点也使用同一变换，
-再由顶点构建半空间。yaw 参考随坐标旋转一次，不从路径切向推断。
-已发出的 odom 系数随后保持不变；新的地图校正影响下一次规划，而不直接跳动当前控制参考。
+位置含平移，导数中的常量平移消失。
+将 $p_m(t)=\sum_{k=0}^5c_{m,k}t^k$ 代入，逐次幂收集，得到
+\[
+ c_{o,0}=R^T(c_{m,0}-b),\qquad c_{o,k}=R^Tc_{m,k}\quad(k\geq1).
+\]
+走廊顶点也使用同一变换，再重新构造半空间；固定 yaw 减去 $R$ 对应的旋转角。
 
-\paragraph{验证与练习}
-测试包含交接前后 1 ns 的 p/v/a、提前预读未来、待交接状态、非法候选保留旧曲线、
-终点保持与显式 reset。另将曲线和区域经平移 + 旋转送到 map 再变回 odom，验证所有导数和区域一致。
-\begin{enumerate}
-\item \textbf{ch19-1：}补齐 p/v/a 边界比较；同位置、不同速度或加速度必须拒绝。
-\item 把新参考错误地连接到 $t_0$ 的状态，观察为何到 $t_s$ 时不能再匹配。
-\item 分别说明定位误差、规划不满足约束、执行跟踪误差；平滑接续只解决其中的参考衔接。
-\end{enumerate}
+例如 $R$ 表示 $90^\circ$ 旋转、$b=(1,2)$，地图位置 $(1,3)$、速度 $(0,0.5)$
+转换为 odom 位置 $(1,0)$、速度 $(0.5,0)$。
+若下一次地图平移校正为 $(1.1,2)$，把旧地图系数直接重新转换会让其 odom 位置跳到 $(1,0.1)$。
+因此已发送的 odom 系数保持固定；新的变换用于下一次规划，并从旧 odom 参考的未来边界接续。
 
-\clearpage
-\section{只在观测自由空间里选择局部目标}
-\begin{lstlisting}[language=bash]
+\code{transformReference} 对曲线与各区域统一转换。
+新地图到达后，还要把剩余 odom 区域按当前对齐放回 map，检查它们是否仍在新的自由配置空间中。
+这样既保留控制参考的连续性，也及时响应新发现的障碍。
+
+\section{在已观测空间中选一个可达的局部目标}
+\begin{lstlisting}[language=bash,numbers=none]
 ros2 run motion2d replanner_demo tmp/ch19_replanner
 /usr/bin/python3 scripts/plot_ch19_replanner.py
 \end{lstlisting}
-规划输入是一份不可变快照：原始占据栅格、由它膨胀的配置空间栅格、同源未膨胀 ESDF。
-目标在地图之外或明确占据时先报告错误；未知目标并不允许搜索穿越未知区域。
-从未来交接点所在自由格做八邻接可达搜索，斜向仍禁止切角。
-若全局目标已可达，就用 A* 找到它；否则，在可达自由格中选择靠近未知区、且更接近目标的一个格。
+一次规划读取同一时刻的地图快照：原始占据栅格、由它膨胀的配置空间栅格、同源未膨胀 ESDF。
+原始栅格回答哪里未知、哪里有障碍；膨胀栅格回答圆心可经过哪里；ESDF 给出优化所用的距离与梯度。
+这些数据来自同一份地图，才能让路径搜索和曲线检查使用一致的几何。
 
-这些候选与原始未知格之间的搜索窗口由膨胀半径和分辨率确定。
-它们是\textbf{局部探索候选}，不是承诺一定能发现通路的完整探索器。
-失败状态分别说明当前局部搜索的结果：
-\begin{itemize}
-\item no\_progress\_frontier：候选的目标距离改善不足 0.1 m。
-\item no\_reachable\_frontier：没有可达的未知边缘候选。
-\end{itemize}
-两者都不代表“整个未知世界一定无路”。
-选好可达目标后，再沿 A* 路线弧长截取一段，默认最多 2 m；截断点仍位于已验证自由线段上。
+从未来交接点所在自由格做八邻接可达搜索，斜向连接按第 11 章禁止切角。
+如果全局目标已可达，直接用 A* 搜索它；否则在可达自由格中选择邻近未知区的\textbf{前沿候选}。
+因为未知区周围已经膨胀，候选不一定紧挨原始未知格。代码检查的窗口半径为
+\[
+ n_w=\left\lceil\frac{r_{\rm clearance}}{d}\right\rceil+2,
+\]
+$d$ 为分辨率。除以 $d$ 把米换成格数，向上取整覆盖膨胀距离，额外两格容纳格子边界与搜索邻域。
+例如 $r_{\rm clearance}=0.15$ m、$d=0.1$ m，得到四格窗口。
 
-\begin{figure}[!ht]
-\centering\includegraphics[width=\linewidth]{figures/ch19_replanner.pdf}
-\caption{两个手工占据网格测试夹具，不是在线 SLAM 成绩。灰色未知、深蓝占据、浅橙为配置空间阻塞；
-星号是全局目标，曲线只到达当前局部终点。左图不穿越未知区，右图采用最多 5 m 的路线前缀绕墙。}
-\end{figure}
-
-例子使用 60$\times$40 格、0.1 m 分辨率、半径 0.1 m 与 0.05 m 余量。
-左图只有 x<3 m 区域已观测，仍能向未知边缘逐段接近；右图全图已知，但本次只执行一段路线前缀。
-若新扫描揭示更多自由空间，下次快照会产生新的候选；若停在看不到更多区域的位置，必须明确报告停滞。
-
-\clearpage
-\section{优化与备用方案都要通过认证}
-对同一路线构建凸走廊，从第 19.1 节的未来 p/v/a 起步，终点设为静止。
-Spline 优化同时使用 ESDF、走廊和速度/加速度软项；只有求解收敛且独立 Bézier 证书通过才接受。
-本章核心默认开启控制点惩罚，走廊权重 50000、额外内缩 0.04 m；
-软速度/加速度目标 0.45/0.5，证书上限 0.7 m/s 与 0.8 m/s$^2$。
-
-若优化失败，不复用一个不合格的低代价值结果，而是尝试明确的备用方案：
-各路点停下的五次段，\textbf{首段仍保留原来的 p/v/a}。
-尝试基准时长与 1.5/2/3 倍时长，每次都重新检查同一组连续证书。
-增加时长不一定能修复问题：固定非零首速度时，较长时间也可能把曲线推到走廊外。
-\lstinputlisting[language=C++,linerange={replanner_fallback_begin-replanner_fallback_end},includerangemarker=false]{../ros2_ws/src/motion2d/src/planning/replanner.cpp}
+对候选中心 $q$ 比较 $\|q-g\|^2$，选离全局目标 $g$ 最近者。
+平方距离与距离的大小顺序相同，省去了逐候选开方。
+还要求 $\|p_s-g\|-\|q-g\|\geq0.1$ m，避免在几乎不前进的候选间反复切换。
+在需要先远离目标才能绕出的凹形环境中，这一规则可能停滞；可进一步加入访问历史或信息增益来改进探索。
 
 \begin{center}\small
-\begin{tabular}{lrr}\toprule
-夹具 & 备用段总时长/s & Spline 总时长/s\\\midrule
-未知目标，局部前缀 & 7.258 & 11.424\\
-绕墙，5 m 路线前缀 & 19.466 & 12.994\\\bottomrule
+\begin{tabular}{lp{8.5cm}}\toprule
+局部搜索状态 & 可以据此检查什么\\\midrule
+no\_reachable\_frontier & 已可达自由区内没有邻近未知区的候选；查看遮挡和地图边界\\
+no\_progress\_frontier & 候选离目标的改善小于阈值；查看是否需要先绕远\\
+goal\_occupied / goal\_outside\_map & 目标在当前占据格或地图范围之外；重新选目标\\\bottomrule
 \end{tabular}
 \end{center}
-四组均通过各自连续证书；示例为便于复现关闭优化墙钟预算，实际节点应限制计算时间。
-Spline 优化的是带能量与软项的总代价，不保证每次都比备用方案更短；单段控制点惩罚也可能偏保守。
-返回结果单列 optimized 或 fallback\_stop\_segments，并保留优化器原始状态。
-所有方案都不合格时返回 no\_certified\_local\_trajectory，上层进入明确的制动处理。
+搜索得到折线后，沿长度截取局部前缀，默认最多 2 m。
+若已累计长度 $L$，下一段向量为 $d_p$，而剩余长度 $\ell_{\max}-L<\|d_p\|$，截断点是
+\[
+ q_{\rm cut}=q_{\rm last}+\frac{\ell_{\max}-L}{\|d_p\|}d_p.
+\]
+比例位于 $[0,1]$，所以新点仍在已经检查过的自由线段上。
+例如剩 0.5 m、下一段为 $(0.6,0.8)$ m，其长度为 1 m，只走 $(0.3,0.4)$ m。
+\begin{center}\begin{minipage}{\linewidth}\makeatletter\def\@captype{figure}\makeatother
+\centering\includegraphics[width=\linewidth]{figures/ch19_replanner.pdf}
+\caption{两张用于学习局部目标选择的占据网格。灰色未知、深蓝占据、浅橙为配置空间阻塞；
+星号是全局目标，曲线只到达当前局部终点。左图不穿越未知区，右图采用最多 5 m 的路线前缀绕墙。}
+\end{minipage}\end{center}
+图中网格为 $60\times40$、分辨率 0.1 m，机器人半径 0.1 m、额外余量 0.05 m。
+左侧只有 $x<3$ m 已观测，局部目标逐渐靠近未知边缘；右侧全图已知，演示最多 5 m 的绕墙路线前缀。
+新的扫描扩展自由空间后，再用新快照选择下一段目标。
 
-\paragraph{验证与练习}
-单元检查未知目标、已知断开的地图、占据/越界目标、路线长度、配置区域整体验证和非零首导数。
-另把首速度设为 2 m/s，超过证书上限，必须拒绝全部备用方案。
-比较有无控制点惩罚时的时长与认证结果；画出原始占据和配置栅格，解释半径为何只能处理一次。
+\section{从未来边界生成并检查局部曲线}
+对局部路线构建凸走廊，起点使用式\eqref{eq:handover}的未来 p/v/a，终点设为静止。
+Spline 优化使用第 15、16 章的能量、ESDF、走廊及导数代价。
+核心演示默认控制点走廊权重 50000、额外内缩 0.04 m，软速度/加速度目标 0.45/0.5，
+最终连续上界要求速度 0.7 m/s、加速度 0.8 m/s$^2$。
+软目标帮助求解靠近可行区域，Bézier 连续界再逐段检查最终曲线。
 
-\clearpage
-\section{把轨迹与走廊作为一个事务接收}
-\begin{lstlisting}[language=bash]
-# Terminal 1: standalone receiver, no simulator
-ros2 run motion2d tracker_node --ros-args \
-  -p use_sim_time:=true -p reference.source:=navigation \
-  -p control.odometry_timeout:=10.0
-# Terminal 2: synthetic /clock and observations
-python3 scripts/check_navigation_boundary.py
-\end{lstlisting}
-NavigationReference 把带绝对起点的五次系数、逐段凸区域、地图快照时刻放进\textbf{同一条消息}。
-否则分别到达的“新曲线 + 旧走廊”可能组成一个从未被规划器验证过的组合。
-区域顶点用 float64，避免 float32 舍入使贴边曲线的接收检查发生变化。
-接收器检查消息坐标、区域数量、有限值及曲线在区域中的连续证书；
-区域是否属于观测自由空间仍由规划器负责，控制器并不读取地图或世界。
+优化结果未通过时，备用方案在各路点停下，\textbf{首段仍保留旧参考的 p/v/a}。
+依次尝试基准时长及其 1.5、2、3 倍，并对每条候选作同样的连续检查。
+\par\noindent\begin{minipage}{\linewidth}
+\lstinputlisting[language=C++,linerange={replanner_fallback_begin-replanner_fallback_end},includerangemarker=false]{../ros2_ws/src/motion2d/src/planning/replanner.cpp}
+\end{minipage}\par
+\code{left=start} 保留移动起点；\code{right} 的导数默认零。
+只有第一段之后，左边界才变成刚构造的静止右边界。
+\code{certifyBezier} 检查同一组区域和导数限制，成功时才返回候选。
+
+\subsection{为什么延长时长有时会把曲线推出走廊}
+静止到静止时，同一形状可以通过延长时间降低导数。
+但首速度 $v_0$ 已经固定时，曲线形状也随时长变化。用单轴起点位置零、首加速度零、终点位置 $D$ 且静止的五次段说明。
+由第 14 章端点公式，令 $s=t/T$，可整理为
+\[
+ p(t)=D h(s)+v_0T b(s),\quad
+ b(s)=s-6s^3+8s^4-3s^5.
+\]
+$h$ 提供静止到静止的位移；$b(0)=b(1)=0,b'(0)=1,b'(1)=0,b''(0)=b''(1)=0$，
+因此第二项恰好补上首速度 $v_0$，其余边界保持不变。
+在中点 $h(1/2)=1/2,b(1/2)=5/32$，所以
+\[
+ p(T/2)=D/2+5v_0T/32.
+\]
+取 $D=1$ m、$v_0=0.5$ m/s，$T=2$ s 时中点为 0.65625 m，$T=8$ s 时却到 1.125 m。
+较长时间让初始速度带来更大的前冲。备用时长每改一次，都要重新检查空间与动力学界。
+
+局部例子的总时长如下，优化目标包含平滑性与软约束，因此时间会随整个目标的权衡变化。
+\begin{center}\small
+\begin{tabular}{lrr}\toprule
+场景 & 逐段停车/s & Spline/s\\\midrule
+未知目标的局部前缀 & 7.258 & 11.424\\
+绕墙的 5 m 前缀 & 19.466 & 12.994\\\bottomrule
+\end{tabular}\end{center}
+这组演示关闭优化墙钟预算以便观察解的差别；在线节点另设计算预算。
+返回状态区分 \code{optimized} 与 \code{fallback_stop_segments}，并保存优化器原始状态。
+所有候选都未通过时，上层进入制动与静止重试。
+
+\section{把曲线与走廊一起交给控制器}
+一条执行参考需要同时说明曲线、绝对起点、对应区域和地图快照时刻。
+\code{NavigationReference} 将这些内容放在同一消息中，让控制器收到的是一套配对数据。
+否则两条独立话题的到达次序可能把新曲线与旧走廊配在一起。
+区域顶点采用 float64，与曲线计算保持相同精度。
+
+接收器先检查坐标、分段与区域数量，再检查曲线在区域中的连续界，以及未来交接的 p/v/a/yaw。
+接收成功后发布携带绝对起点纳秒的确认。
+规划端收到匹配的确认，才将候选放进自己的参考调度，从而与控制端保持一致。
+
+\begin{center}\begin{minipage}{\linewidth}\makeatletter\def\@captype{figure}\makeatother
+\centering\begin{tikzpicture}[x=1cm,y=1cm,>=Stealth]
+\node at(0,0) {规划端};\node at(7,0) {控制端};
+\draw[->,muted] (0,-.3)--(0,-3.2);\draw[->,muted] (7,-.3)--(7,-3.2);
+\draw[->,tealblue,thick] (0,-.7)--(7,-1.2) node[midway,above,sloped,font=\small] {曲线、区域、未来起点 $t_s$};
+\node[right,font=\small] at(7,-1.5) {检查边界与连续界};
+\draw[->,navy] (7,-1.9)--(0,-2.3) node[midway,above,sloped,font=\small] {确认同一个 $t_s$};
+\draw[dashed,muted] (-.5,-2.8)--(7.5,-2.8);
+\node[left,font=\small] at(-.5,-2.8) {$t_s$};
+\node[right,font=\small] at(7,-2.8) {开始执行};
+\end{tikzpicture}
+\caption{确认与开始执行分开。候选在未来起点之前通过接收检查；确认携带该起点，规划端据此匹配自己的待确认计划。}
+\end{minipage}\end{center}
 
 \begin{center}\small
 \begin{tabular}{ll}\toprule
 话题 & 语义\\\midrule
-/navigation/reference & 原子候选，坐标 odom\\
-/control/accepted\_reference & Int64，已接收候选的起点纳秒\\
-/navigation/stop & Empty，显式清空参考并制动\\
-/control/reference & 当前观测时刻的参考位姿与机体速度\\
+/navigation/reference & odom 系完整候选\\
+/control/accepted\_reference & 已接收候选的起点纳秒\\
+/navigation/stop & 清空参考并切换制动\\
+/control/reference & 当前观测时刻的参考位姿、机体系速度\\
 /control/reference\_acceleration & 同时刻的 odom 加速度\\\bottomrule
-\end{tabular}
-\end{center}
-发布成功不等于控制器已经接受。规划端应等到对应起点的确认，再更新自己的参考调度；
-每个待确认请求使用不同的未来起点，不能同时积压多个候选。
-运动中的新曲线严格匹配旧参考的 p/v/a/yaw，拒绝候选时保留原曲线。
-MPC 向前查询时，同时选择对应时刻的区域；第一条曲线尚未开始时，静止保持使用它的第一个区域。
+\end{tabular}\end{center}
+MPC 查询未来参考时，也查询该时刻对应的区域；首条曲线尚未开始时，静止保持使用第一个区域。
+等待确认或等待交接时暂缓第二条候选，确保各自保存的状态简单一致。
 
-\paragraph{启动与停车}
-第一次启动，或显式制动后的重新启动，要求观测速度与角速度不超过 0.02，
-首点在当前位置 0.03 m 内，yaw 差不超过 0.02 rad，并且首 v/a 为零。
-这个小容差用于静止状态的测量波动，不能用于掩盖运动中的不连续交接。
-制动会清空未来曲线、预测和显示路径，使用最新状态计算限幅阻尼力；
-它不承诺制动过程仍满足旧曲线的连续证书或力变化率限制。
+\subsection{首次启动与移动接续的不同边界}
+首次启动和制动后重新启动时，观测速度、角速度分别小于 0.02 m/s、0.02 rad/s，
+首点距当前位置不超过 0.03 m，yaw 差不超过 0.02 rad，并要求首 v/a 为零。
+这组小容差接纳静止测量波动。已有活动参考时，则直接匹配未来旧边界，使用前面的数值精度容差。
 
-理想模式另设 control.controller=ideal，直接发送下一控制周期的参考位置，
-仿真必须配套 ideal 模型并关闭 IMU；带质量模式仍发送力/力矩。
-两者的物理含义不同，完整导航实验会分开报告。
-
-\paragraph{验收与练习}
-合成时钟测试先从静止沿 x 轴运动，再于 0.7 s 接续转向曲线。
-检查确认只出现两次、交接前仍是旧曲线、交接处 p/v/a 相等、错误替换不覆盖有效参考，
-以及显式停车发布新的阻尼力、移动中拒绝重新锚定。
-练习：故意去掉第二条消息的一块区域，再重复发送；说明为什么既不能确认，也不能丢掉原参考。
-
-\clearpage
-\section{观测驱动的导航节点}
-\begin{lstlisting}[language=bash]
-ros2 launch motion2d_bringup ch19.launch.py route:=B
-ros2 service call /sim/pause std_srvs/srv/SetBool "{data: false}"
-# RViz: use the 2D Goal Pose tool, or publish a map goal
-ros2 topic pub --once /goal_pose geometry_msgs/msg/PoseStamped \
-  "{header: {frame_id: map}, pose: {position: {x: -4.0, y: -4.0}, orientation: {w: 1.0}}}"
+可先用合成时钟实验跟踪一次接收过程：
+\begin{lstlisting}[language=bash,numbers=none]
+ros2 run motion2d tracker_node --ros-args \
+  -p use_sim_time:=true -p reference.source:=navigation \
+  -p control.odometry_timeout:=10.0
+# Another terminal; this script supplies /clock and observations.
+python3 scripts/check_navigation_boundary.py
 \end{lstlisting}
-NavigationNode 将几个小模块串起来：地图回调生成同源占据/膨胀/ESDF 快照，
-选定里程计推进调度，激光时间戳检测传感器是否还在更新。
-规划默认 5 Hz，MPC 控制 50 Hz；理想路线直接以 200 Hz 发送下一仿真步的位置。
-暂停时仿真时间不变，墙钟计时器醒来也不重复规划；时间回退清空目标和旧快照，需要重新给目标。
+示例先沿 x 轴运动，再在 0.7 s 接续转向。删除候选的一个区域后，接收器返回数量错误，旧曲线继续使用。
+显式停车则清空计划并按当前速度制动；停车过程使用第 17 章的动力学，下一次起步重新建立静止锚点。
 
-每次预留 0.15 s 交接时间，优化墙钟预算为 0.04 s。
-A*、走廊构建和传输也需要时间，因而还必须检查接收确认是否赶在起点之前。
-节点保存至多一个待确认候选，控制器确认之前不把它当作已经执行的参考。
-下面的核心路径把同一个对齐变换用于首边界、整条曲线和所有区域：
+\section{观测驱动的导航节点}
+\begin{lstlisting}[language=bash,numbers=none]
+ros2 launch motion2d_bringup ch19.launch.py route:=B
+ros2 service call /sim/pause std_srvs/srv/SetBool '{data: false}'
+ros2 topic pub --once /goal_pose geometry_msgs/msg/PoseStamped \
+  '{header: {frame_id: map}, pose: {
+     position: {x: -4.0, y: -4.0}, orientation: {w: 1.0}}}'
+\end{lstlisting}
+也可在 RViz 使用 2D Goal Pose。地图回调生成原始/膨胀/ESDF 快照，里程计回调推进参考调度，
+扫描时间戳用于判断传感器是否持续更新。默认规划频率 5 Hz，MPC 控制 50 Hz；理想点模式按 200 Hz 发下一仿真步的位置。
+
+设上次尝试时刻为 $t_l$、周期为 $P$，满足 $t-t_l\geq P$ 且没有待交接候选时才开始新规划。
+例如 $P=0.2$ s、$t_l=1.0$ s，在 1.19 s 等待，1.20 s 触发。
+判断使用仿真时间，所以暂停时墙钟计时器唤醒也不会反复规划。
+时钟回退意味着开始新的仿真过程，节点清空目标与旧快照，再等待新目标。
+
+每次预留 0.15 s 作为交接提前量，优化墙钟预算为 0.04 s。
+路径搜索、区域构建和传输也占用时间，故确认必须在起点之前到达。
+核心代码先把未来旧边界变到 map，在同一快照上规划，再将结果和区域一起变回 odom：
+\par\noindent\begin{minipage}{\linewidth}
 \lstinputlisting[language=C++,linerange={navigation_snapshot_begin-navigation_snapshot_end},includerangemarker=false]{../ros2_ws/src/motion2d/src/nodes/navigation_node.cpp}
+\end{minipage}\par
+\code{old} 来自未来参考查询，\code{boundary} 是 map 系的首 p/v/a。
+\code{awaiting_} 保存已发出、等待确认的候选；确认回调再更新本地调度。
+TF 使用最近可用的 map/odom 对齐并在本次求解期间固定，适应 IMU 更新快于 SLAM 对齐的情况。
 
-TF 使用最近可用的 map 到 odom 对齐；高频 IMU 时刻通常比 SLAM 最近一次 TF 更晚，
-不对未来外推。该对齐在本次求解期间保持不变。
-已有 odom 参考不随回环修改；新快照会把剩余区域变换回 map，检查整个区域仍属于自由配置空间。
-失效则制动，重新静止起步。区域检查偏保守，但不会把旧地图证书冒充为永久有效。
+新地图到达后检查所有尚未执行完的区域，包括待确认候选。
+扫描年龄超过 0.35 s、里程计超过 0.12 s 或地图超过 3 s 时，参考清空并制动。
+规划候选未通过、确认超时或 MPC 未成功求解时，也转入这一流程。
+保留的目标在静止后重试。若多次停在同一区域，应结合前沿状态、地图和激光覆盖，判断是缺少观测还是路线不可执行。
 
-\paragraph{明确的失败处理}
-扫描超过 0.35 s、里程计超过 0.12 s 或地图超过 3 s 未更新，都会清空参考并制动。
-规划无认证结果、确认超时、MPC 求解失败也采用相同的显式停车路径。
-等待静止后可重试仍保留的目标；这不是完备探索，也不保证总能恢复或到达。
-用结构化状态区分规划失败、等待静止、等待确认、执行和到达，另记录优化器状态、耗时、停车次数。
-
-\paragraph{练习}
-补完 ch19-2 的仿真时间触发条件，验证首次、暂停、恰好到周期、候选待交接和时间回退。
-运行 check\_navigation\_failure.py 的独立自由网格夹具，观察里程计仍更新而激光中断时的制动，
-再观察缺少确认时的制动。夹具地图只用于接口测试，不计入未知环境导航成绩。
-
-\clearpage
-\section{同场景比较三条路线}
-\begin{lstlisting}[language=bash]
-# Starts/stops its own isolated launches; source workspace first.
+\section{同场景逐步接入惯性与估计误差}
+三条路线逐层增加复杂度：
+\begin{center}\small
+\begin{tabular}{llll}\toprule
+路线 & 定位 & 地图 & 控制\\\midrule
+A & 真值适配器 & 扫描观测建图 & 理想点设定\\
+B & 真值适配器 & 扫描观测建图 & 惯性模型 + MPC\\
+C & 激光/IMU、EKF、关键帧 SLAM & 关键帧观测地图 & 惯性模型 + MPC\\\bottomrule
+\end{tabular}\end{center}
+A 到 B 观察动力学和跟踪的影响，B 到 C 再观察估计误差的影响。
+完整障碍列表与真值位姿由独立评价器读取；导航所用自由空间均来自传感器观测。
+C 的 map/odom 对齐由 SLAM 发布。
+\begin{lstlisting}[language=bash,numbers=none]
+# The script launches each trial in its own ROS domain.
 python3 scripts/run_ch19.py --seeds 42 43 44
 python3 scripts/plot_ch19_navigation.py
 \end{lstlisting}
-A 使用真值适配器、观测建图和理想点控制；B 将执行改为带质量模型与 MPC；
-C 将定位改为真实模拟激光/IMU 前端、EKF 和关键帧 SLAM。
-C 不启动真值适配器或真值投影建图节点，唯一 map 到 odom 的变换由 SLAM 发布。
-三组都只有观测地图；真值与完整障碍物只用于最后的评价。
+世界为 $20\times20$ m，含 8 个圆和 8 个凸多边形，圆盘半径 0.2 m。
+同一随机种子对应同一几何。激光为 720 束、10 Hz、6 m 量程，每束标准差 0.01 m；
+B/C 使用 200 Hz IMU，白噪声沿用第 06 章，动力学阻尼与第 18 章相同。
+地图分辨率 0.1 m，配置空间额外留 0.15 m 跟踪余量。
+在线节点采用轨迹采样软惩罚，再用独立 Bézier 连续界检查执行候选。
 
-世界为 20$\times$20 m、8 个圆与 8 个凸多边形，圆盘半径 0.2 m，
-相同种子对应相同几何。传感器为 720 束、10 Hz、6 m 量程、每束标准差 0.01 m；
-B/C 使用 200 Hz IMU，噪声沿用第 10 章，动力学阻尼与第 18 章相同。
-地图分辨率 0.1 m，规划额外跟踪余量 0.15 m。
-节点采用采样软惩罚以减少单段控制点代价过保守的时长，但仍由独立连续证书决定是否执行。
-
-物理起点为 $(-8,-8)$、目标为 $(-4,-4)$，初始 yaw=0。
-A/B 中 map 与 world 相同；C 的初始 map 原点在第一帧，故同一目标约为 $(4,4)$。
-当前 C 配置要求初始 yaw=0，使估计 odom 轴与物理力输入轴一致；扩展初始朝向时须同时适配力向量坐标。
-到达条件为选定定位距目标小于 0.12 m 且速度小于 0.08 m/s；
-评价还要求真实目标误差小于 0.25 m。
-
-\begin{figure}[!ht]
+物理起点为 $(-8,-8)$，目标为 $(-4,-4)$，初始 yaw 为零。
+A/B 中 map 与 world 相同；C 的第一帧设为 map 原点，同一物理目标因此约为 $(4,4)$。
+例如无旋转时，$p_m=p_w-(-8,-8)$，直接代入即可得到这一差别。
+当前 C 配置以初始 yaw 为零对齐估计 odom 与物理施力轴；扩展初始朝向时，要同时旋转力向量接口。
+到达判据为选定定位距目标小于 0.12 m 且速度小于 0.08 m/s，评价器还检查真实目标误差小于 0.25 m。
+\begin{center}\begin{minipage}{\linewidth}\makeatletter\def\@captype{figure}\makeatother
 \centering\includegraphics[width=\linewidth]{figures/ch19_navigation.pdf}
-\caption{主机 ROS 实测的圆心轨迹，统一画在 world 坐标中，圆点为起点、星号为目标。
-此图只比较实际路径，不是地图或 RViz 截图；障碍净空由独立几何评价器计算。}
-\end{figure}
+\caption{三个随机世界中的圆心轨迹，统一画在 world 坐标中，圆点为起点、星号为目标。
+三种路线使用同一世界和目标，障碍净空由完整几何计算。}
+\end{minipage}\end{center}
+\section{分别计算定位误差、短时漂移与跟踪误差}
+\subsection{先把估计位姿放进同一个世界坐标系}
+用第 02 章的位姿变换记号 $T=(R,p)$，其作用是 $q\mapsto Rq+p$。
+记真实位姿为 $T_i^w$，估计 odom 位姿为 $O_i$，该时刻最近可用的 map/odom 对齐为 $M_i$，
+则地图中的估计位姿为 $\widehat T_i=M_iO_i$。
+地图原点可以任意选择，先用第一帧确定一个固定对齐
+\[
+ G=T_0^w(\widehat T_0)^{-1},\qquad \widetilde T_i=G\widehat T_i.
+\]
+代入 $i=0$ 可见 $\widetilde T_0=T_0^w$，之后对齐 $G$ 保持不变。
+这样消除的是初始坐标选择，后续累积的定位误差仍会反映在比较中。
 
-\paragraph{评价约定}
-ATE 只在第一帧做一次 SE(2) 对齐，之后比较 SLAM map 位姿与真实位姿；
-不对整条路径重新拟合来减小漂移。RPE 使用相隔 1 s 的相对位姿平移误差，
-跟踪误差则比较同一时间戳的选定里程计与 odom 参考。
-净空是完整世界几何到真实圆心的距离减去物理半径，不能用有噪声的估计 ESDF 代替。
+\textbf{绝对轨迹误差}（ATE）在本章取平移部分：
+\[
+ e_i^{\rm ATE}=\operatorname{pos}(\widetilde T_i)-\operatorname{pos}(T_i^w),\qquad
+ \mathrm{ATE}_{\rm RMS}=\sqrt{\frac1N\sum_i\|e_i^{\rm ATE}\|^2}.
+\]
+\code{pos} 表示取位姿中的位置向量。平方消去误差方向的正负，平均反映整段轨迹，开方后单位恢复为米。
+例如两个位置误差为 $(0.01,0)$ 和 $(0,0.02)$ m，RMS 为 $\sqrt{(0.01^2+0.02^2)/2}\approx0.01581$ m。
 
-\clearpage
-\section{读懂成绩，也保留边界}
+\subsection{用相对运动检查一秒内积累的误差}
+\textbf{相对位姿误差}（RPE）先比较两帧之间的运动。
+真实与估计的相对变换分别为
+\[
+ D_{ij}=(T_i^w)^{-1}T_j^w,\qquad\widehat D_{ij}=O_i^{-1}O_j,\qquad
+ E_{ij}=D_{ij}^{-1}\widehat D_{ij}.
+\]
+若两种运动相同，$E_{ij}$ 为单位变换。
+展开第 02 章的逆变换和复合式，真实相对平移是
+$R_i^T(p_j-p_i)$，表示“从第 $i$ 帧车身看，第 $j$ 帧移动到哪里”。
+估计相对平移同样计算；再求两种相对变换之间的误差。
+本章选择 $t_j-t_i=1$ s，取 $\|\operatorname{pos}(E_{ij})\|$ 的 RMS。
+实现使用\textbf{连续 odom 位姿}计算 RPE，用带地图校正的位姿计算 ATE，分别观察短时运动与整体定位。
+
+例如方向均为零，真值一秒前进 1 m、估计前进 1.02 m，平移 RPE 为 0.02 m。
+给所有估计位姿左乘同一个固定变换 $H$，相对运动仍是
+$(HO_i)^{-1}(HO_j)=O_i^{-1}O_j$，所以 RPE 对固定坐标原点的选择不敏感。
+
+\subsection{跟踪误差与物理净空}
+跟踪误差比较相同时间戳、同一 odom 系的观测位置与控制参考：
+\[
+ e_i^{\rm track}=p_i^{\rm odom}-p_{r,i}^{\rm odom}.
+\]
+它回答控制器是否跟上了自己使用的参考。
+在已经对齐的一维例子中，某时刻估计位置与参考都为 1.1 m、真实位置为 1.0 m，跟踪误差为零，而估计相对真值仍偏了 0.1 m。
+因此要分别查看定位和跟踪曲线。
+\code{check_ch19.py} 按精确时间戳配对样本；RPE 只使用能找到一秒后对应样本的时刻。
+
+真实圆盘净空为 $d_{\rm true}(p)-r$，其中 $d_{\rm true}$ 是真值圆心到完整障碍边界的最短距离，
+计算方法见第 03 章。它检查实际外形离障碍还有多远；规划 ESDF 则描述当前观测地图中的距离。
+评价还记录到达时间、停车次数、规划与控制耗时，这些量一起描述导航过程。
+
+\section{读懂三条路线的对照结果}
 \begin{center}\small
 \begin{tabular}{lrrrrr}\toprule
 路线/种子 & 到达/s & ATE/mm & 跟踪/mm & 净空/m & 停车\\\midrule
@@ -257,129 +385,111 @@ C/44 & 28.23 & 5.76 & 1.76 & 0.435 & 7\\
 \bottomrule\end{tabular}
 \end{center}
 表中 ATE 和跟踪均为 RMS，净空为全程最小真实圆盘净空。
-这九次均到达，碰撞尝试为 0；A 的直接设点跟踪误差为 0，
-A/B 的定位误差为 0 是真值模式的定义，不能作为估计算法的成绩。
-B/C 均未出现 MPC 未收敛；停车主要来自观测变化使旧区域失效，以及重规划没有认证结果。
-停止后重新建立静止参考是显式中断，不能把这些位置的加速度称为连续。
+A/B 采用真值定位，零 ATE 是该输入模式的定义；A 的理想点设定用于建立几何基线。
+C 的三次一秒平移 RPE 为 2.57、2.21、2.55 mm。
+B/C 的 MPC 在这组运行中均完成求解；停车主要发生在新地图使旧区域失效或局部候选未通过时。
+查看停车前后的状态，可以理解参考接续与重新静止起步如何配合。
 
-C 的三次 1 s 平移 RPE 分别为 2.57、2.21、2.55 mm。
-全部试验的规划 P95 为 6.96--10.13 ms，B/C 的 MPC P95 为 0.38--0.46 ms；
-规划时长包含局部路线、走廊和轨迹求解，不含地图回调的膨胀/ESDF构建、DDS传输和显示。
-这些是顺序运行、未锁频的主机测量，不是实时上界。
+这九组在三个固定随机世界中均到达目标，碰撞尝试为零。
+规划 P95 耗时为 6.96--10.13 ms，B/C 的 MPC P95 为 0.38--0.46 ms。
+规划计时包括局部路线、走廊和轨迹求解；地图回调中的膨胀与 ESDF、消息传输和显示另行耗时。
+换用更长路线或更密集障碍时，应重新记录这些阶段的时间分布。
 
-初始未知格约占 88.9\%--92.9\%，到达时仍有约 74.7\%--76.4\% 未知；
-导航只探索本次任务需要的区域，并没有读入完整世界地图。
-详细数值保存于 textbook/data/ch19\_navigation.csv，脚本另输出逐时刻定位、跟踪、状态和 QP 数据。
-异步回调到达次序与有限墙钟预算会影响具体重规划时刻；相同种子保证几何和噪声流，
-不保证操作系统调度或最终路径逐位相同。
+初始未知格约占 88.9\%--92.9\%，到达时仍有约 74.7\%--76.4\% 未知。
+机器人只需逐步看清本次任务经过的区域；完整地图覆盖率与到达目标是不同的评价目标。
+脚本还保存逐时刻定位、跟踪、状态和 QP 数据。汇总数据见：
+\begin{center}\code{textbook/data/ch19_navigation.csv}\end{center}
+相同种子复现几何和噪声流；消息调度及墙钟预算会改变具体重规划时刻，因此应比较统计量与状态过程。
 
-\paragraph{怎样解释成功率}
-9/9 是三个固定种子、同一起终点、短距离静态场景的本次结果，样本太少，
-不能推断任意未知环境都有这样的成功率。
-长窄通道、不可见凹陷、低激光重叠和动态障碍可能导致停滞；
-当前前沿选择只追求更靠近目标，不具备完整的全局探索策略。
-这些单程任务也没有主动制造回环；实际回环实验见第 10 章，
-本章另用曲线/区域坐标往返和新旧参考测试验证地图校正不会直接重写已发出的 odom 曲线。
+可把下一组实验改成长窄通道、激光低重叠或凹形遮挡场景，观察局部目标为何停滞；
+需要回环时则设置返回起点的路线，并结合第 10 章检查地图校正。
+在 RViz 中同时观察观测地图、注册点云、选定里程计、局部路径和走廊，逐层定位问题。
 
-\paragraph{验收与继续练习}
-检查节点订阅表：导航、控制、激光里程计、EKF 和 SLAM 都不能订阅 ground\_truth 或 sim 位姿。
-分别增大噪声、减小激光量程、降低重规划频率，记录\textbf{失败状态和停车次数}，不要只保留成功曲线。
-当前主机完成无界面 ROS 实验，RViz 的预期内容已配置；桌面图形问题尚未解除，未声称截图验收通过。
-
-\clearpage
-\section{从一份配置选择微分平坦模型}
-本节将第04、15--17章的新增模块接到观测地图。
-它采用停止到停止的小型闭环：先看清模型与约束如何影响真实输入，再学习更复杂的运动中接续。
+\section{通过一份配置选择全向或阿克曼模型}
+为了集中比较模型，第 04、15--17 章的平坦映射模块还提供一个停止到停止的导航入口。
+机器人先静止规划一段，在途中使用对应反馈控制，完成后再接受新目标。
 \begin{lstlisting}[language=bash,numbers=none]
-# Repository root; source ROS and ros2_ws/install first.
 mkdir -p tmp
 cp ros2_ws/src/motion2d_bringup/config/flat_vehicle.yaml \
   tmp/vehicle.yaml
 ros2 launch motion2d_bringup flat_vehicle.launch.py \
-  rviz:=false config:=/absolute/path/to/tmp/vehicle.yaml
+  rviz:=true config:="$PWD/tmp/vehicle.yaml"
 \end{lstlisting}
-先将最后一行替换为自己的绝对路径。物理参数和模型选择见第04章新增配置节。
-
-定位选项在 vehicle 段中，字段名为 \code{localization}，可取 truth 或 slam。
-所有物理量同时传给仿真和规划控制，修改配置后重启，不运行中切换动力学。
+在复制出的配置中编辑顶层 \code{vehicle.model} 为 \code{inertial} 或 \code{ackermann}，
+\code{vehicle.localization} 为 \code{truth} 或 \code{slam}，然后重启。
+launch 将物理参数同时传给仿真和规划控制；文件中的其余节点参数遵循 ROS 参数格式。
 
 \begin{center}\small
 \begin{tabular}{lll}\toprule
-选择 & 全向 inertial & 阿克曼 ackermann\\\midrule
+内容 & 全向惯性 & 阿克曼\\\midrule
 平坦输出 & $(p_x,p_y,\psi)$ & $(p_x,p_y)$，前进支路\\
-规划变量 & 路点、分段时长 & 正的切向长度、分段时长\\
-物理软约束 & 力、力变化率 & 力、转角、转向速率、侧向加速度\\
-控制输出 & $F_x,F_y,\tau$ & $F,r_\delta$\\
-朝向 & 保持起步 yaw & 采用目标 yaw\\\bottomrule
-\end{tabular}
-\end{center}
-全向采用 MINCO/Spline 与前馈PD；阿克曼采用正则几何五次段、五次停车进度和局部反馈。
-\code{planning.backend} 仅影响全向选择，不能把全向五次时间曲线当作阿克曼几何系数。
-原第18/19章线性MPC和未来运动接续仍使用原入口，本节没有实现阿克曼NMPC。
+规划变量 & 路点、时长 & 正切向长度、时长\\
+参考物理量 & 力、力变化率 & 力、转角、转向速率、侧向加速度\\
+控制输入 & $F_x,F_y,\tau$ & $F,r_\delta$\\
+朝向参考 & 保持起步 yaw & 路径切向，末端匹配目标 yaw\\\bottomrule
+\end{tabular}\end{center}
+全向后端由 \code{planning.backend} 选择 MINCO 或 Spline，控制使用前馈 PD。
+阿克曼使用第 16 章的正则几何路径与停车进度，控制使用第 17 章的小车反馈。
+该入口侧重模型与动力学约束；前面的全向 MPC 和运动中参考接续仍使用 \code{ch19.launch.py}。
 
-\textbf{参考限制和执行器限制分开。}默认物理力上限 2 N，规划参考上限 1 N，
-物理转角/转向速率 0.6 rad/1 rad/s，规划为 0.5 rad/0.7 rad/s。
-全向另限制力变化率 2 N/s；阿克曼另限制侧向加速度 0.8 m/s$^2$，两者速度上限均为 0.7 m/s。
-优化软目标取规划上限的 85\%，执行前连续界按完整规划上限验收。
-反馈保留执行器余量，最终指令受物理限幅；参考证书不等于实际跟踪误差或制动过程的保证。
+\subsection{为反馈留出执行器余量}
+默认物理力上限 2 N，参考规划上限 1 N；物理转角/速率为 0.6 rad、1 rad/s，参考上限为 0.5 rad、0.7 rad/s。
+全向参考再限制力变化率 2 N/s，阿克曼参考限制侧向加速度 0.8 m/s$^2$，两者速度上限为 0.7 m/s。
+软惩罚从规划上限的 85\% 开始起作用，连续界按完整规划上限检查。
+剩余执行器能力供反馈消除偏差，实际指令仍按物理上限限幅。
 
-\textbf{数据来源。}truth 也只凭扫描建图；slam 使用激光里程计、IMU融合和关键帧地图，
-不启动真值适配器。阿克曼控制额外读取显式理想转角编码器；SLAM仍只使用扫描和IMU。
-默认半径 0.4 m，配置栅格额外留 0.15 m 跟踪余量，未知格阻塞。
+默认圆盘半径 0.4 m，配置栅格再留 0.15 m 跟踪余量；阿克曼圆盘中心与状态点均在后轴。
+truth 模式使用扫描观测建图；slam 模式使用激光、IMU 和关键帧地图。
+阿克曼反馈还读取显式转角编码器，估计器仍从激光和 IMU 获取运动信息。
 
-\clearpage
 \section{从观测就绪到未来起步}
-启动时暂停；在另一个已加载环境的终端恢复，然后给出当前可达的近目标：
+恢复仿真后给一个近目标：
 \begin{lstlisting}[language=bash,numbers=none]
 ros2 service call /sim/pause std_srvs/srv/SetBool '{data: false}'
-# truth mode: start (-8,-8), goal (-6,-7.7), yaw=0
+# Truth localization: start (-8,-8), goal (-6,-7.7), yaw=0.
 ros2 topic pub --once /goal_pose geometry_msgs/msg/PoseStamped \
   '{header: {frame_id: map}, pose: {
      position: {x: -6.0, y: -7.7}, orientation: {w: 1.0}}}'
 ros2 topic echo /flat/status
 \end{lstlisting}
-SLAM 第一帧作为初始 map 原点，同一相对目标改为 $(2,0.3)$。
-当前配置要求初始 yaw=0，保持估计 odom 和全向施力轴一致。
-目标必须携带有效平面四元数；阿克曼采用其中的终点朝向，全向仍保持起步朝向。
+SLAM 模式以第一帧为地图原点，同一相对目标为 $(2,0.3)$ m。
+当前配置取初始 yaw 为零；目标需包含平面四元数，阿克曼用它约束末端朝向，全向保持起步朝向。
 
-SLAM 的第一帧自由概率 0.4 尚未低于规划的 0.35 阈值，
-\code{waiting_observed_free_start} 会等下一份观测地图。
-后续关键帧增加证据才继续，不为尽快开车降低自由判据。
-A* 和凸走廊都来自同一份膨胀地图；固定路径曲率不适合小车时，专用优化器可明确失败。
+初始扫描后可能看到 \code{waiting_observed_free_start}。
+这是因为一次自由观测的概率 0.4 还高于规划自由阈值 0.35。
+由第 07 章的 log-odds 累加，两次相同自由证据给出
+\[
+ L_2=2\ln\frac{0.4}{0.6},\qquad
+ p_2=\frac{e^{L_2}}{1+e^{L_2}}=\frac{(2/3)^2}{1+(2/3)^2}=\frac4{13}\approx0.308.
+\]
+重复证据会把格子推到自由阈值以下；关键帧地图则在新增关键帧后更新这些证据。
+因此应先观察扫描、地图和状态，再等待可通行起点形成。
 
-\textbf{求解完成不等于现在开始。}仅在观测速度、角速度以及阿克曼转角接近零时求解，
-预算默认 1 s。成功后还要等求解结束之后的一条新里程计，
-以其 stamp 加 0.3 s 设执行起点；避免使用计算期间排队的旧观测。
-路径和区域由同一 map 到 odom 变换冻结，后续定位校正不重写已发出的系数。
-新地图若使区域失效，则清空参考并制动。
+只在速度、角速度和阿克曼转角接近零时开始求解，默认预算 1 s。
+求解完成后等待一条时间戳晚于求解完成时刻的新里程计，再以它的 stamp 加 0.3 s 安排起步。
+这样执行起点来自新观测，而不是计算期间排队的旧数据。
+曲线和区域仍按同一 map/odom 变换冻结，新地图使区域失效时则清空参考并制动。
 
 \begin{lstlisting}[language=bash,numbers=none]
 ros2 topic pub --once /flat/stop std_msgs/msg/Empty '{}'
 ros2 service call /sim/reset std_srvs/srv/Trigger '{}'
 \end{lstlisting}
-暂停保持同一个模拟时间，不重复推进控制；reset、非法目标和显式停车清空旧参考。
-有新鲜里程计但激光/地图/转角过期时，以新状态给限幅阻尼输入；
-里程计也超过 120 ms 时，改为零输入，避免反复使用旧速度制动而使车辆反向加速。
-这是明确的故障处理，不是原轨迹连续证书的一部分。
+停车、reset 或非法目标会清空旧参考。里程计新鲜而激光、地图或转角过期时，使用新状态产生限幅制动。
+里程计超过 120 ms 时改用零输入：此时旧速度已无法可靠描述当前运动，持续按旧方向施力可能使车反向加速。
+恢复观测后再根据当前状态重新起步。
 
-\textbf{接口与显示。}阿克曼曲线通过 \code{/flat/ackermann_trajectory} 输出，
-几何参数 $u$ 无量纲，每段另存物理秒和绝对起点；空曲线表示撤销。
-\code{/flat/reference} 是当前观测时刻的 Odometry 参考。
-RViz配置显示观测地图、注册点云、选定里程计、\code{/plan/path} 和凸区域；
-完整世界与仿真圆盘属于可选真值对照。此主机完成无界面验证，未声称新增GUI画面已验收。
+阿克曼曲线通过 \code{/flat/ackermann_trajectory} 发布；每段保存无量纲几何参数、物理时长和绝对起点。
+空曲线表示撤销。\code{/flat/reference} 为当前参考里程计，RViz 中可同时查看参考、实际位姿、地图与凸区域。
 
-\clearpage
-\section{选模实验、失败案例与练习}
-启动匹配的配置后，从仓库根目录运行；脚本会主动 reset、推进和暂停：
+\section{用配置实验理解模型约束}
+启动对应配置后，从仓库根目录运行四组模型与定位组合：
 \begin{lstlisting}[language=bash,numbers=none]
 /usr/bin/python3 scripts/check_flat_vehicle.py \
   --model ackermann --localization truth --output tmp/flat_check
 \end{lstlisting}
-分别修改配置和脚本参数，完成两种模型与两种定位的四组试验。
-默认 seed42，世界 20$\times$20 m、8圆/8多边形；质量1kg、半径0.4m，
-720束/10Hz激光、每束标准差0.01m，200Hz IMU沿用第06章白噪声。
-相对目标为 $(2,0.3)$ m，初终朝向均为零。
-
+脚本执行 reset、推进和暂停。改变脚本参数的同时，要重启匹配的 launch 配置。
+固定 seed42，世界 $20\times20$ m、8 圆/8 多边形；质量 1 kg、半径 0.4 m，
+720 束/10 Hz 激光、每束标准差 0.01 m、200 Hz IMU。相对目标为 $(2,0.3)$ m，初终朝向为零。
 \begin{center}\small
 \begin{tabular}{llrr}\toprule
 模型/定位 & 规划后端 & 参考时长/s & 峰值跟踪/mm\\\midrule
@@ -389,23 +499,27 @@ RViz配置显示观测地图、注册点云、选定里程计、\code{/plan/path
 全向/SLAM & MINCO & 11.115 & 4.931\\\bottomrule
 \end{tabular}
 \end{center}
-跟踪误差比较相同 stamp 的选定里程计与参考，\textbf{不是 SLAM 的 ATE}。
-四组均完成，暂停保持时刻/状态，非法目标和 reset 后无旧轨迹重放；
-真实节点订阅图确认规划、估计节点不读真值，只有一个时钟发布者。
-数据保存在 \code{textbook/data/flat_vehicle_validation.csv}。
-样本是固定种子的短距离静态场景，不能作为任意环境成功率或两类优化器速度优劣的结论。
+峰值跟踪误差由同 stamp 的选定里程计与参考比较。
+表中全向两组还使用了不同后端；若要单独研究定位影响，应固定同一个后端再重复实验。
+汇总数据见：
+\begin{center}\code{textbook/data/flat_vehicle_validation.csv}\end{center}
 
-\textbf{保留失败。}将规划转角上限改成 0.005 rad，再给同一换道目标，
-验收脚本加 \code{--expect-failure}：主机报告规划失败，未发布非空执行曲线。
-因为 $\delta=\arctan(L\kappa)$ 只取决于几何，单纯延长时长不能减小转角。
-拒绝的是这个固定几何路点/朝向问题，不是证明整个未知世界没有其他可行路线。
+将规划转角上限改成 0.005 rad，并对同一换道目标运行带 \code{--expect-failure} 的检查。
+该几何候选的转角上界会超限，执行曲线保持为空。
+由 $\delta=\arctan(L\kappa)$，转角由曲率决定，单纯延长时长保持 $\kappa$ 不变；
+应改变路线形状、路点朝向或可用转角。
+相比之下，同一几何下减慢进度可以降低纵向惯性力和转向速率，具体比例见第 16 章。
 
-\paragraph{ch19-3 配置练习}
-先逐项改变质量、规划力上限、转角上限，每次只改变一个量，记录状态、认证界、时长与跟踪误差。
-解释物理上限、参考软目标和后验认证之间的关系，失败样本也写入报告。
-再试验运动中显式停车，说明为什么不能声称制动仍满足原曲线证书。
-代码练习 ch19-1/2 仍用于原运动接续入口；新增平坦梯度练习在 ch04-5/6、ch15-3、ch16-3。
-
-\textbf{扩展边界。}此小车规划前进、逐段停车，固定几何路点和朝向；
-没有倒车、Hybrid A*、前沿探索或阿克曼NMPC。窄通道、急弯、远处未知目标可以失败。
-下一步扩展时先加入相应几何搜索和控制模型，再沿用这里的单位、时间、解析反向和独立验收约定。
+\section{练习：沿着一条消息追踪整个闭环}
+\begin{enumerate}
+\item \textbf{代码 ch19-1：}补全首 p/v/a 比较。用旧曲线在 1.5 s 的解析结果，构造只改速度的候选并检查接收结果。
+\item 按时间表依次查询未来、当前、交接后；解释为什么查询函数与推进函数应分开。
+\item 手算本章 $90^\circ$ 旋转的曲线首点和速度，再将常数系数与高次系数分别变回 map 核对。
+\item 用剩余路长和线性插值截断一条 A* 路线；更改未知区域边界，观察局部目标如何移动。
+\item 推导 $p(T/2)=D/2+5v_0T/32$，比较 $D=1,v_0=0.5$ 时两个时长，说明备用方案为何仍需重新检查走廊。
+\item \textbf{代码 ch19-2：}按仿真时间补全周期触发条件，检查首次、暂停、周期边界、待交接和回退。
+\item 删去候选的一个区域，跟踪发送、拒绝与旧参考继续执行；再停掉扫描，观察里程计仍更新时的传感器年龄判断。
+\item 用同一组样本分别算 ATE、RPE 和跟踪 RMS，解释它们的坐标、时间配对和单位。
+\item \textbf{配置 ch19-3：}每次只改变质量、规划力或转角上限，记录参考时长、连续界、跟踪误差与状态。为一个超限案例提出几何或时间上的修改。
+\end{enumerate}
+练习编译入口与手算提示见 \code{exercises/ch19/README.md}。
