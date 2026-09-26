@@ -1,0 +1,5 @@
+metric,initial,status,x,y,yaw,rmse,pairs,iterations
+point,zero,converged,0.102987327,-0.0864593407,0.0473735898,0.0209919085,162,3
+point,near,converged,0.12,-0.08,0.04,2.21280333e-16,162,2
+line,zero,converged,0.12,-0.08,0.04,1.96024723e-16,154,3
+line,near,converged,0.12,-0.08,0.04,1.86401933e-16,154,2

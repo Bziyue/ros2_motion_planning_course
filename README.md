@@ -6,6 +6,9 @@
 
 [教材 PDF](output/pdf/course.pdf) · [实施进度](docs/PROGRESS.md) · [主机验收记录](docs/VALIDATION.md)
 
+后续第 08–20 章已获连续实施授权。第 08 章正在实现，已完成点到点/点到线配准内核与初值实验；
+运行入口见 [第 08 章说明](chapters/ch08/README.md)。其余进度按每次功能提交更新。
+
 | 章节 | 内容与运行说明 | 练习 | 启动文件 |
 | --- | --- | --- | --- |
 | 01 | [环境与圆盘场景](chapters/ch01/README.md) | [ch01](exercises/ch01/README.md) | `ch01.launch.py` |

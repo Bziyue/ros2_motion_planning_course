@@ -1,0 +1,106 @@
+\chapter{让两帧扫描对齐：激光里程计}\label{ch:icp}
+\begin{notebox}
+\textbf{目标}\quad 从最近邻和最小二乘理解二维配准，再把相对运动积累成里程计。\\
+\textbf{先修}\quad 第 01--07 章。先实现只接收两组点的配准内核。
+\end{notebox}
+
+\section{先对齐两组已知形状的点}
+在 ros2\_ws 加载环境后运行：
+\begin{lstlisting}[language=bash,numbers=none]
+ros2 run motion2d scan_matcher_demo
+\end{lstlisting}
+演示先造两面互相垂直的墙，再用已知位姿
+$t=(0.12,-0.08)$ m、$\psi=0.04$ rad 生成当前帧。
+配准函数只收到两组点和初值，不收到这个答案。输出包括两种残差的状态、位姿、
+RMSE、关联数与迭代次数。真实雷达点还会受遮挡、噪声和视角变化影响。
+实验同时使用零初值，以及 $(0.11,-0.075,0.038)$ 的邻近初值。
+零初值下，点到点结果约为 $(0.1030,-0.0865,0.0474)$：
+虽然报告收敛，仍有约 1.8 cm 的位置误差。邻近初值能恢复本例答案，
+点到线则在两个初值下都成功。这个例子说明规则采样也可能形成错误的局部极小值。
+
+设当前帧点为 $p_i$，参考帧点为 $q_j$。我们求的是
+$T_{\rm reference\leftarrow current}$：
+\begin{equation}
+e_i=R(\psi)p_i+t-q_{j(i)},\qquad
+j(i)=\arg\min_j\|R(\psi)p_i+t-q_j\|.
+\end{equation}
+先用当前猜测寻找最近邻，固定这些对应关系解一个小问题，再重新寻找对应关系。
+这就是 ICP 的交替过程。对应关系也在变化，所以它不是一次线性求解，也不保证找到全局最优。
+
+\begin{center}
+\begin{tikzpicture}[x=1cm,y=1cm,>=Stealth,
+  box/.style={draw=tealblue,fill=pale,rounded corners=2pt,inner sep=6pt}]
+\node[box] (guess) at (0,0) {位姿初值};
+\node[box] (pairs) at (3.1,0) {寻找最近邻};
+\node[box] (solve) at (6.4,0) {求解小增量};
+\node[box] (update) at (9.6,0) {更新位姿};
+\draw[->] (guess)--(pairs);
+\draw[->] (pairs)--(solve);
+\draw[->] (solve)--(update);
+\draw[->] (update.south)--++(0,-.7)-|(pairs.south);
+\node[below] at (6.3,-1.3) {重新关联，直到小增量收敛或明确失败};
+\end{tikzpicture}
+\end{center}
+
+超过关联距离的点不参与本轮优化。默认门限为 0.5 m，最多 40 次迭代，
+至少 20 个有效关联。门限不是越大越好：太大容易认错墙，太小则运动稍快就没有足够的点。
+
+\clearpage
+\section{点到点残差的两行雅可比}
+本章使用加法更新 $(t_x,t_y,\psi)$。记 $u=R(\psi)p_i$，则
+\begin{equation}
+J_i=\frac{\partial e_i}{\partial(t_x,t_y,\psi)}
+=\begin{bmatrix}1&0&-u_y\\0&1&u_x\end{bmatrix}.
+\end{equation}
+旋转列不包含平移。这里的增量约定不是 SE(2) 左乘或右乘指数映射；
+换一种更新方式，雅可比也要随之改变。
+\lstinputlisting[language=C++,linerange={icp_jacobian_begin-icp_jacobian_end},
+  includerangemarker=false]{../ros2_ws/src/motion2d/src/estimation/scan_matcher.cpp}
+
+线性化后 $e_i(\theta+\delta)\approx e_i+J_i\delta$。求导令零得到
+\begin{equation}
+H=\sum_i w_iJ_i^\top J_i,\qquad
+g=\sum_i w_iJ_i^\top e_i,\qquad H\delta=-g.
+\end{equation}
+不要显式求 $H^{-1}$；用分解求解线性方程。默认 Huber 尺度为 0.08 m：
+\begin{equation}
+\rho(s)=
+\begin{cases}\frac12s^2,&|s|\le a,\\a|s|-\frac12a^2,&|s|>a,\end{cases}
+\qquad w=\min(1,a/|s|).
+\end{equation}
+零残差时直接取 $w=1$。点到点使用残差模长，点到线使用有符号距离。
+鲁棒权重减弱大残差的影响，不能凭空识别所有错误对应。
+
+\textbf{代码练习 ch08-1：}补完 \path{starter/point_jacobian.hpp}。
+检查程序在三个朝向对独立投影公式做中心差分。先手算，再运行；
+不要照抄一个与自己实现完全相同的公式充当测试。
+
+\section{点到线：沿墙滑动和穿墙不同}
+参考表面的单位法向量为 $n_i$ 时，
+\begin{equation}
+r_i=n_i^\top(Rp_i+t-q_i),\qquad J_i^{\rm line}=n_i^\top J_i.
+\end{equation}
+它主要惩罚穿过表面的误差，降低沿表面离散采样位置不一致的影响。
+本实现对参考点半径 0.4 m 内的邻域做 PCA；至少 5 点，
+且小特征值小于大特征值的 0.15 倍，才认为局部像一条线。
+法向量正负不影响平方残差；孤立点和不可靠的角点不提供法向约束。
+
+\clearpage
+\section{配准失败必须有名字}
+只有一面水平墙时，点到线误差不包含沿墙的 $t_x$，$H$ 秩不足。
+检查最小与最大特征值之比，能识别这类局部退化。
+点到点的错误最近邻、重复房间却可能仍给出满秩矩阵，因此满秩不等于正确定位。
+\lstinputlisting[language=C++,linerange={icp_solve_begin-icp_solve_end},
+  includerangemarker=false]{../ros2_ws/src/motion2d/src/estimation/scan_matcher.cpp}
+
+结果分为 converged、too\_few\_pairs、degenerate、iteration\_limit 和 high\_residual。
+只有增量小于容差、重算后的关联数和秩合格、RMSE 不超过门限，才接受位姿。
+返回的加权法方程矩阵只是局部信息指标，不能直接宣称是经过标定的真实协方差。
+
+\begin{enumerate}
+\item \textbf{理解：}为什么增大门限可能让残差下降，却得到错误的位姿？
+\item \textbf{实验：}改变已知变换和初值，比较点到点与点到线；删掉一面墙观察退化。
+\item \textbf{验收：}参考解通过中心差分；刚体点集恢复位姿；空点集、无重叠、
+单墙退化和迭代耗尽均报告失败。两种 RMSE 的含义不同，不能只凭数值大小比较精度。
+\end{enumerate}
+当前配准内核还没有时间历史或回环；下一步由激光里程计负责保存局部参考和处理失败帧。

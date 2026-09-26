@@ -19,7 +19,8 @@ add_library(motion2d_core
   src/sim/ideal_model.cpp src/sim/swept_collision.cpp src/sim/velocity_model.cpp
   src/sim/inertial_model.cpp src/sim/reference_model.cpp src/sim/raycast.cpp src/sim/lidar_cpu.cpp
   src/sim/imu.cpp src/sim/sensor_scheduler.cpp src/mapping/scan_projection.cpp
-  src/mapping/occupancy_grid.cpp src/evaluation/map_evaluation.cpp)
+  src/mapping/occupancy_grid.cpp src/evaluation/map_evaluation.cpp
+  src/estimation/scan_matcher.cpp)
 target_compile_features(motion2d_core PUBLIC cxx_std_17)
 target_compile_options(motion2d_core PRIVATE -Wall -Wextra -Wpedantic)
 target_include_directories(motion2d_core PUBLIC
@@ -57,6 +58,10 @@ target_link_libraries(mapping_demo PRIVATE motion2d_core)
 install(TARGETS mapping_demo DESTINATION lib/motion2d)
 ament_export_targets(motion2d_core_targets HAS_LIBRARY_TARGET)
 ament_export_dependencies(Eigen3)
+
+add_executable(scan_matcher_demo src/examples/scan_matcher_demo.cpp)
+target_link_libraries(scan_matcher_demo PRIVATE motion2d_core)
+install(TARGETS scan_matcher_demo DESTINATION lib/motion2d)
 
 add_executable(hello_scene_node src/nodes/hello_scene_node.cpp)
 # Lyrical requires C++20 at its ROS boundary; later pure math targets use C++17.
@@ -116,6 +121,8 @@ install(TARGETS mapping_node DESTINATION lib/motion2d)
 
 if(BUILD_TESTING)
   find_package(ament_cmake_gtest REQUIRED)
+  ament_add_gtest(test_scan_matcher test/test_scan_matcher.cpp)
+  target_link_libraries(test_scan_matcher motion2d_core)
   ament_add_gtest(test_se2 test/test_se2.cpp)
   target_link_libraries(test_se2 motion2d_core)
   ament_add_gtest(test_sim_clock test/test_sim_clock.cpp)
