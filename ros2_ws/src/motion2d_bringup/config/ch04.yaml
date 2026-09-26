@@ -26,3 +26,9 @@ simulator:
     command_timeout: 0.5  # seconds of simulated time, not wall time
     speed_max: 1.0        # translational norm limit, m/s (velocity mode)
     yaw_rate_max: 1.0     # absolute yaw rate limit, rad/s (velocity mode)
+    mass: 1.0            # kg (inertial mode)
+    inertia_z: -1.0      # -1 derives m*r^2/2; radius=0 needs an explicit positive value
+    linear_drag: 0.0     # kg/s
+    angular_drag: 0.0    # kg*m^2/s
+    force_max: 2.0       # N per odom axis; not a vector norm bound
+    torque_max: 0.2      # N*m

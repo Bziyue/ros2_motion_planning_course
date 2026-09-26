@@ -45,4 +45,48 @@ State2D stepVelocity(const State2D & state, const VelocityCommand & command, dou
  *  For a body-frame command max|a|=|yaw_rate|*|velocity|; odom motion is straight.
  */
 double velocitySweepPadding(const VelocityCommand & command, double dt);
+
+/** @brief Physical parameters: kg, kg/s, kg*m^2, kg*m^2/s, N and N*m. */
+struct InertialParameters
+{
+  double mass = 1.0;
+  double linear_drag = 0.0;
+  double inertia_z = 0.02;
+  double angular_drag = 0.0;
+  double force_max = 2.0;   ///< Separate symmetric bound on each odom force axis.
+  double torque_max = 0.2;
+};
+
+/** @brief Applied planar force in odom (N) and yaw torque (N*m). */
+struct Wrench2D
+{
+  Eigen::Vector2d force = Eigen::Vector2d::Zero();
+  double torque = 0.0;
+};
+
+/** @brief Validate external physical parameters once; throw on invalid values. */
+void validateInertialParameters(const InertialParameters & parameters);
+
+/** @brief Apply per-axis force and absolute torque limits; no speed clipping.
+ *  @pre Valid parameters and a finite input.
+ */
+Wrench2D limitWrench(Wrench2D command, const InertialParameters & parameters);
+
+/**
+ * @brief Exact zero-order-hold step of linear damped translation and yaw dynamics.
+ * @param dt Positive duration (s); command and parameters stay constant in this interval.
+ * @pre Finite state/command and validated parameters.
+ * @details \f$m\dot v=F-c_vv,\ I_z\dot\omega=\tau-c_\omega\omega\f$.
+ * Saturation is applied before integration. Acceleration is evaluated at the
+ * new state under the applied command, ready for later sensor simulation.
+ */
+State2D stepInertial(const State2D & state, const Wrench2D & command,
+  const InertialParameters & parameters, double dt);
+
+/** @brief Radius padding for the full curved inertial step, in metres.
+ *  @details Constant input and nonnegative isotropic drag give
+ *  \f$a(t)=a(0)e^{-c_vt/m}\f$; max|a|=|a(0)|, so pad by |a(0)|*dt^2/8.
+ */
+double inertialSweepPadding(const State2D & state, const Wrench2D & command,
+  const InertialParameters & parameters, double dt);
 }  // namespace motion2d

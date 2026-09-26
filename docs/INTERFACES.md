@@ -4,6 +4,8 @@
 
 第 04 章落地约定：simulator 独占时钟，发布 /sim/pose、/sim/velocity、/sim/acceleration 真值调试消息。此章 map 与 odom 重合，真值 TF 暂由 simulator 发布；第 07 章才拆出里程计选源适配器。理想到点在下一 tick 执行，失败扫掠冻结上一个有效状态和时间，/sim/status=collision_predicted，必须 reset 开新试验。不把这个调试入口供给后续 SLAM。
 
+已实现三个互斥模型 ideal/velocity/inertial，只订阅对应命令。速度支持 odom/base_link，力仅支持 odom。有限二维输入、命令 frame/时间、物理参数均在边界校验。速度限模长；力每轴独立限幅。保持输入在模拟时间中超时，速度模式切零速度，惯性模式撤力并继续积分。惯性核心用线性阻尼系统的零阶保持解析离散，碰撞增加曲线与弦的偏差上界；质量与阻尼配置可直接供后续 MPC 使用。
+
 ## 1. 模块与数据边界
 
 ```text

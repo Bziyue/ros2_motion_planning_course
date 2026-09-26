@@ -1,6 +1,6 @@
 \chapter{让圆盘运动：位置、速度与力}\label{ch:robot}
 \begin{notebox}
-\textbf{目标}\quad 区分理想位置执行与物理运动；让碰撞半径真正约束移动。\\
+\textbf{目标}\quad 区分位置、速度和力输入；理解质量、阻尼、碰撞与制动。\\
 \textbf{先修}\quad 前三章、速度与加速度的含义。先运行，再推导。
 \end{notebox}
 
@@ -16,7 +16,7 @@ p=(p_x,p_y),\quad v=(v_x,v_y).
 
 控制量不同，模型的物理意义就不同。理想到点输入目标位姿；速度模型输入平面速度；
 惯性模型输入力和偏航力矩。它们分别使用不同话题，不能把同一个数值悄悄解释成另一种单位。
-先完成最容易运行的理想到点，再逐项加入连续运动模型。
+下面从最容易运行的理想到点出发，再运行速度模型与受力惯性模型。
 
 \section{先让机器人到一个点}
 停止之前的场景，重新构建并加载 install 后运行：
@@ -166,7 +166,156 @@ $a_{\max}=|\omega|\,\|u\|$，odom 恒速度时为零。
 \begin{lstlisting}[language=bash,numbers=none]
 /usr/bin/python3 ../scripts/check_ch04.py --model velocity
 \end{lstlisting}
-% extension_sections
+\clearpage
+\section{给力：质量必须真正起作用}
+速度命令能立即停下，真实惯性不能。全向平面模型把平移和偏航分开：
+\begin{align}
+\dot p&=v,& m\dot v&=F-c_vv,\\
+\dot\psi&=\omega,& I_z\dot\omega&=\tau-c_\omega\omega.
+\end{align}
+F 为 odom 系平面力，单位 N；$\tau$ 为偏航力矩，单位 N$\cdot$m。
+m 是质量，$I_z$ 是转动惯量。$c_v,c_\omega$ 分别为平移和转动阻尼，
+不能把 kg/s 的阻尼系数与没有单位的“衰减比例”混用。
+
+推荐继续使用这个全向模型：控制器给力，可以直接观察质量、限幅和制动，再学习线性 MPC。
+扫地机器人的差速驱动不能横移，适合在附录加上非完整约束。
+本模型也不等价于四旋翼完整的姿态与推力动力学。
+
+重启场景后，在第二个终端持续施加力与力矩：
+\begin{lstlisting}[language=bash,numbers=none]
+ros2 launch motion2d_bringup ch04.launch.py model:=inertial
+# second terminal
+ros2 topic pub -r 20 /command/wrench geometry_msgs/msg/WrenchStamped \
+  "{header: {frame_id: odom}, wrench: {force: {x: 1.0}, torque: {z: 0.02}}}"
+\end{lstlisting}
+本模式只订阅 \code{/command/wrench}，只接受 odom 系的平面分量。
+力始终指向 odom 的 x 正方向，圆盘转向也不改变这个力的方向。
+停发消息后，默认 0.5 s 超时，撤去的是力，不是速度。
+
+\begin{center}
+\begin{tabular}{lll}
+\toprule
+配置项 & 默认值 & 单位与意义\\
+\midrule
+mass & 1.0 & kg，必须为正\\
+inertia\_z & -1.0 & 自动取 $mr^2/2$；可显式给正惯量\\
+linear\_drag & 0.0 & kg/s，非负\\
+angular\_drag & 0.0 & kg$\cdot$m$^2$/s，非负\\
+force\_max & 2.0 & N，每个平面轴分别限幅\\
+torque\_max & 0.2 & N$\cdot$m，偏航力矩绝对值上限\\
+\bottomrule
+\end{tabular}
+\end{center}
+参数在启动时读取，改 YAML 后重启。若 r=0，必须显式提供正的转动惯量；
+几何质点不意味着可以除以零。速度模式的两个速度上限不用于惯性模式，
+因为直接剪掉速度会改变物理方程。
+
+\clearpage
+\section{从恒加速度到带阻尼的离散模型}
+先设阻尼为零。一个步长 h 内恒力意味着恒加速度 $a=F/m$：
+\begin{equation}
+p_{k+1}=p_k+h v_k+\frac12h^2a,\qquad v_{k+1}=v_k+ha.
+\end{equation}
+位置更新使用旧速度。若先更新速度再用新速度加上同一个二次项，就会多走一段。
+偏航用同样的关系，把 $a$ 换成 $\tau/I_z$。
+
+有线性阻尼时，每个分量都是 $\dot v=u-\lambda v$，其中
+$u=F/m,\lambda=c_v/m$。步内输入保持不变称为\textbf{零阶保持}。
+积分这个一阶方程可以得到
+\begin{align}
+A&=e^{-\lambda h},&
+B&=\frac{1-e^{-\lambda h}}{\lambda},&
+C&=\frac{h-B}{\lambda},\\
+v_{k+1}&=A v_k+B u,&
+p_{k+1}&=p_k+Bv_k+Cu.
+\end{align}
+在 $\lambda=0$ 时取连续极限：$A=1,B=h,C=h^2/2$。
+实现对很小的 $\lambda h$ 用泰勒展开，避免两个相近浮点数相减损失精度。
+偏航使用 $\lambda=c_\omega/I_z,u=\tau/I_z$，复用相同的积分系数。
+
+\par\noindent\begin{minipage}{\linewidth}
+\lstinputlisting[language=C++,linerange={inertia_begin-inertia_end},
+  includerangemarker=false]{../ros2_ws/src/motion2d/src/sim/inertial_model.cpp}
+\end{minipage}\par
+先限幅，再积分。步末加速度由施加的力和步末速度重新计算，后续 IMU 会使用这个运动真值。
+它不是对有噪声的位置做差分。命令在 tick 切换，位置和速度连续，加速度可以跳变。
+
+\clearpage
+\section{惯性、超时和碰撞如何一起工作}
+无阻尼时，零力意味着速度不变；有阻尼、零力时，
+\begin{equation}
+v(t)=v(0)e^{-c_vt/m}.
+\end{equation}
+所以命令超时不能让惯性模型“瞬间刹住”。超时只切换为零输入，同时报告
+\code{command_timeout}。后续控制器要用反向力制动，并考虑剩余空间；
+如果一直保持反向力，越过零速度后会向反方向加速。
+
+碰撞策略仍然是提前终止试验。对于步内恒定力和非负线性阻尼，
+\begin{equation}
+a(t)=a(0)e^{-c_vt/m},\qquad
+a(0)=\frac{F-c_vv_k}{m}.
+\end{equation}
+因此本步加速度模长不超过 $\|a(0)\|$。继续使用前一节的插值误差界，
+把 $\|a(0)\|h^2/8$ 加到检查半径上，可以保守覆盖整个曲线。
+碰撞或数值异常时都不发布失败候选，而是冻结上一个有效状态。
+这不是接触动力学，也不是任意浮点误差下的形式化无碰撞证明。
+
+\begin{figure}[ht]
+\centering
+\includegraphics[width=.8\linewidth]{figures/ch04_inertial_rviz.png}
+\caption{受力后的实际圆盘、运动轨迹与机体系坐标轴。平移与偏航可以分别驱动。}
+\end{figure}
+
+默认配置启动后，执行真实通信实验：
+\begin{lstlisting}[language=bash,numbers=none]
+/usr/bin/python3 ../scripts/check_ch04.py --model inertial
+\end{lstlisting}
+脚本检查力与力矩限幅、自动惯量、暂停不推进、超时滑行、反向力制动和重置。
+质量改为 2 kg 时，可追加 \code{--mass 2}；其余仍使用默认零阻尼配置。
+
+\clearpage
+\section{实验：质量、步长和制动距离}
+从静止出发，1 N 力持续 1 s，1 kg 的机器人移动 0.50 m、达到 1 m/s；
+2 kg 的机器人移动 0.25 m、达到 0.5 m/s。再从相同初速 $v_0=1$ m/s 出发，
+用大小 $F_b=1$ N 的反向力制动，在无阻尼时
+\begin{equation}
+t_{\rm stop}=\frac{m v_0}{F_b},\qquad
+d_{\rm stop}=\frac{m v_0^2}{2F_b}.
+\end{equation}
+因此质量翻倍，同速制动距离也翻倍。比较制动时必须明确初速是否相同。
+
+\begin{figure}[ht]
+\centering
+\input{figures/ch04_mass_comparison}
+\caption{直接读取 C++ 实验 CSV 的结果，dt=0.005 s、阻尼为零，力大小为 1 N。}
+\end{figure}
+
+核心实验不依赖 ROS 回调时延，直接运行：
+\begin{lstlisting}[language=bash,numbers=none]
+ros2 run motion2d inertia_demo
+\end{lstlisting}
+\begin{center}
+\begin{tabular}{rrrrr}
+\toprule
+m / kg & dt / s & 1 s 位移 / m & 1 s 末速 / (m/s) & 同速制动距离 / m\\
+\midrule
+1 & 0.020 & 0.50 & 1.00 & 0.50\\
+1 & 0.005 & 0.50 & 1.00 & 0.50\\
+2 & 0.020 & 0.25 & 0.50 & 1.00\\
+2 & 0.005 & 0.25 & 0.50 & 1.00\\
+\bottomrule
+\end{tabular}
+\end{center}
+这里改变 dt 仍得到相同解析结果，因为力恒定、切换时刻恰好位于步边界，
+并使用零阶保持的解析离散。这不代表 dt 永远无关：输入刷新、事件检测、未来控制闭环都会受影响；
+曲线碰撞余量也随 dt 的平方变化。
+
+\textbf{代码练习 ch04-3：}补完 \path{exercises/ch04/starter/force_step.hpp}。
+先做无阻尼恒力一步更新，输入已经限幅；平移和偏航都要正确。
+独立的 check\_force.cpp 覆盖非零初速度、不同质量与转动惯量，运行命令见习题 README。
+
+\textbf{拓展实验：}把 linear\_drag 改为 0.5 kg/s，从有速度的状态撤去力，
+画出速度随时间的衰减，与 $v_0e^{-c_vt/m}$ 比较。不要用瞬时速度模式代替这个试验。
 \clearpage
 \section{接口、练习与验收}
 本章默认 dt=0.005 s。位姿输入接受 odom/map；map 可用是因为本章二者重合。

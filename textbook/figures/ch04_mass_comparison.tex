@@ -1,0 +1,19 @@
+\begin{tikzpicture}[font=\scriptsize]
+\begin{groupplot}[
+  group style={group size=3 by 1,horizontal sep=9mm},
+  width=.29\linewidth,height=45mm,
+  ybar,/pgf/bar width=11pt,xtick={1,2},xlabel={mass (kg)},ymin=0,
+  xmin=.5,xmax=2.5,enlarge x limits=false,axis lines=left,ymajorgrids=true,
+  grid style={linecolor},tick align=outside,
+  restrict expr to domain={\thisrow{dt_s}}{0.0049:0.0051},
+  filter discard warning=false,unbounded coords=discard,
+  nodes near coords,nodes near coords style={font=\tiny},
+]
+\nextgroupplot[title={After 1 s},ylabel={position (m)},ymax=.65]
+\addplot[fill=tealblue,draw=tealblue] table[x=mass_kg,y=x_after_1s_m,col sep=comma]{data/ch04_inertia.csv};
+\nextgroupplot[title={After 1 s},ylabel={speed (m/s)},ymax=1.3]
+\addplot[fill=tealblue,draw=tealblue] table[x=mass_kg,y=v_after_1s_mps,col sep=comma]{data/ch04_inertia.csv};
+\nextgroupplot[title={Brake from 1 m/s},ylabel={distance (m)},ymax=1.3]
+\addplot[fill=navy,draw=navy] table[x=mass_kg,y=brake_distance_m,col sep=comma]{data/ch04_inertia.csv};
+\end{groupplot}
+\end{tikzpicture}

@@ -5,7 +5,7 @@ import math
 import time
 import rclpy
 from rclpy.qos import DurabilityPolicy, QoSProfile
-from geometry_msgs.msg import PoseStamped, TwistStamped
+from geometry_msgs.msg import PoseStamped, TwistStamped, WrenchStamped, AccelStamped
 from std_msgs.msg import String
 from std_srvs.srv import SetBool, Trigger
 
@@ -17,6 +17,7 @@ class Probe:
         self.pose = None
         self.velocity = None
         self.status = None
+        self.acceleration = None
         qos = QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL)
         self.node.create_subscription(PoseStamped, "/sim/pose",
                                       lambda m: setattr(self, "pose", m), qos)
@@ -24,14 +25,18 @@ class Probe:
                                       lambda m: setattr(self, "velocity", m), qos)
         self.node.create_subscription(String, "/sim/status",
                                       lambda m: setattr(self, "status", m.data), qos)
+        self.node.create_subscription(AccelStamped, "/sim/acceleration",
+                                      lambda m: setattr(self, "acceleration", m), qos)
         self.pose_pub = self.node.create_publisher(PoseStamped, "/command/pose", 1)
         self.velocity_pub = self.node.create_publisher(TwistStamped, "/command/velocity", 1)
+        self.wrench_pub = self.node.create_publisher(WrenchStamped, "/command/wrench", 1)
         self.pause = self.node.create_client(SetBool, "/sim/pause")
         self.step = self.node.create_client(Trigger, "/sim/step")
         self.reset = self.node.create_client(Trigger, "/sim/reset")
         for client in (self.pause, self.step, self.reset):
             assert client.wait_for_service(timeout_sec=5), "Start ch04.launch.py first"
-        active_pub = self.pose_pub if model == "ideal" else self.velocity_pub
+        active_pub = {"ideal": self.pose_pub, "velocity": self.velocity_pub,
+                      "inertial": self.wrench_pub}[model]
         self.wait(lambda: self.pose is not None and active_pub.get_subscription_count() == 1)
 
     def wait(self, predicate, timeout=5):
@@ -71,6 +76,14 @@ class Probe:
         self.velocity_pub.publish(message)
         self.spin()
 
+    def command_wrench(self, fx, fy, torque=0.0, frame="odom"):
+        message = WrenchStamped()
+        message.header.frame_id = frame
+        message.wrench.force.x, message.wrench.force.y = float(fx), float(fy)
+        message.wrench.torque.z = float(torque)
+        self.wrench_pub.publish(message)
+        self.spin()
+
 
 def check_ideal(probe):
     assert probe.call(probe.reset, Trigger.Request()).success
@@ -101,12 +114,17 @@ def check_ideal(probe):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--model", choices=("ideal", "velocity"), default="ideal")
+    parser.add_argument("--model", choices=("ideal", "velocity", "inertial"), default="ideal")
+    parser.add_argument("--mass", type=float, default=1.0,
+                        help="Expected inertial mass; assumes radius=.2 and automatic inertia")
     args = parser.parse_args()
     rclpy.init()
     probe = Probe(args.model)
     try:
-        (check_ideal if args.model == "ideal" else check_velocity)(probe)
+        if args.model == "inertial":
+            check_inertial(probe, args.mass)
+        else:
+            (check_ideal if args.model == "ideal" else check_velocity)(probe)
     finally:
         probe.node.destroy_node()
         rclpy.shutdown()
@@ -140,6 +158,42 @@ def check_velocity(p):
     assert p.call(p.step, Trigger.Request()).success
     assert p.pose.pose.position.x == -8.0
     print("PASS velocity: input isolation, pause, norm/yaw limits, body frame, timeout and reset")
+
+
+def check_inertial(p, mass):
+    assert p.call(p.reset, Trigger.Request()).success
+    p.wait(lambda: p.stamp() == 0.0)
+    assert p.pose_pub.get_subscription_count() == p.velocity_pub.get_subscription_count() == 0
+    p.command_wrench(1, 0, frame="base_link")
+    assert p.call(p.step, Trigger.Request()).success
+    assert p.pose.pose.position.x == -8.0
+    p.call(p.reset, Trigger.Request())
+    p.command_wrench(99, 0, 99)
+    assert p.pose.pose.position.x == -8.0, "Paused force must not advance motion"
+    for _ in range(10):
+        assert p.call(p.step, Trigger.Request()).success
+    assert math.isclose(p.pose.pose.position.x, -8 + .0025 / mass, abs_tol=1e-10)
+    assert math.isclose(p.velocity.twist.linear.x, .1 / mass, abs_tol=1e-10)
+    assert math.isclose(p.velocity.twist.angular.z, .5 / mass, abs_tol=1e-10)
+    p.call(p.reset, Trigger.Request())
+    p.command_wrench(1, 0)
+    for _ in range(100):
+        assert p.call(p.step, Trigger.Request()).success
+    for _ in range(5):  # Input expires; zero drag means coasting, not instant stopping.
+        assert p.call(p.step, Trigger.Request()).success
+    p.wait(lambda: p.status == "command_timeout")
+    assert math.isclose(p.velocity.twist.linear.x, .5 / mass, abs_tol=1e-10)
+    assert math.isclose(p.pose.pose.position.x, -8 + .1375 / mass, abs_tol=1e-10)
+    assert p.acceleration.accel.linear.x == 0.0
+    p.command_wrench(-1, 0)
+    for _ in range(100):
+        assert p.call(p.step, Trigger.Request()).success
+    assert abs(p.velocity.twist.linear.x) < 1e-10
+    assert math.isclose(p.pose.pose.position.x, -8 + .2625 / mass, abs_tol=1e-10)
+    p.call(p.reset, Trigger.Request())
+    assert p.call(p.step, Trigger.Request()).success
+    assert p.pose.pose.position.x == -8.0 and p.velocity.twist.linear.x == 0.0
+    print(f"PASS inertial mass={mass}: input isolation, limits, torque, coast, braking and reset")
 
 
 if __name__ == "__main__":

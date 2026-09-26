@@ -33,6 +33,12 @@ Visualization Manager:
         Durability Policy: Transient Local
         History Policy: Keep Last
         Depth: 1
+    - Class: rviz_default_plugins/Axes
+      Name: Body orientation
+      Enabled: true
+      Reference Frame: base_link
+      Length: 0.6
+      Radius: 0.025
   Tools:
     - Class: rviz_default_plugins/Interact
     - Class: rviz_default_plugins/MoveCamera

@@ -12,6 +12,7 @@
 #include <geometry_msgs/msg/pose_stamped.hpp>
 #include <geometry_msgs/msg/transform_stamped.hpp>
 #include <geometry_msgs/msg/twist_stamped.hpp>
+#include <geometry_msgs/msg/wrench_stamped.hpp>
 #include <rosgraph_msgs/msg/clock.hpp>
 #include <std_msgs/msg/string.hpp>
 #include <std_srvs/srv/set_bool.hpp>
@@ -48,10 +49,11 @@ public:
     if (!std::isfinite(initial_.yaw) || !std::isfinite(command_timeout_) ||
       !std::isfinite(speed_max_) || !std::isfinite(yaw_rate_max_) ||
       command_timeout_ <= 0.0 || speed_max_ <= 0.0 || yaw_rate_max_ <= 0.0 ||
-      (model_ != "ideal" && model_ != "velocity"))
+      (model_ != "ideal" && model_ != "velocity" && model_ != "inertial"))
     {
-      throw std::invalid_argument("Expected ideal/velocity model and finite positive limits/timeout");
+      throw std::invalid_argument("Expected ideal/velocity/inertial model and positive limits/timeout");
     }
+    if (model_ == "inertial") {readInertia();}
     state_ = idealPose(initial_);
     clock_.setPaused(declare_parameter("start_paused", false));
     const auto retained = rclcpp::QoS(1).reliable().transient_local();
@@ -65,10 +67,14 @@ public:
       pose_sub_ = create_subscription<geometry_msgs::msg::PoseStamped>(
         "/command/pose", rclcpp::QoS(1),
         [this](const geometry_msgs::msg::PoseStamped & message) {receivePose(message);});
-    } else {
+    } else if (model_ == "velocity") {
       velocity_sub_ = create_subscription<geometry_msgs::msg::TwistStamped>(
         "/command/velocity", rclcpp::QoS(1),
         [this](const geometry_msgs::msg::TwistStamped & message) {receiveVelocity(message);});
+    } else {
+      wrench_sub_ = create_subscription<geometry_msgs::msg::WrenchStamped>(
+        "/command/wrench", rclcpp::QoS(1),
+        [this](const geometry_msgs::msg::WrenchStamped & message) {receiveWrench(message);});
     }
     createServices();
     publishStaticFrames();
@@ -87,6 +93,22 @@ public:
   }
 
 private:
+  void readInertia()
+  {
+    inertia_.mass = declare_parameter("mass", 1.0);
+    inertia_.linear_drag = declare_parameter("linear_drag", 0.0);
+    inertia_.angular_drag = declare_parameter("angular_drag", 0.0);
+    inertia_.inertia_z = declare_parameter("inertia_z", -1.0);
+    inertia_.force_max = declare_parameter("force_max", 2.0);
+    inertia_.torque_max = declare_parameter("torque_max", 0.2);
+    if (inertia_.inertia_z == -1.0) {
+      inertia_.inertia_z = 0.5 * inertia_.mass * radius_ * radius_;
+    }
+    validateInertialParameters(inertia_);
+    RCLCPP_INFO(get_logger(), "mass=%.3f kg, inertia_z=%.5f kg m^2; force inputs are in odom",
+      inertia_.mass, inertia_.inertia_z);
+  }
+
   std::chrono::nanoseconds readStep()
   {
     const double dt = declare_parameter("dt", 0.005);
@@ -146,6 +168,21 @@ private:
     setStatus(clock_.paused() ? "paused" : "running");
   }
 
+  void receiveWrench(const geometry_msgs::msg::WrenchStamped & message)
+  {
+    const auto & f = message.wrench.force;
+    const auto & t = message.wrench.torque;
+    if (blocked_ || message.header.frame_id != "odom" || !freshHeader(message.header) ||
+      !std::isfinite(f.x) || !std::isfinite(f.y) || !std::isfinite(t.z) ||
+      f.z != 0.0 || t.x != 0.0 || t.y != 0.0)
+    {
+      RCLCPP_WARN(get_logger(), "Wrench rejected: expected finite planar force/torque in odom");
+      return;
+    }
+    wrench_command_ = {{f.x, f.y}, t.z};
+    acceptHeldCommand(message.header);
+  }
+
   // tick_begin
   bool advanceTick(bool single_step)
   {
@@ -162,7 +199,23 @@ private:
       next = stepVelocity(state_, command, dt());
       padding = velocitySweepPadding(command, dt());
     }
+    if (model_ == "inertial") {
+      const auto command = have_command_ ? wrench_command_ : Wrench2D{};
+      next = stepInertial(state_, command, inertia_, dt());
+      padding = inertialSweepPadding(state_, command, inertia_, dt());
+    }
     pending_pose_.reset();
+    if (!next.pose.position.allFinite() || !next.velocity.allFinite() ||
+      !next.acceleration.allFinite() || !std::isfinite(next.pose.yaw) ||
+      !std::isfinite(next.yaw_rate) || !std::isfinite(next.yaw_acceleration) ||
+      !std::isfinite(padding))
+    {
+      blocked_ = true;
+      clock_.setPaused(true);
+      setStatus("invalid_state");
+      RCLCPP_ERROR(get_logger(), "Non-finite candidate; check physical scales and reset");
+      return false;
+    }
     if (!sweptDiskIsFree(world_, state_.pose.position, next.pose.position, radius_ + padding)) {
       blocked_ = true;
       clock_.setPaused(true);
@@ -187,7 +240,7 @@ private:
           clock_.setPaused(request->data);
           if (!blocked_) {setStatus(request->data ? "paused" : "running");}
         }
-        response->message = blocked_ ? "collision_predicted; reset required" : status_;
+        response->message = blocked_ ? status_ + "; reset required" : status_;
       });
     step_service_ = create_service<std_srvs::srv::Trigger>("/sim/step",
       [this](const std_srvs::srv::Trigger::Request::SharedPtr,
@@ -205,6 +258,7 @@ private:
         pending_pose_.reset();
         have_command_ = false;
         velocity_command_ = VelocityCommand{};
+        wrench_command_ = Wrench2D{};
         blocked_ = false;
         trail_.clear();
         rememberPosition();
@@ -298,7 +352,7 @@ private:
     disk.type = Marker::CYLINDER;
     disk.pose.orientation.w = 1.0;
     disk.pose.position.z = 0.06;
-    disk.scale.x = disk.scale.y = std::max(2.0 * radius_, 0.04);  // Visible dot for radius=0.
+    disk.scale.x = disk.scale.y = radius_ == 0.0 ? 0.04 : 2.0 * radius_;  // Point display only.
     disk.scale.z = 0.08;
     disk.color.r = blocked_ ? 0.9F : 0.05F;
     disk.color.g = blocked_ ? 0.15F : 0.6F;
@@ -323,6 +377,8 @@ private:
   State2D state_;
   std::optional<Pose2D> pending_pose_;
   VelocityCommand velocity_command_;
+  Wrench2D wrench_command_;
+  InertialParameters inertia_;
   double radius_, command_timeout_, speed_max_, yaw_rate_max_;
   std::int64_t command_deadline_ = 0;
   bool blocked_ = false, have_command_ = false;
@@ -338,6 +394,7 @@ private:
   rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr marker_pub_;
   rclcpp::Subscription<geometry_msgs::msg::PoseStamped>::SharedPtr pose_sub_;
   rclcpp::Subscription<geometry_msgs::msg::TwistStamped>::SharedPtr velocity_sub_;
+  rclcpp::Subscription<geometry_msgs::msg::WrenchStamped>::SharedPtr wrench_sub_;
   rclcpp::Service<std_srvs::srv::SetBool>::SharedPtr pause_service_;
   rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr step_service_, reset_service_;
   rclcpp::TimerBase::SharedPtr timer_, static_timer_, marker_timer_;

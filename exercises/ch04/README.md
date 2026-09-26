@@ -24,3 +24,16 @@ g++ -std=c++17 -I/usr/include/eigen3 -Iros2_ws/src/motion2d/include \
   ros2_ws/src/motion2d/src/geometry/se2.cpp -o /tmp/ch04_velocity
 /tmp/ch04_velocity
 ~~~
+
+6. 推导题：同一个 1 N 力分别作用于 1 kg 和 2 kg 机器人 1 s，初始静止，求位移和速度。再从相同 1 m/s 初速出发，用 -1 N 制动，比较制动时间和距离。
+7. 代码题 ch04-3：实现无阻尼恒力/恒力矩的一步积分；输入已经限幅。更新位置必须使用旧速度。
+8. 实验题：运行 inertia_demo，比对 dt=0.02 与 0.005 s；解释为何恒定输入对齐步边界时结果一致。再改变阻尼，预测无输入衰减趋势；在 ROS 模式中停止发力，验证它不会立即停下。
+
+~~~bash
+g++ -std=c++17 -I/usr/include/eigen3 -Iros2_ws/src/motion2d/include \
+  -Iexercises/ch04/starter exercises/ch04/check_force.cpp \
+  ros2_ws/src/motion2d/src/geometry/se2.cpp -o /tmp/ch04_force
+/tmp/ch04_force
+~~~
+
+参考解仍用 solutions 替换 starter。评分要求包括平移与偏航，不能只让位置通过。自动惯量取 m*r²/2；r=0 时请显式给正惯量，不能拿零做除数。

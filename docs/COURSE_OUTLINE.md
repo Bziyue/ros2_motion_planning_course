@@ -2,7 +2,7 @@
 
 版本：v0.1，2026-09-26。**已批准，逐功能实施。** 本文件保留完整计划；实际完成状态见 [PROGRESS.md](PROGRESS.md)，原始 PDF 审阅稿保留不改。
 
-本文件是课程范围与章节映射的主要依据。`textbook/outline.tex` 和 `output/pdf/course_outline.pdf` 保留原始审阅摘要。第 01-03 章已实现，代码映射以下文和各章 README 为准；其他章节的源文件、launch、习题和验收实验仍是计划。
+本文件是课程范围与章节映射的主要依据。`textbook/outline.tex` 和 `output/pdf/course_outline.pdf` 保留原始审阅摘要。第 01-04 章已实现，代码映射以下文和各章 README 为准；其他章节的源文件、launch、习题和验收实验仍是计划。
 
 ## 1. 课程目标与学习路线
 
@@ -79,7 +79,7 @@
 
 - **目标**：区分几何外形、运动学和动力学；先手动移动，再观察加速与制动。
 - **内容/公式**：位置、速度、yaw、角速度；理想到点与连续理想轨迹；速度积分；`m v_dot = F - c_v v`；时间离散；力/力矩限幅；碰撞事件与试验停止。
-- **计划代码**：`sim/robot_model.cpp`；`sim/ideal_model.cpp`；`sim/inertial_model.cpp`；`nodes/simulator_node.cpp`。
+- **已实现代码**：声明 `include/motion2d/sim/robot_model.hpp`；`sim/ideal_model.cpp`、`sim/velocity_model.cpp`、`sim/inertial_model.cpp`、`sim/swept_collision.cpp`；`nodes/simulator_node.cpp`。连续参考轨迹执行在第 14 章接入。
 - **练习**：预测相同力下两种质量的加速度；补完一步积分；比较时间步长与制动距离。
 - **验收**：零力与恒力实验符合解析结果；改变半径影响碰撞；理想位置跳转检查扫过的圆盘，不允许跨过障碍。真正 reset/瞬移明确开始新试验并清理缓存，不用于 IMU 实验。
 
@@ -245,7 +245,7 @@ C++ 使用普通值类型、Eigen 和薄节点，关键接口及公式采用 Dox
 | --- | --- | --- | --- |
 | S0 | 初始化 | 仓库、协作约定、大纲、接口草案、PDF 审阅稿 | 已批准 |
 | S1 | 01-03 | 主机教程、最小 ROS 2 场景、随机障碍环境 | 已完成 |
-| S2 | 04-07 | 模型、CPU 激光、IMU、真值里程计与建图 | 第 04 章实施中 |
+| S2 | 04-07 | 模型、CPU 激光、IMU、真值里程计与建图 | 第 04 章完成 |
 | S3 | 08-10 | 激光/IMU 里程计、回环 SLAM | 未实施 |
 | S4 | 11-14 | A*、ESDF、走廊、五次轨迹、理想执行 | 未实施 |
 | S5 | 15-16 | MINCO 与 Spline2D、数值对照和约束验证 | 未实施 |

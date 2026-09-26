@@ -2,7 +2,7 @@
 
 从二维世界、圆盘机器人和模拟传感器开始，逐步学习定位建图、路径与轨迹规划、跟踪控制。教材、代码和练习按章节对应。
 
-**当前状态：第 01-03 章已完成，第 04 章逐功能实施中。** 已有理想到点、整段扫掠碰撞和速度控制。大纲提交为 `5c0c642`；每完成一个可运行、已验证的功能就单独提交，教材和练习同步更新。传感器、SLAM 和规划尚未实现。
+**当前状态：第 01-03 章已完成，第 04 章实施中。** 已有随机世界、理想到点、速度控制与受力惯性模型，连续理想参考随后补齐。大纲提交为 `5c0c642`；每完成一个可运行、已验证的功能就单独提交，教材和练习同步更新。传感器、SLAM 和规划尚未实现。
 
 [教材 PDF](output/pdf/course.pdf) · [实施进度](docs/PROGRESS.md) · [主机验收记录](docs/VALIDATION.md)
 
@@ -18,10 +18,12 @@ source /opt/ros/lyrical/setup.bash
 cd /home/zdp/ForCodex/ros2_motion_planning_course/ros2_ws
 colcon build --symlink-install --cmake-args -DCMAKE_BUILD_TYPE=RelWithDebInfo -DPython3_EXECUTABLE=/usr/bin/python3
 source install/setup.bash
-ros2 launch motion2d_bringup ch03.launch.py
+ros2 launch motion2d_bringup ch04.launch.py model:=inertial
 ~~~
 
 上面使用 bash；zsh 对应使用 setup.zsh。启动时加 `rviz:=false` 可仅运行节点。同一时间只启动一个章节，避免多个时钟与 TF 发布者。初次学习请从第 01 章开始。
+
+第 04 章支持 `model:=ideal`、`velocity`、`inertial`，分别接收位姿、速度、力/力矩。完整输入命令、参数与实验见 [第 04 章说明](chapters/ch04/README.md)。惯性模式初始静止，需要发送力；停发命令后仍可能滑行。
 
 ## 审阅入口
 
@@ -37,7 +39,7 @@ ros2 launch motion2d_bringup ch03.launch.py
 
 仿真与传感器 → 真值里程计和激光建图 → 激光/IMU 定位 → 闭环 SLAM → A* → ESDF 与安全走廊 → 二维 MINCO / SplineTrajectory → PD / MPC → 在线重规划。CUDA 激光仿真为选学章节。
 
-采用已批准的全向圆盘与 C++17 算法主线，当前已完成第 01-03 章的小型可视化环境。大纲 PDF 保留为原始审阅记录，实际教材使用独立 PDF。
+采用已批准的全向圆盘与 C++17 算法主线，当前已完成第 01-04 章的环境与机器人模型。大纲 PDF 保留为原始审阅记录，实际教材使用独立 PDF。
 
 ## 当前目录
 
