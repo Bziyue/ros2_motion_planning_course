@@ -2,6 +2,8 @@
 
 状态：v0.1，随批准大纲进入实施。这里规定课程将使用的语义，实际已实现范围见 [PROGRESS.md](PROGRESS.md)。优先标准消息；实际需要第二种实现或跨节点传输时才增加抽象。
 
+第 04 章落地约定：simulator 独占时钟，发布 /sim/pose、/sim/velocity、/sim/acceleration 真值调试消息。此章 map 与 odom 重合，真值 TF 暂由 simulator 发布；第 07 章才拆出里程计选源适配器。理想到点在下一 tick 执行，失败扫掠冻结上一个有效状态和时间，/sim/status=collision_predicted，必须 reset 开新试验。不把这个调试入口供给后续 SLAM。
+
 ## 1. 模块与数据边界
 
 ```text

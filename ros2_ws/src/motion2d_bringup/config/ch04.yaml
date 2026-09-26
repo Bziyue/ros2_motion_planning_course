@@ -1,0 +1,26 @@
+# Shared world values: display and collision must describe the same geometry.
+/**:
+  ros__parameters:
+    use_sim_time: true
+    x: -8.0
+    y: -8.0
+    radius: 0.20
+    seed: 42
+    width: 20.0
+    height: 20.0
+    circle_count: 8
+    polygon_count: 8
+    size_min: 0.35
+    size_max: 1.2
+    polygon_samples: 8
+    goal_x: 8.0
+    goal_y: 8.0
+    margin: 0.05
+    require_connected: true
+    check_resolution: 0.25
+simulator:
+  ros__parameters:
+    dt: 0.005
+    yaw: 0.0
+    start_paused: false
+    command_timeout: 0.5  # seconds of simulated time, not wall time

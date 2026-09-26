@@ -41,6 +41,18 @@ double clearance(const World2D & world, const Eigen::Vector2d & center);
 bool isFree(const World2D & world, const Eigen::Vector2d & center, double radius);
 
 /**
+ * @brief Check the whole straight-line sweep of a disk, including contact.
+ * @param from Initial centre (m), in the world's frame.
+ * @param to Final centre (m), in the same frame.
+ * @param radius Physical radius plus any explicit conservative padding (m).
+ * @pre Valid world, finite coordinates and radius >= 0.
+ * @details Tests the capsule against circles and all polygon edges, not samples.
+ * Rectangle containment also checks both endpoints. See chapter 04.
+ */
+bool sweptDiskIsFree(const World2D & world, const Eigen::Vector2d & from,
+  const Eigen::Vector2d & to, double radius);
+
+/**
  * @brief Conservative 4-connected flood-fill check, not a shortest-path planner.
  * @param radius Disk radius including the desired extra safety margin (m).
  * @param resolution Maximum grid cell edge length (m), positive.

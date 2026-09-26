@@ -8,11 +8,13 @@ find_package(Eigen3 REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(rosgraph_msgs REQUIRED)
 find_package(std_srvs REQUIRED)
+find_package(std_msgs REQUIRED)
 find_package(tf2_ros REQUIRED)
 
 add_library(motion2d_core
   src/geometry/se2.cpp src/geometry/obstacles.cpp
-  src/sim/sim_clock.cpp src/sim/world.cpp src/sim/world_generator.cpp)
+  src/sim/sim_clock.cpp src/sim/world.cpp src/sim/world_generator.cpp
+  src/sim/ideal_model.cpp src/sim/swept_collision.cpp)
 target_compile_features(motion2d_core PUBLIC cxx_std_17)
 target_compile_options(motion2d_core PRIVATE -Wall -Wextra -Wpedantic)
 target_include_directories(motion2d_core PUBLIC
@@ -55,6 +57,17 @@ target_link_libraries(world_scene_node PRIVATE motion2d_core rclcpp::rclcpp
   visualization_msgs::visualization_msgs__rosidl_typesupport_cpp)
 install(TARGETS world_scene_node DESTINATION lib/motion2d)
 
+add_executable(simulator_node src/nodes/simulator_node.cpp)
+target_compile_features(simulator_node PRIVATE cxx_std_20)
+target_compile_options(simulator_node PRIVATE -Wall -Wextra -Wpedantic)
+target_link_libraries(simulator_node PRIVATE motion2d_core rclcpp::rclcpp tf2_ros::tf2_ros
+  visualization_msgs::visualization_msgs__rosidl_typesupport_cpp
+  geometry_msgs::geometry_msgs__rosidl_typesupport_cpp
+  rosgraph_msgs::rosgraph_msgs__rosidl_typesupport_cpp
+  std_msgs::std_msgs__rosidl_typesupport_cpp
+  std_srvs::std_srvs__rosidl_typesupport_cpp)
+install(TARGETS simulator_node DESTINATION lib/motion2d)
+
 if(BUILD_TESTING)
   find_package(ament_cmake_gtest REQUIRED)
   ament_add_gtest(test_se2 test/test_se2.cpp)
@@ -63,6 +76,8 @@ if(BUILD_TESTING)
   target_link_libraries(test_sim_clock motion2d_core)
   ament_add_gtest(test_world test/test_world.cpp)
   target_link_libraries(test_world motion2d_core)
+  ament_add_gtest(test_robot_model test/test_robot_model.cpp)
+  target_link_libraries(test_robot_model motion2d_core)
 endif()
 
 ament_package()

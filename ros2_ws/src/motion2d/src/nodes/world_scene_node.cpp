@@ -1,5 +1,4 @@
 #include <chrono>
-#include <limits>
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -7,7 +6,7 @@
 #include <geometry_msgs/msg/point.hpp>
 #include <rclcpp/rclcpp.hpp>
 #include <visualization_msgs/msg/marker_array.hpp>
-#include "motion2d/sim/world.hpp"
+#include "motion2d/ros/world_parameters.hpp"
 
 namespace motion2d
 {
@@ -45,27 +44,7 @@ class WorldScene : public rclcpp::Node
 public:
   WorldScene() : Node("world_scene")
   {
-    WorldConfig c;
-    const auto seed = declare_parameter<std::int64_t>("seed", 42);
-    if (seed < 0 || seed > std::numeric_limits<std::uint32_t>::max()) {
-      throw std::invalid_argument("seed must fit an unsigned 32-bit integer");
-    }
-    c.seed = static_cast<std::uint32_t>(seed);
-    c.width = declare_parameter("width", 20.0);
-    c.height = declare_parameter("height", 20.0);
-    c.circle_count = declare_parameter("circle_count", 8);
-    c.polygon_count = declare_parameter("polygon_count", 8);
-    c.size_min = declare_parameter("size_min", 0.35);
-    c.size_max = declare_parameter("size_max", 1.2);
-    c.polygon_samples = declare_parameter("polygon_samples", 8);
-    c.start.x() = declare_parameter("x", -8.0);
-    c.start.y() = declare_parameter("y", -8.0);
-    c.goal.x() = declare_parameter("goal_x", 8.0);
-    c.goal.y() = declare_parameter("goal_y", 8.0);
-    c.robot_radius = declare_parameter("radius", 0.2);
-    c.margin = declare_parameter("margin", 0.05);
-    c.require_connected = declare_parameter("require_connected", true);
-    c.check_resolution = declare_parameter("check_resolution", 0.25);
+    const WorldConfig c = readWorldConfig(*this);
     const World2D world = generateWorld(c);
     markers_ = drawWorld(world);
     publisher_ = create_publisher<visualization_msgs::msg::MarkerArray>(
