@@ -30,6 +30,8 @@ def generate_launch_description():
              parameters=[config], output="screen"),
         Node(package="motion2d", executable="truth_odometry_node", name="truth_odometry",
              parameters=[{"use_sim_time": True}], output="screen"),
+        Node(package="motion2d", executable="mapping_node", name="mapping",
+             parameters=[config], output="screen"),
     ]
     return LaunchDescription([
         DeclareLaunchArgument("rviz", default_value="true"),

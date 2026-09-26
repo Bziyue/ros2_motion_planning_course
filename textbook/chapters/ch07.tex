@@ -95,3 +95,75 @@ g++ -std=c++17 -I/usr/include/eigen3 -Iexercises/ch07/starter \
 \end{lstlisting}
 \textbf{常见错误：}世界速度直接写入 body twist；把起点重定位为零却没同步地图；
 同时打开模拟器与适配器的运动 TF；把本章真值基线称为 SLAM。
+
+\clearpage
+\section{从距离到二维点云}
+单束距离 $r_i$ 与方向 $\alpha_i$ 给出雷达系点：
+\begin{equation}
+ p_i^L=\begin{bmatrix}r_i\cos\alpha_i\\r_i\sin\alpha_i\end{bmatrix},
+ \qquad p_i^O=R(\psi(t_s))p_i^L+p(t_s),\quad
+ \alpha_i=\alpha_{\min}+i\Delta\alpha.
+\end{equation}
+$t_s$ 是整帧 snapshot 扫描的采集时间。圆心外参为单位变换，因此 base\_link 与 laser
+共用位姿；偏置安装时应改用 $T_{OL}=T_{OB}T_{BL}$，不能只改 frame 字符串。
+例如 $r=2$ m、$\alpha=0$、$p=(3,4)$ m、$\psi=\pi/2$，变换结果为 $(3,6)$ m。
+
+\lstinputlisting[language=C++,linerange={scan_projection_begin-scan_projection_end},
+ includerangemarker=false]{../ros2_ws/src/motion2d/src/mapping/scan_projection.cpp}
+
+只有有限且量程内的回波才进入点云。$+\infty$ 表示“在量程内没有回波”，NaN 表示无效；
+二者都没有表面端点。将无穷替换为最大量程并画成点，会凭空造出一圈障碍物。
+
+\begin{center}
+\begin{tabular}{lll}
+\toprule
+输出 & 坐标系 & 内容\\\midrule
+\code{/cloud/scan} & laser & 当前帧有效回波\\
+\code{/cloud/registered} & odom & 用采样位姿变换的同一批点\\
+\bottomrule
+\end{tabular}
+\end{center}
+两者均为 \code{PointCloud2}，保留扫描时间。每点 x/y/z 是三个 float32，
+z 恒为 0；height=1、point\_step=12 字节，is\_dense=true 表示输出不含无效点。
+这里的 registered 仅表示已按位姿转入统一坐标系，\textbf{尚未进行扫描匹配}。
+本章不累积 \code{/map/cloud}；后续全局位姿修正需要保留关键帧才能重建点云。
+
+\textbf{练习 ch07-2：}完成 \path{starter/scan_point.hpp}，用
+\path{check_projection.cpp} 核对手算坐标。进一步说明：
+“没有点的地方”为什么不能直接标为空闲？点云只记录命中表面，射线才携带沿途自由信息。
+
+\clearpage
+\section{时间对齐比点云画出来更重要}
+同一条话题内部按采样顺序发布，不代表不同话题的回调先后相同。
+mapping 使用两个小缓存，按\textbf{整数纳秒完全相等}匹配扫描与位姿。
+模拟器已在每个扫描时刻输出真值状态，所以本章无需插值。
+真实传感器若没有这一条件，必须设计插值或同步策略，不能直接沿用此假设。
+
+\lstinputlisting[language=C++,linerange={scan_pose_join_begin-scan_pose_join_end},
+ includerangemarker=false]{../ros2_ws/src/motion2d/src/nodes/mapping_node.cpp}
+
+队列最多保留 1000 个不同时间的位姿、20 帧待处理扫描，缺少匹配时等待；
+扫描队列满后告警并丢弃最旧帧。不能用最近一次位姿伪装匹配成功。
+重复扫描时间不重复处理；暂停心跳只刷新位姿，不产生新点云。
+未来接入更低频的估计里程计时，应输出同一帧扫描的估计位姿，或明确加入插值。
+
+\begin{lstlisting}[language=bash,numbers=none]
+# ch07.launch.py rviz:=false is running
+/usr/bin/python3 ../scripts/check_ch07_cloud.py
+# Separate terminals/domain: mapping node only
+ROS_DOMAIN_ID=47 ros2 run motion2d mapping_node
+ROS_DOMAIN_ID=47 /usr/bin/python3 ../scripts/check_ch07_join.py
+\end{lstlisting}
+后一个脚本先发旧位姿，再发新扫描，确认无输出；补发同时间位姿后才产生点云。
+它也覆盖位姿先到、扫描先到、重复帧和两种重置到达顺序。
+默认场景脚本逐点核对真实 LaserScan、PointCloud2 与里程计，误差容差为
+$3\times10^{-6}$ m，容纳消息 float32 舍入。
+
+\textbf{重置边界：}本章 reset 会回到固定的 t=0 初态并暂停。
+扫描时间回退时清除扫描队列与旧的正时间位姿，里程计回退时清除位姿历史。
+先等待新试验首帧和里程计到齐，再恢复；外部 DDS 旧消息不能被服务远程清空。
+不支持任意乱序回放或跨试验无屏障混流，必要时重启消费者。
+
+RViz 的 \texttt{Registered scan} 显示 \code{/cloud/registered}，橙色点应落在
+可见障碍表面附近。世界几何只是显示对照，可在 Displays 中关闭；
+mapping 的订阅中没有世界列表、真值调试话题或 TF。

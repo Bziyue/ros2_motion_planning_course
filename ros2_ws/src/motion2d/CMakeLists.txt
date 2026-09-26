@@ -18,7 +18,7 @@ add_library(motion2d_core
   src/sim/sim_clock.cpp src/sim/world.cpp src/sim/world_generator.cpp
   src/sim/ideal_model.cpp src/sim/swept_collision.cpp src/sim/velocity_model.cpp
   src/sim/inertial_model.cpp src/sim/reference_model.cpp src/sim/raycast.cpp src/sim/lidar_cpu.cpp
-  src/sim/imu.cpp src/sim/sensor_scheduler.cpp)
+  src/sim/imu.cpp src/sim/sensor_scheduler.cpp src/mapping/scan_projection.cpp)
 target_compile_features(motion2d_core PUBLIC cxx_std_17)
 target_compile_options(motion2d_core PRIVATE -Wall -Wextra -Wpedantic)
 target_include_directories(motion2d_core PUBLIC
@@ -101,6 +101,14 @@ target_link_libraries(truth_odometry_node PRIVATE rclcpp::rclcpp tf2_ros::tf2_ro
   geometry_msgs::geometry_msgs__rosidl_typesupport_cpp)
 install(TARGETS truth_odometry_node DESTINATION lib/motion2d)
 
+add_executable(mapping_node src/nodes/mapping_node.cpp src/ros/mapping_messages.cpp)
+target_compile_features(mapping_node PRIVATE cxx_std_20)
+target_compile_options(mapping_node PRIVATE -Wall -Wextra -Wpedantic)
+target_link_libraries(mapping_node PRIVATE motion2d_core rclcpp::rclcpp
+  sensor_msgs::sensor_msgs__rosidl_typesupport_cpp
+  nav_msgs::nav_msgs__rosidl_typesupport_cpp)
+install(TARGETS mapping_node DESTINATION lib/motion2d)
+
 if(BUILD_TESTING)
   find_package(ament_cmake_gtest REQUIRED)
   ament_add_gtest(test_se2 test/test_se2.cpp)
@@ -122,6 +130,13 @@ if(BUILD_TESTING)
   ament_add_gtest(test_odometry test/test_odometry.cpp src/ros/odometry_messages.cpp)
   target_compile_features(test_odometry PRIVATE cxx_std_20)
   target_link_libraries(test_odometry motion2d_core nav_msgs::nav_msgs__rosidl_typesupport_cpp)
+  ament_add_gtest(test_scan_projection test/test_scan_projection.cpp)
+  target_link_libraries(test_scan_projection motion2d_core)
+  ament_add_gtest(test_mapping_messages test/test_mapping_messages.cpp src/ros/mapping_messages.cpp)
+  target_compile_features(test_mapping_messages PRIVATE cxx_std_20)
+  target_link_libraries(test_mapping_messages motion2d_core
+    sensor_msgs::sensor_msgs__rosidl_typesupport_cpp
+    nav_msgs::nav_msgs__rosidl_typesupport_cpp)
 endif()
 
 ament_package()

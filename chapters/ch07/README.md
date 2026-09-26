@@ -1,10 +1,10 @@
 # 第 07 章：真值里程计、激光点云与观测建图
 
-先修 01-06。当前完成真值里程计与 TF 责任划分；点云、占据栅格和分辨率实验在本章后续独立功能中实现。
+先修 01-06。当前完成真值里程计、TF 责任划分与扫描点云；占据栅格和分辨率实验在本章后续独立功能中实现。
 
 ## 先明确本章已知什么
 
-本章已知机器人真值位姿，用传感器观测建图；它不是 SLAM。建图将只读取 /scan 与统一的 /odometry，不能读取世界几何或 /sim 调试数据。完整几何仅用于独立评估。
+本章已知机器人真值位姿，用传感器观测建图；它不是 SLAM。建图节点只读取 /scan 与统一的 /odometry，不能读取世界几何或 /sim 调试数据。完整几何仅用于独立评估。
 
 | 输出/边 | 发布者 | 含义 |
 | --- | --- | --- |
@@ -42,3 +42,13 @@ ch07.launch.py 强制 simulator.publish_truth_tf=false，适配器独占运动 T
 - [练习 ch07-1](../../exercises/ch07/README.md)：机体速度转换。
 
 暂停时 /odometry 与 TF 有同一时间戳的心跳，观测处理不能把它当成新运动或重复地图证据。reset 从 t=0 开始新试验，下游消费者需要清理时序历史。
+
+## 扫描点云
+
+核心为 mapping/scan_projection.cpp，消息转换为 ros/mapping_messages.cpp，消费者为 nodes/mapping_node.cpp。LaserScan 只保留有限且量程内的回波；两个 PointCloud2 输出分别使用 laser 与 odom，XYZ float32、z=0、12 字节/点，保持原始采样时间。外参固定为圆心单位变换。registered 指位姿变换，尚不是扫描匹配。
+
+从 ros2_ws 运行 `/usr/bin/python3 ../scripts/check_ch07_cloud.py`，检查扫描、里程计和点云逐点一致。另在独立域的两个终端分别运行 `ROS_DOMAIN_ID=47 ros2 run motion2d mapping_node` 与 `ROS_DOMAIN_ID=47 /usr/bin/python3 ../scripts/check_ch07_join.py`，验证两种到达顺序和拒绝陈旧位姿。不要在这个测试域同时启动模拟器。
+
+每个扫描按整数纳秒精确配对；缓存上限 1000 条位姿、20 帧扫描，缺少位姿时等待，扫描溢出告警丢弃。重复时间戳不重复处理。reset 后先保持暂停，等待新 t=0 扫描和里程计，再恢复；任意乱序回放/无屏障的多试验混流不在本章范围内。雷达和里程计时间回退会清理本地历史。
+
+RViz 的 Registered scan 显示当前帧观测点，不累积全局点云。Simulation world 是可关闭的真值视觉对照，不是 mapping 输入。/map/cloud 留给后续关键帧重建，不在本章发布。练习 ch07-2 与投影公式对应。

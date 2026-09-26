@@ -114,6 +114,8 @@ reference 按绝对时刻求解析轨迹，inertial/velocity 在最近接受区�
 
 传感器使用与订阅端匹配的 SensorDataQoS；控制/轨迹采用小队列和明确可靠性；静态/低频地图使用适合晚加入 RViz2 的 transient-local 配置。具体值在第 02 章验证，不复制未经检验的 QoS 模板。
 
+第 07 章 mapping 已接入 /scan 和 /odometry 的整数纳秒精确配对。输出 /cloud/scan（laser）与 /cloud/registered（odom），均为当前帧有限回波，snapshot、圆心单位外参、XYZ float32、z=0。不订阅 TF 或真值调试话题；当前 registered 仅指位姿变换，不含扫描匹配。/map/cloud 留给后续关键帧重建。
+
 ## 7. 话题草案
 
 | 话题 | 消息 | frame / 语义 |

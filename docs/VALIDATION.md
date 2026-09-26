@@ -192,3 +192,12 @@ imu_demo 的五行输出与教材解析值一致：静止和匀速 f_z=9.81；ya
 实际 ch07 reference 场景通过 check_ch07_odometry.py：t=0..0.2 s 的 41 个 tick，原始/选源位姿与速度一致；初始 (-8,-8) 未重定位为零；TF 与各非零采样时刻的位姿一致；/tf 唯一发布者为 truth_odometry，/clock 唯一发布者为 simulator。独立真值 frame 没有进入 TF 树。reset 恢复 t=0 暂停状态。
 
 ch07-1 参考解通过、未完成 starter 按预期失败。教材合订 PDF 为 53 页，新章节正文 47–49 页已编译并渲染检查。这一增量完成里程计输入，不宣称已完成点云或栅格；RViz 的观测地图显示将在后续增量实际验收。
+
+
+## 第 07 章增量：扫描点云与精确时间配对
+
+主机两个包构建通过，累计 72 个 GoogleTest 用例通过（含 11 个包装项共 83 项）。覆盖极坐标方向、包含量程端点、无效/+inf 过滤、SE(2) 变换、空点云、XYZ 字段/字节布局，以及不支持的滚动扫描和非平面位姿。
+
+默认 reference 场景 check_ch07_cloud.py 通过：t=0..1 s 共 11 帧，逐点核对当前雷达系与 odom 系输出，3e-6 m 容差内吻合。暂停不产生新帧；reset 首帧字节一致；通过 ROS 图检查确认 mapping 未订阅 /ground_truth、/sim、/visualization 或 TF。独立 ROS_DOMAIN_ID=47 的 mapping_node 通过 check_ch07_join.py：两种消息到达顺序、陈旧位姿等待、重复帧不重发，以及扫描/位姿分别先到的暂停重置。
+
+ch07-2 参考解通过，starter 按预期失败。合订 PDF 55 页，新增正文 50–51 页编译和渲染检查通过。点云按采样位姿变换，不含 ICP 或累积地图；GUI 地图显示在下一增量验证。

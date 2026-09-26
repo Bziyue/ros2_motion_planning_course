@@ -50,9 +50,24 @@ Visualization Manager:
         Depth: 1
     - Class: rviz_default_plugins/LaserScan
       Name: Measured scan points
-      Enabled: true
+      Enabled: false
       Topic:
         Value: /scan
+        Reliability Policy: Best Effort
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Depth: 5
+      Style: Points
+      Size (Pixels): 4
+      Color Transformer: FlatColor
+      Color: 210; 67; 29
+      Position Transformer: XYZ
+      Decay Time: 0
+    - Class: rviz_default_plugins/PointCloud2
+      Name: Registered scan (observed points)
+      Enabled: true
+      Topic:
+        Value: /cloud/registered
         Reliability Policy: Best Effort
         Durability Policy: Volatile
         History Policy: Keep Last
