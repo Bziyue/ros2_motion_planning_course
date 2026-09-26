@@ -6,13 +6,13 @@
 
 \section{先让一束光碰到障碍}
 雷达安装在圆盘中心，发出一条没有宽度的射线。机器人位置与 yaw 决定射线的起点和方向。
-雷达不检测机器人自身，否则从圆心发出的光总会先碰到自己的外壳。机器人半径仍参与运动碰撞。
+模拟器让射线与环境障碍求交，圆盘外形则交给运动碰撞检查。这样可以把圆心看成雷达的安装点。
 
 射线用起点 o、单位方向 d 和非负距离 t 表示：
 \begin{equation}
 p(t)=o+td,\qquad \|d\|=1,\quad t\geq0.
 \end{equation}
-只有方向已归一化时，t 才直接表示米。测距求的是最近表面，不是障碍中心的距离。
+由于 $\|p(t)-o\|=t\|d\|=t$，单位方向使 t 直接表示米。测距对应最近障碍表面。
 沿同一方向有多个交点时，较近表面会挡住较远表面。
 
 \begin{center}
@@ -36,29 +36,55 @@ ros2 run motion2d raycast_demo
 三个距离应依次为 2、4、2 m。前两个分别是圆和墙的单独求交；最后一个在世界中取最近值。
 代码位于 \path{src/examples/raycast_demo.cpp}，这里的墙和圆都可以手算。
 
-\clearpage
-\section{射线与圆：别忘了第二个根}
-把射线代入圆心 c、半径 R 的圆方程，令 $q=c-o$、$h=q^\top d$：
+\section{射线与圆：从圆方程到两个交点}
+令射线起点到圆心的向量为 $q=c-o$。把射线代入半径 R 的圆方程并展开点积：
+\begin{align}
+\|o+td-c\|^2&=\|td-q\|^2=R^2,\\
+t^2(d^\top d)-2tq^\top d+q^\top q-R^2&=0.
+\end{align}
+单位方向满足 $d^\top d=1$。记沿射线方向的圆心投影为 $h=q^\top d$，配方后得到
 \begin{equation}
-\|o+td-c\|^2=R^2
-\ \Longrightarrow\ t^2-2ht+\|q\|^2-R^2=0.
+(t-h)^2=R^2-(\|q\|^2-h^2).
 \end{equation}
-二维叉积 $a\times b=a_xb_y-a_yb_x$ 是一个标量。
-单位方向下，$|d\times q|$ 是圆心到射线所在直线的距离，因此
+括号中的 $\|q\|^2-h^2$ 是圆心到直线的垂距平方。为了直接计算垂距，取与 d 垂直的单位向量
+$d_\perp=(-d_y,d_x)^\top$。垂直分量为 $d_\perp^\top q=d_xq_y-d_yq_x=d\times q$。
+两个垂直方向的分量满足勾股关系，因此
 \begin{equation}
-D=R^2-(d\times q)^2,\qquad t_\pm=h\pm\sqrt D.
+D=R^2-(d\times q)^2,\qquad t_-=h-\sqrt D,\quad t_+=h+\sqrt D.
 \end{equation}
-$D<0$ 时没有交点；$D=0$ 时相切，也算命中。先检查较小的根 $t_-$ 是否非负，
-否则再检查 $t_+$。两个根都负，说明圆在射线背后。圆内起点的小根为负，大根是出口；
-这有助于测试函数，但课程中的机器人应始终位于自由空间。
+代码采用叉积形式计算 D，直接使用垂距，省去了 $\|q\|^2-h^2$ 这两个平方量相减。
+
+\begin{figure}[ht]
+\centering
+\begin{tikzpicture}[x=1.2cm,y=1.2cm,>=Stealth]
+\draw[fill=pale,draw=tealblue] (3,.6) circle(1);
+\draw[->,navy] (0,0)--(4.5,0);
+\draw[dashed,muted] (3,0)--(3,.6);
+\draw[muted] (3,.12)--(3.12,.12)--(3.12,0);
+\draw[<->,muted] (0,-.75)--(3,-.75) node[midway,below] {$h=3$};
+\fill[navy] (0,0) circle(1.6pt) node[left] {$o$};
+\fill[navy] (3,.6) circle(1.6pt) node[above left] {$c$};
+\fill[tealblue] (2.2,0) circle(2pt) node[below left] {$t_-$};
+\fill[tealblue] (3.8,0) circle(2pt) node[below right] {$t_+$};
+\draw[->,muted] (3,.6)--(3.7071,1.3071);
+\node[above right] at (3.7071,1.3071) {$R=1$};
+\node[anchor=west] at (4.6,.65) {垂距为0.6 m};
+\end{tikzpicture}
+\caption{垂足到两个交点各相距 $\sqrt{1-0.6^2}=0.8$ m，因此根为2.2和3.8 m。}
+\end{figure}
+
+$D<0$ 表示垂距大于半径，直线与圆分离；$D=0$ 时两根相同，对应相切。
+$D>0$ 时有两个直线交点，但射线只保留 $t\geq0$ 的部分。
+先检查较小根 $t_-$，若为负再检查 $t_+$；两个根都负，圆便位于射线背后。
+例如起点在圆心时 $h=0,D=R^2$，两根为 $-R,R$，正根是向前射出的出口。
 
 \par\noindent\begin{minipage}{\linewidth}
 \lstinputlisting[language=C++,linerange={ray_circle_begin-ray_circle_end},
   includerangemarker=false]{../ros2_ws/src/motion2d/src/sim/raycast.cpp}
 \end{minipage}\par
 
-没有命中返回正无穷，它与后续所有距离取最小值时自然不起作用。此处先计算真实几何，
-量程与测量噪声留给扫描层处理；不要在这个函数里混入 ROS 消息。
+代码中的 \code{kMiss} 是正无穷。把它与有限距离取最小值时，有限距离会被保留。
+几何层由此统一返回“最近非负距离或正无穷”，扫描层再处理量程和测量误差。
 
 \textbf{代码练习 ch05-1：}在 \path{exercises/ch05/starter/forward_root.hpp}
 补完根的选择。从仓库根目录运行：
@@ -70,16 +96,34 @@ g++ -std=c++17 -Iexercises/ch05/starter \
 先手算圆心 (3,0)、半径 1、起点 (0,0)、方向 (1,0) 的两个根；再把起点放到圆心。
 这两个例子分别检查最近回波和第二个根。
 
-\clearpage
-\section{射线与线段：平行不一定没交点}
-令线段端点为 a、b，$e=b-a$。联立 $o+td=a+ue$，分别取叉积可得
+\section{射线与线段：用叉积消去一个未知数}
+令线段为 $a+ue$，其中 $e=b-a,0\leq u\leq1$。
+交点同时位于射线和线段上，因此 $o+td=a+ue$，移项得到 $td-ue=a-o$。
+这里有两个未知数 t、u。利用向量与自身的叉积为零，可以分别消去它们：
+\begin{align}
+(td-ue)\times e&=t(d\times e)=(a-o)\times e,\\
+(td-ue)\times d&=-u(e\times d)=u(d\times e)=(a-o)\times d.
+\end{align}
+第二行用了 $e\times d=-(d\times e)$。当 $d\times e\ne0$，直接相除：
 \begin{equation}
 t=\frac{(a-o)\times e}{d\times e},\qquad
 u=\frac{(a-o)\times d}{d\times e}.
 \end{equation}
-只有 $t\geq0$ 且 $0\leq u\leq1$ 才命中线段，而不只是命中它所在的直线。
-当分母接近零时不能继续做除法：平行但不共线则无交点；共线时将端点投影到射线上，
-检查投影区间是否与 $[0,+\infty)$ 相交，取重叠部分的最近点。
+t 的单位为米，u 是线段上的无量纲比例。只有 $t\geq0$ 且 $0\leq u\leq1$ 才同时满足两种限制。
+例如 $o=(0,0),d=(1,0),a=(4,-1),b=(4,1)$，有 $e=(0,2)$、分母2，
+分子分别为8和1，故 $t=4,u=1/2$，交点是墙的中点 $(4,0)$。
+
+当分母为零，两条方向平行。若 $(a-o)\times d\ne0$，说明线段偏离射线直线，二者分离；
+否则它们共线。共线时，计算两个端点沿 d 的投影
+$t_a=(a-o)^\top d,t_b=(b-o)^\top d$，得到区间 $[\min(t_a,t_b),\max(t_a,t_b)]$。
+它与射线区间 $[0,+\infty)$ 的交集有两种结果：
+\begin{equation}
+\begin{cases}
+\text{无交点},&\max(t_a,t_b)<0,\\
+t=\max(0,\min(t_a,t_b)),&\max(t_a,t_b)\geq0.
+\end{cases}
+\end{equation}
+例如投影区间 $[-2,3]$ 包含起点，最近距离为0；$[2,4]$ 的最近距离为2；$[-4,-2]$ 位于背后。
 
 \par\noindent\begin{minipage}{\linewidth}
 \lstinputlisting[language=C++,linerange={ray_segment_begin-ray_segment_end},
@@ -90,17 +134,16 @@ u=\frac{(a-o)\times d}{d\times e}.
 对得到的非负距离取最小值。这样自然处理遮挡，不依赖障碍物存储顺序。
 算法复杂度随表面数线性增长；先保留这个清楚的 CPU 基准，后续再讨论加速。
 
-\textbf{验收与实验：}运行 \code{colcon test --packages-select motion2d}。
+\textbf{动手核对：}运行 \code{colcon test --packages-select motion2d}。
 几何测试覆盖圆相切、背向、线段端点、平行与共线、矩形角点、遮挡和刚体变换不变性。
 把演示的圆移到墙后，预测最近命中；反转射线方向，解释距离为何改变。
 
-\begin{notebox}
-这里的浮点容差面向课程的米制小场景。它用于避免接近平行时除以极小数，
-不是任意坐标尺度下的精确几何谓词。无效几何应在世界生成边界拒绝。
-\end{notebox}
+\paragraph{读代码时留意的数值分支}
+方向几乎平行时，除数很小，舍入误差会被放大。实现按边长设置一个小容差，
+把这个范围内的叉积视作平行，再进入上面推导的分支。可在米制场景中逐渐旋转一条接近平行的边，
+观察分支切换前后的距离与交点位置。
 
-\clearpage
-\section{均匀角度采样：一圈不要重复起点}
+\section{把方向均匀排成一圈}
 在雷达坐标系中，第 i 束的角度为 $\alpha_i=\alpha_0+i\Delta\alpha$。
 初始方向 $\alpha_0$ 与 yaw 是不同的量：前者决定扫描扇区，后者描述机器人朝向。
 世界方向与圆心起点是
@@ -108,9 +151,11 @@ u=\frac{(a-o)\times d}{d\times e}.
 d_i=\begin{bmatrix}\cos(\psi+\alpha_i)\\\sin(\psi+\alpha_i)\end{bmatrix},
 \qquad o=p_{\mathrm{robot}}.
 \end{equation}
-完整 360 度使用 $\Delta\alpha=2\pi/N$，i 从 0 到 N-1。若同时采 $-\pi$ 与 $\pi$，
-两束实际上指向同一方向。部分视场 F 则包含两个端点，使用 $\Delta\alpha=F/(N-1)$，
-并要求 $N\geq2$。不要用“束数减一”的同一个公式处理这两种情况。
+完整一圈像钟面一样闭合。N 个方向之间有 N 个间隔，末方向到首方向也算一段，所以
+$\Delta\alpha=2\pi/N$，i 从0到 N-1。部分视场 F 像一把展开的扇子，N 个方向只隔出 N-1 段，
+两端都要采样，因此 $\Delta\alpha=F/(N-1)$，要求 $N\geq2$。
+例如从 $-\pi$ 开始取4束整周扫描，方向是 $-\pi,-\pi/2,0,\pi/2$；
+取3束、$90^\circ$ 视场时，从 $-45^\circ$ 到 $45^\circ$ 得到 $-45^\circ,0,45^\circ$。
 
 \par\noindent\begin{minipage}{\linewidth}
 \lstinputlisting[language=C++,linerange={scan_cpu_begin-scan_cpu_end},
@@ -118,12 +163,13 @@ d_i=\begin{bmatrix}\cos(\psi+\alpha_i)\\\sin(\psi+\alpha_i)\end{bmatrix},
 \end{minipage}\par
 
 核心输出只是一组 float 距离，便于与 ROS 分离测试。机器人状态与几何使用 double；
-LaserScan 本身使用 float32，因此通信检查允许相应的舍入误差。当前扫描逐束遍历全部表面，
-复杂度为 $O(N(C+E))$，C 是圆数，E 是所有边的数量（含世界四边）。
+LaserScan 用 float32 保存距离，对应代码最后一次类型转换。
+每束都检查 C 个圆和 E 条边（含世界四边），N 束共需约 $N(C+E)$ 次基本求交。
+因此计算量随束数、表面数近似线性增加，常记作 $O(N(C+E))$。
 
-\clearpage
 \section{量程、无效读数与采样时间}
-先求最近真实表面，再判断量程。近处有盲区障碍时，不能略过它后返回更远的墙。
+先求最近真实表面，再判断它是否可测。近处障碍即使落在盲区内，仍然挡住后面的墙；
+所以整束应标为无效。
 默认最小量程 0.05 m、最大量程 10 m，两个端点都包含。
 
 \begin{center}
@@ -137,34 +183,33 @@ LaserScan 本身使用 float32，因此通信检查允许相应的舍入误差�
 \bottomrule
 \end{tabular}
 \end{center}
-NaN 的大小比较均为假。有效读数应检查有限性和上下界，不能只写
-“若小于最小值或大于最大值，则无效”的反向判断。量程边界处也不能把无回波伪装成
-恰好命中最大量程，二者的建图终点含义不同。
+NaN 表示无有效数值，参与大小比较时结果为假。消费扫描时，先区分有限回波、正无穷和 NaN，
+再按表中的含义更新地图。例如真正命中10 m处的墙，应标记终点占据；正无穷表示量程内无回波，只用于清空沿途。
 
 \begin{notebox}
-\textbf{与设备规范的区别}\quad
+\textbf{接入真实设备时的编码}\quad
 \href{https://raw.githubusercontent.com/ros-infrastructure/rep/master/rep-0117.rst}{REP-117}
-用 $-\infty$ 表示过近。课程沿用已批准的约定，把近距盲区统一归入 NaN 无效读数；
-适配实际硬件时需保留设备自己的语义，不把这两种编码说成相同。
+分别用 $-\infty$、NaN、$+\infty$ 表示过近、无效和无回波。
+课程将近距盲区统一编码为 NaN，建图时跳过整束；接入按 REP-117 输出的设备时，
+应在适配层单独识别 $-\infty$ 的过近标记。
 \end{notebox}
 
 \textbf{snapshot 是一张快照。}\quad 所有束使用同一时刻的机器人位姿，
 因此 \code{time_increment=0}。默认 10 Hz 的帧间周期为 0.1 s，
 所以 \code{scan_time=0.1}。header 记录采样时刻，frame 为 laser；
-没有反射强度模型时 intensities 为空。这些字段依据
-\href{https://raw.githubusercontent.com/ros2/common_interfaces/rolling/sensor_msgs/msg/LaserScan.msg}{LaserScan 定义}
-及主机安装的同名消息核对。
+intensities 为空。字段的完整说明见
+\href{https://raw.githubusercontent.com/ros2/common_interfaces/rolling/sensor_msgs/msg/LaserScan.msg}{LaserScan 消息定义}。
 
 模拟器默认每 0.005 s 推进一步，雷达每 20 步采样一次。t=0 有首帧，
 暂停期间不重复发布新扫描；碰撞冻结也不继续采样。reset 清理采样时序，在 t=0 生成新试验首帧。
-本章先学习周期为 dt 整数倍的情形，辅助函数 \code{lidarPeriodTicks} 会拒绝 7 Hz。
-当前模拟器已接入第六章的采样调度，因此运行时也支持 7 Hz，原理见第六章。
+周期与步长对齐时，间隔步数为 $K=1/(f_s\Delta t)$；10 Hz和0.005 s给出 $K=20$。
+本章的辅助函数 \code{lidarPeriodTicks} 用来检查这个整数条件。
+7 Hz对应约28.57步，需要在步内计算采样状态；模拟器使用的这部分调度将在第6章展开。
 
 \textbf{代码练习 ch05-2：}补全 \path{exercises/ch05/starter/beam_angle.hpp}，
 用 \path{check_angles.cpp} 检查 90/360/720 束与部分视场。理解题：
 如果盲区被写成 $+\infty$，后续建图会把哪里错误标为空闲？
 
-\clearpage
 \section{在 RViz2 同时观察光束和命中点}
 停止上一章场景，构建并加载 install 后运行：
 \begin{lstlisting}[language=bash,numbers=none]
@@ -179,19 +224,18 @@ ros2 launch motion2d_bringup ch05.launch.py
 \begin{figure}[ht]
 \centering
 \includegraphics[width=.92\linewidth]{figures/ch05_scan_rviz.png}
-\caption{关闭测距噪声的主机基准画面。橙色线是有效测距射线，红点是 LaserScan 命中点；
+\caption{关闭测距噪声时的扫描。橙色线是有效测距射线，红点是 LaserScan 命中点；
 淡蓝线只表示量程内无回波，障碍后的空间仍不可见。}
 \end{figure}
 
 /scan 使用 SensorDataQoS（Best Effort、Volatile），RViz 的 LaserScan 显示也要匹配。
 显示辅助光束发布在 /visualization/lidar，按采样位姿固定在 odom 中，
-不会在两帧之间跟随当前机器人漂移。辅助显示含真值对齐信息，SLAM 不得读取。
+不会在两帧之间跟随当前机器人漂移。SLAM 从 /scan 的距离、角度及时间戳处理观测；辅助光束用来检查显示与几何。
 
-\textbf{验收实验：}检查脚本会暂停、重置、逐步推进并核对 TF、角度、QoS 与光束数量。
+\textbf{采样实验：}检查脚本会暂停、重置、逐步推进并核对 TF、角度、QoS 与光束数量。
 默认 19 步内没有第二帧，第 20 步的采样时间为 0.1 s；尝试改为 20 Hz 再手动核对间隔。
 暂停时晚加入的 LaserScan 订阅者不会收到历史帧，恢复运行后等待下一帧即可。
 
-\clearpage
 \section{高斯测距噪声：先有回波，再加误差}
 对真实量程内的有效回波 $r_i$，加入独立的零均值高斯误差：
 \begin{equation}
@@ -200,10 +244,24 @@ ros2 launch motion2d_bringup ch05.launch.py
 \end{equation}
 $\sigma_r$ 是每束、每次采样的标准差，单位 m，不是方差，也不是噪声密度。
 默认 \code{lidar.range_stddev=0.01} m；设为零即可回到精确几何基准。
-课程暂不模拟反射率、入射角、距离相关噪声或多径。
+这个模型用一个参数控制回波散布的宽度，适合先研究随机测距误差对地图的影响。
 
-无回波的 $+\infty$ 和盲区 NaN 保持原值，不凭空生成障碍。有效距离加噪后若越出量程，
-记为 NaN；既不夹到最大量程形成假墙，也不改为 $+\infty$ 暗示自由空间。
+无回波的 $+\infty$ 和盲区 NaN 保持原值。有效距离加噪后若越出量程，记为 NaN。
+例如9.99 m回波加0.03 m误差后超过10 m，整束标为无效；若把它截成10 m，建图就会在量程边界累积一圈错误终点。
+
+\subsection*{零均值与标准差分别描述什么}
+反复测量同一距离，误差可能为正，也可能为负。记 E 为“重复很多次测量后的平均”这一理想操作，
+$\mu=E[\epsilon]$ 称为期望。零均值模型取 $\mu=0$，表示误差没有固定偏向。
+\textbf{方差}是偏离均值的平方的期望：
+\begin{equation}
+\operatorname{Var}(\epsilon)=E[(\epsilon-\mu)^2]=\sigma_r^2.
+\end{equation}
+先平方使正负误差都贡献非负大小，再平均描述散布程度；最后开平方得到标准差 $\sigma_r$，恢复到米的单位。
+高斯分布用均值和方差确定形状：它关于均值对称，越接近均值越常见，偏离很远的误差越来越少。
+符号 $\mathcal N(0,\sigma_r^2)$ 就指定了这个分布。代码用
+\code{normal_distribution(0.0, range_stddev)} 抽样，其中第二个参数是标准差。
+相当于先抽均值为零、标准差为1的高斯变量 Z，再计算 $\epsilon=\sigma_r Z$：
+$E[\epsilon]=\sigma_r E[Z]=0$，$E[\epsilon^2]=\sigma_r^2E[Z^2]=\sigma_r^2$。
 
 \par\noindent\begin{minipage}{\linewidth}
 \lstinputlisting[language=C++,linerange={range_noise_begin-range_noise_end},
@@ -219,19 +277,19 @@ reset 重置这个随机流；同一配置、轨迹、采样顺序和标准库�
 \textbf{代码练习 ch05-3：}补完 \path{exercises/ch05/starter/noisy_range.hpp}，
 正确处理给定误差与特殊值。检查入口为 \path{check_noise.cpp}，编译命令见本章习题 README。
 
-\clearpage
-\section{噪声验收：看统计量，也看真实消息}
-一两个噪声样本不能说明分布正确。先让所有真实距离固定在 5 m，
+\section{从一批读数估计误差分布}
+为了观察散布，先让所有真实距离固定在5 m，
 远离 0.05 m 和 10 m 的量程边界，取 50000 个样本：
 \begin{lstlisting}[language=bash,numbers=none]
 ros2 run motion2d lidar_noise_demo
 \end{lstlisting}
-误差 $e_j=\widetilde r_j-r_j$ 的样本均值与总体式样本标准差为
+先用已知真实距离减出误差 $e_j=\widetilde r_j-r_j$。
+用 M 个误差的平均估计中心，再计算它们相对这个中心的平方偏差平均，得到本实验使用的样本标准差：
 \begin{equation}
 \bar e=\frac1M\sum_{j=1}^M e_j,\qquad
 \widehat\sigma=\sqrt{\frac1M\sum_{j=1}^M(e_j-\bar e)^2}.
 \end{equation}
-下面直接读取同一 C++ 演示生成的 CSV（seed=4242）：
+下面是 seed=4242 的演示数据，比较设置值与从样本算出的值：
 \begin{center}
 \pgfplotstabletypeset[
   col sep=comma,columns={samples,sigma_m,mean_m,stddev_m},
@@ -243,15 +301,31 @@ ros2 run motion2d lidar_noise_demo
   every last row/.style={after row=\bottomrule}
 ]{data/ch05_noise.csv}
 \end{center}
-均值应接近零，误差容差应随样本数变化。测试要求
-$|\bar e|<5\sigma/\sqrt M$，方差与 $\sigma^2$ 的相对偏差不超过 3\%。
-这是可复现的统计检查，不是要求有限样本均值恰好为零。
-靠近量程边界时，越界样本会被丢弃，保留下来的误差分布可能偏斜，不能照搬这组检验。
+\subsection*{为什么均值误差随样本数的平方根缩小}
+每个误差独立、期望为零，因此 $E[e_i e_j]=E[e_i]E[e_j]=0$（$i\ne j$）。
+把样本均值的平方展开：
+\begin{align}
+E[\bar e^2]&=\frac1{M^2}E\left[\left(\sum_j e_j\right)^2\right]\\
+ &=\frac1{M^2}\left(\sum_jE[e_j^2]+2\sum_{i<j}E[e_ie_j]\right)
+ =\frac{M\sigma_r^2}{M^2}=\frac{\sigma_r^2}{M}.
+\end{align}
+由于 $E[\bar e]=0$，这也是均值的方差。其标准差为 $\sigma_r/\sqrt M$，常称为\textbf{标准误}。
+样本数增加四倍，平均值的随机起伏约缩小一半；单个样本的标准差仍为 $\sigma_r$。
+本实验以五个标准误作为均值比较范围，方差与设定值的相对差用3\%作为检查阈值。
+例如 $\sigma_r=0.01$ m、$M=50000$ 时，五个标准误约为0.000224 m。
 
-还要确认 ROS 发布链确实使用了噪声。使用无障碍的 20 m 方形房间，
-把机器人静止放在中心；每束真实墙距为
+上面的方差估计使用 M 作分母。展开可得
+$\widehat\sigma^2=\frac1M\sum e_j^2-\bar e^2$，所以其期望是
+$(1-1/M)\sigma_r^2$。将分母改为 M-1 可消除这个有限样本偏差；这里 M 很大，两者十分接近。
+靠近量程边界时，越界样本会被舍弃，例如靠近上限时正误差更容易消失，保留的误差就会向负侧偏移。
+这解释了实验为何选量程中间的5 m。
+
+还可以在 ROS 场景中做同样的计算。使用无障碍的20 m方形房间，把机器人静止放在中心。
+一束方向为 $\alpha$ 的射线走 t 米后，位置为 $(t\cos\alpha,t\sin\alpha)$。
+碰到竖墙需 $t|\cos\alpha|=10$，碰到横墙需 $t|\sin\alpha|=10$，取较先到达的墙：
 \begin{equation}
-r(\alpha)=\frac{10}{\max(|\cos\alpha|,|\sin\alpha|)}.
+r(\alpha)=\min\left(\frac{10}{|\cos\alpha|},\frac{10}{|\sin\alpha|}\right)
+=\frac{10}{\max(|\cos\alpha|,|\sin\alpha|)}.
 \end{equation}
 停止上一场景，从 ros2\_ws 运行下列实验：
 \begin{lstlisting}[language=bash,numbers=none]
@@ -260,20 +334,20 @@ ros2 launch motion2d_bringup ch05.launch.py model:=ideal rviz:=false \
 # second terminal, same ROS environment
 /usr/bin/python3 ../scripts/check_ch05_noise.py
 \end{lstlisting}
-实验使用 360 束、50 Hz、最大量程 20 m。脚本重置后检查 t=0 到 3.98 s
-的 200 帧、72000 个实际残差；缺帧会明确失败。
-这里远处墙面也在量程内，不会因无回波而混入另一种分布。
+方向平行于某组墙时，把该分母为零的候选距离视为正无穷，另一组墙给出有限距离。
+实验使用360束、50 Hz、最大量程20 m；脚本重置后收集 t=0到3.98 s的200帧，
+逐束用上述墙距减出残差。房间对角方向最远约14.14 m，全部墙面都落在量程内。
 
 \textbf{理解与实验：}把标准差翻倍，预测方差变成几倍；把采样频率翻倍，
-解释为什么单个样本的设定标准差不变。修改后应同步调整验收脚本中的预期参数，
-不要把默认配置的断言直接用于所有实验。
+解释为什么单个样本的设定标准差不变。修改后同步调整实验脚本中的预期参数，分别比较单样本散布和样本均值的变化。
 
-\clearpage
-\section{束数实验：看不见不等于没有障碍}
-相邻光束在相同距离 r 处的端点形成一个等腰三角形，端点间距为
+\section{从角间隔理解细小障碍的漏检}
+相邻光束在相同距离 r 处的端点形成一个等腰三角形。沿角平分线切开后，
+直角三角形的斜边为 r，对边为端点间距 s 的一半，因此 $s/2=r\sin(\Delta\alpha/2)$，得到
 \begin{equation}
 s=2r\sin\frac{\Delta\alpha}{2}\approx r\Delta\alpha.
 \end{equation}
+近似式来自 $\sin x=x+O(x^3)$，适用于小角间隔，角度单位是弧度。
 距离越远，相同角分辨率对应的间距越大。以 5 m 处为例，90、360、720 束的整周扫描
 分别对应约 34.90、8.73、4.36 cm 的端点间距。增加束数能让边界更密，但有限束数仍可能漏掉细小物体。
 
@@ -281,13 +355,16 @@ s=2r\sin\frac{\Delta\alpha}{2}\approx r\Delta\alpha.
 \centering
 \input{figures/ch05_resolution}
 \caption{同一 seed=42 世界、同一圆心 $(-8,-8)$、yaw=0、关闭噪声的有限回波。
-十字为雷达；图中空白不等于已经观测到的自由空间。}
+十字为雷达。点列之间的空白包含光束间隙和被遮挡区域。}
 \end{figure}
 
 再单独构造一个直径 0.10 m 的小圆：圆心距离雷达 5 m，方向为 $2^\circ$。
 雷达位于原点，扫描从 $-\pi$ 开始。90 束的方向间隔是 $4^\circ$，
 恰好从小圆两侧穿过；360 束有一束命中，720 束有三束命中。
-这个确定性例子已经写成测试，不依赖肉眼判断。
+从雷达向小圆作切线，直角三角形给出其半角宽度
+$\gamma=\arcsin(0.05/5)\approx0.573^\circ$。
+因而圆占据约 $[1.427^\circ,2.573^\circ]$ 的方向区间：
+4度网格中没有方向落入，1度网格只有2度，0.5度网格则有1.5、2、2.5度。
 
 \begin{center}
 \pgfplotstabletypeset[
@@ -302,24 +379,24 @@ s=2r\sin\frac{\Delta\alpha}{2}\approx r\Delta\alpha.
 
 \textbf{代码练习 ch05-4：}补完 \path{exercises/ch05/starter/beam_gap.hpp}，
 把角分辨率换算为米制端点间距。然后改变小圆的方向、尺寸或距离，比较是否命中。
-表中结果只对应这个特定场景，不是“720 束必定能看见所有小障碍”的保证。
+把小圆再移远，角宽会缩小；它可能重新落在两束之间。用角区间能预测这种漏检。
 
 \textbf{实际 ROS 对照：}复制 ch05.yaml，分别将 lidar.beams 改为 90、360、720，
 保持其余参数和世界 seed 相同。启动各配置后运行
 \code{check_ch05.py --beams 90}（其余束数类推），核对消息与光束数量。
 
-\clearpage
-\section{性能实验：先说清楚计时范围}
+\section{测量束数增加后的计算代价}
 从 ros2\_ws 运行 CPU 基准：
 \begin{lstlisting}[language=bash,numbers=none]
 ros2 run motion2d lidar_benchmark > ../textbook/data/ch05_benchmark.csv
 ros2 run motion2d lidar_benchmark --points > ../textbook/data/ch05_hits.csv
 # repository root
-make -C textbook
+make -C textbook REVIEW_CHAPTER=5
 \end{lstlisting}
 程序使用 seed=42 的默认 8 圆、8 多边形世界和固定起点。
 每种束数先预热 100 帧，再测 1000 次 \code{scanCpu} 调用，用单调时钟统计中位数和 P95。
-P95 表示按耗时排序后，约 95\% 的调用不超过这个数；它不是最坏情况上界。
+例如把1000次耗时从小到大排序，中位数描述中间位置，P95描述约第950个位置。
+前者反映典型耗时，后者帮助观察较慢的调用；两者会随后台负载发生变化。
 
 \begin{figure}[ht]
 \centering
@@ -340,11 +417,9 @@ P95 表示按耗时排序后，约 95\% 的调用不超过这个数；它不是�
 ]{data/ch05_benchmark.csv}
 \end{center}
 
-计时包含方向计算、全部表面求交、量程编码和结果数组分配。
-不包含世界生成、加噪、ROS 消息转换、DDS 传输、光束 Marker 或 RViz 渲染，
-所以不能把表中数字称为端到端传感器时延或整机实时性保证。实验未绑定 CPU 核，
-调频与系统负载会使复测数字变化。
+这里的计时范围是一次 \code{scanCpu} 调用：方向计算、表面求交、量程编码及结果数组分配。
+消息发布还会增加噪声生成、数据转换和传输等开销；可以为这些阶段分别加计时点，比较时间花在哪里。
+复测时记录 CPU、编译选项和系统负载，再观察束数翻倍后几何扫描耗时的变化。
 
-\textbf{为 CUDA 留下基准：}未来使用同一几何、姿态、束数和输出编码，先关噪声比较距离，
-再分别测计算内核、主机/设备传输和完整消息发布。不能把 GPU 内核时间与 CPU 完整流程直接比较，
-也不能在未测量前承诺加速比。本章没有建图或规划求解器，求解失败率不适用。
+第20章将用同一场景、位姿、束数和量程编码比较 CPU 与 CUDA。
+先对齐无噪声距离，再分别测几何计算、数据传输和完整发布过程，就能判断并行计算在哪种规模下有收益。
