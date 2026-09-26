@@ -67,6 +67,10 @@ omega_dot = (tau_z - c_omega omega) / I_z
 - **进阶 rolling 模式**：逐束采样，`time_increment=scan_time/N`，header 为首束采集时刻，整帧采完再发布。每束使用自己的 pose，去畸变方法与扫描模型同时启用。
 - CPU/CUDA 输入一致；确定性对比先关噪声。加噪对比使用同一组事先生成的样本，不能把不同随机序列误认成几何误差。
 
+第 05 章已落地 CPU snapshot：/scan 使用 SensorDataQoS，所有束共享当前模拟 tick 的位姿与时间。扫描周期必须是 dt 的整数倍（频率至少 0.1 Hz）；不对齐时启动报错，插值调度留给后续传感器时间课程。暂停/碰撞冻结不重采样，reset 在 t=0 发布新试验的首帧。光束 Marker 以 odom 表达采样时刻的实测射线，不随当前机器人移动；这些显示辅助量不供 SLAM 使用。CPU 单帧束数范围为 2-100000，参数改动后重启。
+
+近距 NaN 是本课程的已批准无效读数约定。REP-117 对“过近”另有 -inf 定义；不能把课程的 NaN 约定说成完整实现该 REP。实际设备适配时需区分处理。
+
 ## 5. IMU 契约
 
 `sensor_msgs/Imu`，frame 为 `imu_link`，水平面 yaw-only 姿态，roll/pitch 固定为零。真实姿态只在模拟器内部用于生成传感器读数。

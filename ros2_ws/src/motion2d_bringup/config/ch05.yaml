@@ -1,0 +1,46 @@
+# Shared world values: display and collision must describe the same geometry.
+/**:
+  ros__parameters:
+    use_sim_time: true
+    x: -8.0
+    y: -8.0
+    radius: 0.20
+    seed: 42
+    width: 20.0
+    height: 20.0
+    circle_count: 8
+    polygon_count: 8
+    size_min: 0.35
+    size_max: 1.2
+    polygon_samples: 8
+    goal_x: 8.0
+    goal_y: 8.0
+    margin: 0.05
+    require_connected: true
+    check_resolution: 0.25
+simulator:
+  ros__parameters:
+    dt: 0.005
+    yaw: 0.0
+    start_paused: false
+    command_timeout: 0.5  # seconds of simulated time, not wall time
+    speed_max: 1.0        # translational norm limit, m/s (velocity mode)
+    yaw_rate_max: 1.0     # absolute yaw rate limit, rad/s (velocity mode)
+    mass: 1.0            # kg (inertial mode)
+    inertia_z: -1.0      # -1 derives m*r^2/2; radius=0 needs an explicit positive value
+    linear_drag: 0.0     # kg/s
+    angular_drag: 0.0    # kg*m^2/s
+    force_max: 2.0       # N per odom axis; not a vector norm bound
+    torque_max: 0.2      # N*m
+    reference_radius: 1.0 # radius of the prescribed path, NOT the robot disk (m)
+    reference_omega: 0.4  # reference angular frequency (rad/s)
+    lidar.enabled: true
+    lidar.backend: cpu
+    lidar.scan_model: snapshot
+    lidar.beams: 720
+    lidar.angle_min: -3.141592653589793
+    lidar.fov: 6.283185307179586  # full turn excludes the duplicate endpoint
+    lidar.rate: 10.0            # period must be an integer multiple of dt
+    lidar.range_min: 0.05       # nearer true hit -> NaN, not free space
+    lidar.range_max: 10.0       # no in-range echo -> +inf
+    lidar.visualize_beams: true # display helper only; SLAM must not consume it

@@ -98,3 +98,94 @@ u=\frac{(a-o)\times d}{d\times e}.
 这里的浮点容差面向课程的米制小场景。它用于避免接近平行时除以极小数，
 不是任意坐标尺度下的精确几何谓词。无效几何应在世界生成边界拒绝。
 \end{notebox}
+
+\clearpage
+\section{均匀角度采样：一圈不要重复起点}
+在雷达坐标系中，第 i 束的角度为 $\alpha_i=\alpha_0+i\Delta\alpha$。
+初始方向 $\alpha_0$ 与 yaw 是不同的量：前者决定扫描扇区，后者描述机器人朝向。
+世界方向与圆心起点是
+\begin{equation}
+d_i=\begin{bmatrix}\cos(\psi+\alpha_i)\\\sin(\psi+\alpha_i)\end{bmatrix},
+\qquad o=p_{\mathrm{robot}}.
+\end{equation}
+完整 360 度使用 $\Delta\alpha=2\pi/N$，i 从 0 到 N-1。若同时采 $-\pi$ 与 $\pi$，
+两束实际上指向同一方向。部分视场 F 则包含两个端点，使用 $\Delta\alpha=F/(N-1)$，
+并要求 $N\geq2$。不要用“束数减一”的同一个公式处理这两种情况。
+
+\par\noindent\begin{minipage}{\linewidth}
+\lstinputlisting[language=C++,linerange={scan_cpu_begin-scan_cpu_end},
+  includerangemarker=false]{../ros2_ws/src/motion2d/src/sim/lidar_cpu.cpp}
+\end{minipage}\par
+
+核心输出只是一组 float 距离，便于与 ROS 分离测试。机器人状态与几何使用 double；
+LaserScan 本身使用 float32，因此通信检查允许相应的舍入误差。当前扫描逐束遍历全部表面，
+复杂度为 $O(N(C+E))$，C 是圆数，E 是所有边的数量（含世界四边）。
+
+\clearpage
+\section{量程、无效读数与采样时间}
+先求最近真实表面，再判断量程。近处有盲区障碍时，不能略过它后返回更远的墙。
+默认最小量程 0.05 m、最大量程 10 m，两个端点都包含。
+
+\begin{center}
+\begin{tabular}{lll}
+\toprule
+情形 & ranges 中的值 & 后续建图含义\\
+\midrule
+量程内命中 & 有限距离 & 光线清空、终点占据\\
+量程内没有回波 & $+\infty$ & 只清空量程内光线\\
+真实命中近于盲区 & NaN & 整束跳过\\
+\bottomrule
+\end{tabular}
+\end{center}
+NaN 的大小比较均为假。有效读数应检查有限性和上下界，不能只写
+“若小于最小值或大于最大值，则无效”的反向判断。量程边界处也不能把无回波伪装成
+恰好命中最大量程，二者的建图终点含义不同。
+
+\begin{notebox}
+\textbf{与设备规范的区别}\quad
+\href{https://raw.githubusercontent.com/ros-infrastructure/rep/master/rep-0117.rst}{REP-117}
+用 $-\infty$ 表示过近。课程沿用已批准的约定，把近距盲区统一归入 NaN 无效读数；
+适配实际硬件时需保留设备自己的语义，不把这两种编码说成相同。
+\end{notebox}
+
+\textbf{snapshot 是一张快照。}\quad 所有束使用同一时刻的机器人位姿，
+因此 \code{time_increment=0}。默认 10 Hz 的帧间周期为 0.1 s，
+所以 \code{scan_time=0.1}。header 记录采样时刻，frame 为 laser；
+没有反射强度模型时 intensities 为空。这些字段依据
+\href{https://raw.githubusercontent.com/ros2/common_interfaces/rolling/sensor_msgs/msg/LaserScan.msg}{LaserScan 定义}
+及主机安装的同名消息核对。
+
+模拟器默认每 0.005 s 推进一步，雷达每 20 步采样一次。t=0 有首帧，
+暂停期间不重复发布新扫描；碰撞冻结也不继续采样。reset 清理采样时序，在 t=0 生成新试验首帧。
+这里要求周期恰好是 dt 的整数倍，7 Hz 会在启动时明确报错；跨 tick 的状态插值留到后续传感器时间课程。
+
+\textbf{代码练习 ch05-2：}补全 \path{exercises/ch05/starter/beam_angle.hpp}，
+用 \path{check_angles.cpp} 检查 90/360/720 束与部分视场。理解题：
+如果盲区被写成 $+\infty$，后续建图会把哪里错误标为空闲？
+
+\clearpage
+\section{在 RViz2 同时观察光束和命中点}
+停止上一章场景，构建并加载 install 后运行：
+\begin{lstlisting}[language=bash,numbers=none]
+ros2 launch motion2d_bringup ch05.launch.py
+# second terminal, from ros2_ws with the same ROS environment
+/usr/bin/python3 ../scripts/check_ch05.py
+\end{lstlisting}
+默认沿第 04 章的解析圆参考运动。也可选择 \code{model:=ideal}，
+用 2D Goal Pose 手动移动，或选择 velocity/inertial 并发送相应控制量。
+修改 \path{motion2d_bringup/config/ch05.yaml} 后重启；早期章节默认不启用雷达。
+
+\begin{figure}[ht]
+\centering
+\includegraphics[width=.92\linewidth]{figures/ch05_scan_rviz.png}
+\caption{主机实际扫描。橙色线是有效测距射线，红点是 LaserScan 命中点；
+淡蓝线只表示量程内无回波，障碍后的空间仍不可见。}
+\end{figure}
+
+/scan 使用 SensorDataQoS（Best Effort、Volatile），RViz 的 LaserScan 显示也要匹配。
+显示辅助光束发布在 /visualization/lidar，按采样位姿固定在 odom 中，
+不会在两帧之间跟随当前机器人漂移。辅助显示含真值对齐信息，SLAM 不得读取。
+
+\textbf{验收实验：}检查脚本会暂停、重置、逐步推进并核对 TF、角度、QoS 与光束数量。
+默认 19 步内没有第二帧，第 20 步的采样时间为 0.1 s；尝试改为 20 Hz 再手动核对间隔。
+暂停时晚加入的 LaserScan 订阅者不会收到历史帧，恢复运行后等待下一帧即可。

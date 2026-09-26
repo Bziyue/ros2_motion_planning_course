@@ -2,7 +2,7 @@
 
 从二维世界、圆盘机器人和模拟传感器开始，逐步学习定位建图、路径与轨迹规划、跟踪控制。教材、代码和练习按章节对应。
 
-**当前状态：第 01-04 章已完成，第 05 章实施中。** CPU 射线求交已加入，整帧雷达与 ROS 可视化随后接入。大纲提交为 `5c0c642`；每完成一个可运行、已验证的功能就单独提交，教材和练习同步更新。IMU、SLAM 和规划尚未实现。
+**当前状态：第 01-04 章已完成，第 05 章实施中。** CPU 射线求交、均匀扫描与 ROS/RViz2 已加入，噪声与束数实验随后补齐。大纲提交为 `5c0c642`；每完成一个可运行、已验证的功能就单独提交，教材和练习同步更新。IMU、SLAM 和规划尚未实现。
 
 [教材 PDF](output/pdf/course.pdf) · [实施进度](docs/PROGRESS.md) · [主机验收记录](docs/VALIDATION.md)
 
@@ -12,7 +12,7 @@
 | 02 | [SE(2)、时钟与 TF](chapters/ch02/README.md) | [ch02](exercises/ch02/README.md) | `ch02.launch.py` |
 | 03 | [随机圆与凸多边形世界](chapters/ch03/README.md) | [ch03](exercises/ch03/README.md) | `ch03.launch.py` |
 | 04 | [机器人模型](chapters/ch04/README.md) | [ch04](exercises/ch04/README.md) | `ch04.launch.py` |
-| 05 | [CPU 激光雷达](chapters/ch05/README.md) | [ch05](exercises/ch05/README.md) | 当前运行 `raycast_demo` |
+| 05 | [CPU 激光雷达](chapters/ch05/README.md) | [ch05](exercises/ch05/README.md) | `ch05.launch.py` |
 
 ~~~bash
 source /opt/ros/lyrical/setup.bash

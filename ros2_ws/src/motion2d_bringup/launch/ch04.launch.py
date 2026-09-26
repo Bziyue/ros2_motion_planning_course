@@ -31,11 +31,12 @@ def generate_launch_description():
         DeclareLaunchArgument("rviz", default_value="true"),
         DeclareLaunchArgument("model", default_value="ideal"),
         DeclareLaunchArgument("config", default_value=str(share / "config/ch04.yaml")),
+        DeclareLaunchArgument("rviz_config", default_value=str(share / "rviz/ch04.rviz")),
         *[RegisterEventHandler(OnProcessExit(
             target_action=node, on_exit=required_node_exited)) for node in (simulator, world)],
         simulator, world,
         Node(package="rviz2", executable="rviz2", name="course_rviz",
              parameters=[{"use_sim_time": True}],
-             arguments=["-d", str(share / "rviz/ch04.rviz")],
+             arguments=["-d", LaunchConfiguration("rviz_config")],
              condition=IfCondition(LaunchConfiguration("rviz")), output="screen"),
     ])

@@ -21,6 +21,7 @@
 #include <tf2_ros/transform_broadcaster.hpp>
 #include <visualization_msgs/msg/marker_array.hpp>
 #include "motion2d/ros/world_parameters.hpp"
+#include "motion2d/ros/lidar_messages.hpp"
 #include "motion2d/sim/robot_model.hpp"
 #include "motion2d/sim/sim_clock.hpp"
 
@@ -28,7 +29,7 @@ namespace motion2d
 {
 /** @brief Single-clock robot plant. Chapter 04 uses aligned map/odom truth TF.
  *  @details Commands are consumed at a tick boundary. A rejected sweep freezes
- *  the last accepted state and time; reset starts a new trial. This node's
+ *  the last accepted state and time; reset starts a new trial.
  *  The sim namespace contains truth, not a localization algorithm's output.
  */
 class Simulator : public rclcpp::Node
@@ -72,6 +73,7 @@ public:
     acceleration_pub_ = create_publisher<geometry_msgs::msg::AccelStamped>("/sim/acceleration", retained);
     status_pub_ = create_publisher<std_msgs::msg::String>("/sim/status", retained);
     marker_pub_ = create_publisher<visualization_msgs::msg::MarkerArray>("/visualization/robot", retained);
+    if (declare_parameter("lidar.enabled", false)) {readLidar();}
     if (model_ == "ideal") {
       pose_sub_ = create_subscription<geometry_msgs::msg::PoseStamped>(
         "/command/pose", rclcpp::QoS(1),
@@ -92,16 +94,54 @@ public:
     timer_ = create_wall_timer(clock_.stepDuration(), [this]() {
         if (!clock_.paused()) {advanceTick(false);}
         publishState();  // Frozen timestamps also serve late subscribers when paused.
+        publishLidarIfDue();
       });
     static_timer_ = create_wall_timer(std::chrono::seconds(1), [this]() {publishStaticFrames();});
     marker_timer_ = create_wall_timer(std::chrono::milliseconds(50), [this]() {publishMarkers();});
     publishState();
+    publishLidarIfDue();
     publishMarkers();
     RCLCPP_INFO(get_logger(), "model=%s, radius=%.3f m; /sim/* is simulation truth",
       model_.c_str(), radius_);
   }
 
 private:
+  void readLidar()
+  {
+    lidar_config_.beams = declare_parameter("lidar.beams", lidar_config_.beams);
+    lidar_config_.angle_min = declare_parameter("lidar.angle_min", lidar_config_.angle_min);
+    lidar_config_.fov = declare_parameter("lidar.fov", lidar_config_.fov);
+    lidar_config_.range_min = declare_parameter("lidar.range_min", lidar_config_.range_min);
+    lidar_config_.range_max = declare_parameter("lidar.range_max", lidar_config_.range_max);
+    validateLidarConfig(lidar_config_);
+    const double rate = declare_parameter("lidar.rate", 10.0);
+    lidar_period_ns_ = lidarPeriodTicks(rate, dt()) * clock_.stepDuration().count();
+    if (declare_parameter<std::string>("lidar.backend", "cpu") != "cpu" ||
+      declare_parameter<std::string>("lidar.scan_model", "snapshot") != "snapshot")
+    {
+      throw std::invalid_argument("Chapter 05 supports lidar backend=cpu, scan_model=snapshot only");
+    }
+    scan_pub_ = create_publisher<sensor_msgs::msg::LaserScan>("/scan", rclcpp::SensorDataQoS());
+    if (declare_parameter("lidar.visualize_beams", true)) {
+      beam_pub_ = create_publisher<visualization_msgs::msg::MarkerArray>(
+        "/visualization/lidar", rclcpp::QoS(1).reliable().transient_local());
+    }
+    RCLCPP_INFO(get_logger(), "CPU snapshot lidar: %d beams, %.3f Hz, range [%.3f, %.3f] m",
+      lidar_config_.beams, rate, lidar_config_.range_min, lidar_config_.range_max);
+  }
+
+  void publishLidarIfDue()
+  {
+    const auto now = clock_.nanoseconds();
+    if (!scan_pub_ || now == last_scan_ns_ || now % lidar_period_ns_ != 0) {return;}
+    const auto ranges = scanCpu(world_, state_.pose, lidar_config_);
+    const auto scan = toLaserScan(lidar_config_, ranges,
+      rclcpp::Time(now, RCL_ROS_TIME), lidar_period_ns_ * 1e-9);
+    scan_pub_->publish(scan);
+    if (beam_pub_) {beam_pub_->publish(lidarBeamMarkers(scan, state_.pose));}
+    last_scan_ns_ = now;
+  }
+
   void readInertia()
   {
     inertia_.mass = declare_parameter("mass", 1.0);
@@ -267,6 +307,7 @@ private:
         response->success = clock_.paused() && advanceTick(true);
         response->message = response->success ? "advanced one tick" : "pause first; reset if blocked";
         publishState();
+        publishLidarIfDue();
         publishMarkers();
       });
     reset_service_ = create_service<std_srvs::srv::Trigger>("/sim/reset",
@@ -284,6 +325,8 @@ private:
         setStatus("paused");
         publishStaticFrames();
         publishState();
+        last_scan_ns_ = -1;
+        publishLidarIfDue();
         publishMarkers();
         response->success = true;
         response->message = "new paused trial; state, command and trail cleared";
@@ -398,6 +441,8 @@ private:
   VelocityCommand velocity_command_;
   Wrench2D wrench_command_;
   InertialParameters inertia_;
+  LidarConfig lidar_config_;
+  std::int64_t lidar_period_ns_ = 1, last_scan_ns_ = -1;
   double radius_, command_timeout_, speed_max_, yaw_rate_max_;
   double reference_radius_ = 1.0, reference_omega_ = .4;
   std::int64_t command_deadline_ = 0;
@@ -412,6 +457,8 @@ private:
   rclcpp::Publisher<geometry_msgs::msg::AccelStamped>::SharedPtr acceleration_pub_;
   rclcpp::Publisher<std_msgs::msg::String>::SharedPtr status_pub_;
   rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr marker_pub_;
+  rclcpp::Publisher<sensor_msgs::msg::LaserScan>::SharedPtr scan_pub_;
+  rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr beam_pub_;
   rclcpp::Subscription<geometry_msgs::msg::PoseStamped>::SharedPtr pose_sub_;
   rclcpp::Subscription<geometry_msgs::msg::TwistStamped>::SharedPtr velocity_sub_;
   rclcpp::Subscription<geometry_msgs::msg::WrenchStamped>::SharedPtr wrench_sub_;

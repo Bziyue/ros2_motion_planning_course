@@ -13,3 +13,5 @@
 7. **MPC 的 QP 求解器候选**：[OSQP 官方仓库](https://github.com/osqp/osqp)。第 18 章实施前再验证接口并锁定版本；先解释离散动力学与 QP 矩阵，再接入求解器。
 
 SplineTrajectory 的性能数字依赖具体问题、优化设置和硬件。教材将自行测量，不直接承诺上游测试的加速比。若引入上游代码，保留其许可及第三方声明；课程自身的对外发布许可证尚未确定。
+
+第 05 章补充：再次核对主机 LaserScan.msg 与 [官方原始定义](https://raw.githubusercontent.com/ros2/common_interfaces/rolling/sensor_msgs/msg/LaserScan.msg)，并阅读 [REP-117](https://raw.githubusercontent.com/ros-infrastructure/rep/master/rep-0117.rst)。REP-117 区分 -inf（过近）、NaN（无效）与 +inf（无回波）。已批准的课程契约将近距盲区统一编码为 NaN、让建图跳过，因此不宣称完整实现 REP-117 的三种编码；转换到真实硬件时必须保留这一区别。官方 HTML 文档本次受访问保护，采用原始源文件和本机定义核对。

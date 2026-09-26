@@ -113,3 +113,15 @@ mass=0、inertia_z=0、linear_drag=-1 时 launch 均返回 1。radius=0 且自�
 主机两个包构建通过，累计 38 个 GoogleTest 用例通过（colcon 含 5 个包装项共 43 项，0 error、0 failure、0 skipped）。7 个新增测试覆盖圆近根/出口/相切/背向、线段端点与平行共线退化、矩形角点、遮挡顺序与刚体变换。
 
 ros2 run motion2d raycast_demo 实测输出 2、4、2 m，与解析值一致。ch05-1 参考解通过，未完成 starter 按预期失败。教材扩展为 31 页，XeLaTeX 编译并渲染检查新增公式、几何示意图和代码；本增量尚未发布 LaserScan 或新增 RViz 场景。
+
+## 第 05 章增量：均匀扫描与 ROS/RViz2
+
+两个包构建通过，累计 44 个 GoogleTest 用例通过（colcon 含 6 个包装项共 50 项）。新测试验证完整/部分视场、平移和 yaw、矩形解析距离、近距遮挡、正无穷、包含量程端点以及采样周期对齐。
+
+实际 ch05.launch.py 默认 reference 场景通过 check_ch05.py：720 束，无重复末方向；t=0 首帧，19 步内无新帧，第 20 步 t=0.1 s；暂停不重采样；reset 重放首帧；TF 查询与采样位姿一致。t=0.1 s 有 599 个有效回波、121 个无回波，光束 Marker 端点数分别匹配。验证 Best Effort/Volatile QoS、空 intensities、零 time_increment 与唯一时钟。
+
+检查程序的 TF Buffer 使用模拟时钟，从而在 reset 时间回退时清理历史。最初使用默认墙钟的检查程序会保留旧 TF 并超时，已修正检查程序并重新通过。RViz 在 reset 后恢复运行能重新显示扫描；关闭阶段的主机已知问题仍适用。
+
+分别修改临时 YAML 的 beams=1、fov=0、range_min=11、rate=7、backend=cuda，节点均返回 1 并报告参数或未实现组合。参数实验通过 YAML 修改，未假定命令行全局参数能覆盖节点专属 YAML。
+
+本机实际 RViz2 同时显示光束和命中点，截图纳入教材。ch05-2 参考解通过，未完成 starter 失败。合订 PDF 共 34 页，XeLaTeX 编译成功并渲染检查新增页；已注明近距 NaN 与 REP-117 的编码区别。

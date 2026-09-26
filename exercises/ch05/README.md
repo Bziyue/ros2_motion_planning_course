@@ -12,3 +12,14 @@ g++ -std=c++17 -Iexercises/ch05/starter exercises/ch05/check_root.cpp -o /tmp/ch
 ~~~
 
 将 starter 改为 solutions 可验证参考解。评分：六类情况都正确，漏掉第二个根或把背后的交点当回波均不通过。提示单独存于 [hints.md](hints.md)；练习不参与正常演示构建。
+
+4. 理解：为何小于 range_min 的真实命中不能写成 +inf？为何不能忽略它并继续寻找后面的墙？解释 NaN 在浮点比较中的特殊性。
+5. 代码 ch05-2：补全 beam_angle.hpp，兼容整周和部分视场。90/360/720 束的首末方向不能重复；90 度视场必须覆盖两个端点。
+6. 实验：以 720 束、10 Hz 运行默认 reference 场景。暂停并单步 19 次、再走第 20 步，观察 /scan 时间戳；把频率改为 20 Hz，预测间隔。试填 7 Hz，阅读拒绝原因，不要静默改成邻近频率。
+
+~~~bash
+g++ -std=c++17 -Iexercises/ch05/starter exercises/ch05/check_angles.cpp -o /tmp/ch05_angles
+/tmp/ch05_angles
+~~~
+
+参考解仍在 solutions。合格标准是全部角度检查通过，并能解释 scan_time=0.1 与 time_increment=0 分别代表什么。
