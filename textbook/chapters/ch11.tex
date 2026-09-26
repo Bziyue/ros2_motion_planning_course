@@ -11,61 +11,194 @@ ros2 run motion2d astar_demo tmp/ch11_astar
 \end{lstlisting}
 这次输入是手工给定的 $41\times31$ 栅格，分辨率 0.1 m。
 中间隔墙有宽 0.7 m 的门；起点 $(.75,.75)$ m，终点 $(3.25,2.25)$ m。
-改变半径，观察门从可通行变成不可达。该小实验隔离规划算法，不冒充未知环境建图。
+改变半径，观察门从可通行变成不可达。输入几何已经确定，便于单独观察半径与栅格规则对路径的影响；本章后半部分再换成激光观测地图。
 
 \section{圆盘变成一个中心点}
-设原始阻塞区域为 $\mathcal O$，圆盘物理半径为 $r$，额外安全裕量为 $m$。
-中心点必须避开膨胀集合
+\subsection{从碰撞条件推导障碍膨胀}
+机器人中心为 $p$，半径为 $r$，其占据区域是
+$p+B(0,r)$，其中 $B(0,r)=\{u:\|u\|\leq r\}$。
+设原始阻塞区域为 $\mathcal O$。发生碰撞意味着存在机器人内部偏移 $u$ 和障碍点 $o$，
+满足 $p+u=o$，也就是 $p=o-u$。
+圆盘关于原点对称，$u$ 在圆内时 $-u$ 也在圆内，因此所有会碰撞的中心位置恰好组成
+\begin{equation}
+\mathcal O\oplus B(0,r)=\{o+u:\ o\in\mathcal O,\ \|u\|\leq r\}.
+\end{equation}
+$\oplus$ 称为 Minkowski 和，含义是将障碍的每个点向周围扩张一个圆盘。
+把额外安全裕量 $m$ 加在半径上，中心点需避开的\textbf{配置空间障碍}就是
 \begin{equation}
 \mathcal O_{\rm conf}=\mathcal O\oplus B(0,r+m).
 \end{equation}
-这里 $\oplus$ 表示将集合中的每个点向外扩张一个半径 $r+m$ 的圆。
-半径与裕量只加一次；后面使用已经膨胀的地图时不能再重复扣除机器人半径。
+“配置”在这里指中心位置 $(x,y)$。圆盘转动后外形相同，所以碰撞判断只需这两个数。
+例如障碍本身是半径 $R$ 的圆，两个圆心距离小于或等于 $R+r+m$ 就不满足间隙要求，
+相当于把障碍圆半径增至 $R+r+m$，机器人中心按一个点来搜索。
+物理半径和裕量已包含在膨胀结果中，后续算法直接查询这张配置空间地图。
 
-原始占据栅格表示方格的\textbf{面积}，不是只有格子中心的一个点。
-本章还要求输出自由格的整个闭区域都安全，方便后续构造走廊。
-两个边长 $\rho$ 的格子，相对索引差为 $(\Delta i,\Delta j)$，其最小距离为
+\subsection{安全的是整块方格}
+占据栅格把障碍表示成有面积的方格。为了让后面的路径连接与走廊构造更直接，
+我们还要求输出的每一个自由格，\textbf{整个闭方格内的中心位置都安全}。
+所以需要求候选方格与阻塞方格之间的最小距离。
+
+两个边长为 $\rho$ 的方格，中心在 $x$ 轴上的距离为 $\rho|\Delta i|$。
+每个方格从中心向左右延伸 $\rho/2$，两者合计占去 $\rho$，
+所以两个投影区间的间隙是 $\rho(|\Delta i|-1)$。
+投影重叠或接触时，最小间隙为零，故
 \begin{equation}
-d_x=\rho\max(0,|\Delta i|-1),\qquad
- d_y=\rho\max(0,|\Delta j|-1),\qquad d=\sqrt{d_x^2+d_y^2}.
+d_x=\rho\max(0,|\Delta i|-1),\qquad d_y=\rho\max(0,|\Delta j|-1).
 \end{equation}
-若 $d\leq r+m$，候选格子被阻塞。相邻方格共享边或角时距离为零；接触也视为碰撞。
+平面距离平方为 $\Delta x^2+\Delta y^2$，方格的两个坐标区间可以分别取到各自最小间隙，
+由勾股定理得到
+\begin{equation}
+d_{\rm square}=\sqrt{d_x^2+d_y^2}.
+\end{equation}
+若 $d_{\rm square}\leq r+m$，至少有一个候选中心位置不满足间隙要求，便将整格标成阻塞。
+
+\begin{center}
+\begin{tikzpicture}[x=1cm,y=1cm,>=Stealth]
+\draw[step=1,draw=linecolor] (-.1,-.1) grid (4.1,3.1);
+\filldraw[fill=navy!18,draw=navy,thick] (0,0) rectangle (1,1);
+\filldraw[fill=pale,draw=tealblue,thick] (3,2) rectangle (4,3);
+\draw[tealblue,thick] (1,1)--(3,2);
+\draw[dashed] (1,1)--(3,1)--(3,2);
+\node[below] at (2,1) {$d_x=2\rho$};
+\node[right] at (3,1.5) {$d_y=\rho$};
+\node[above,rotate=26.565] at (2,1.5) {$d=\sqrt5\rho$};
+\node[below] at (.5,-.15) {阻塞格};
+\node[above] at (3.5,3.15) {候选格};
+\begin{scope}[xshift=6.3cm]
+\draw[step=1,draw=linecolor] (0,0) grid (2,2);
+\filldraw[fill=navy!18,draw=navy] (1,0) rectangle (2,1);
+\draw[->,tealblue,thick] (.5,.5)--(1.5,1.5);
+\fill[navy] (1,1) circle(2pt);
+\node[below] at (1,-.2) {对角线接触阻塞角点};
+\end{scope}
+\end{tikzpicture}
+\end{center}
+左图中索引差为 $(3,2)$。若 $\rho=.1$ m，则最小距离为 $\sqrt5\times.1\approx.2236$ m。
+$r+m=.2$ m 时这两个方格满足间隙要求，增至 $.25$ m 时便需要阻塞候选格。
+相邻方格共享边或角，最小距离为零，因此即使 $r=0$，与障碍接触的格子也会被排除。
+
+代码先计算哪些相对索引需要膨胀，得到一个偏移表，再将这张表平移到每个阻塞格上。
+由 $d_x\leq r+m$ 可知，需要考察的横向偏移不会超过
+$\lceil(r+m)/\rho\rceil+1$；纵向同理。
+\par\noindent\begin{minipage}{\linewidth}
 \lstinputlisting[language=C++,linerange={inflation_stencil_begin-inflation_stencil_end},
   includerangemarker=false]{../ros2_ws/src/motion2d/src/planning/inflation.cpp}
+\end{minipage}\par
+地图外部也视为阻塞。宽 $W$、高 $H$ 的地图中，格子 $(i,j)$ 左边缘离地图左边界为 $i\rho$，
+右边缘离右边界为 $(W-1-i)\rho$，上下类似，因此整格到外界的最小距离为
+\begin{equation}
+d_{\rm boundary}=\rho\min(i,j,W-1-i,H-1-j).
+\end{equation}
+它也必须大于 $r+m$。这就是 \code{inflateGrid} 最后一个循环的判断。
 
-这种整格安全证书比只检查中心更保守。即使 $r=0$，与障碍接触的相邻格仍会被排除。
-连续几何可以通过的窄门，粗网格可能判不可达；缩小 $\rho$ 能减少这类保守损失。
-地图外部也视为阻塞，边界附近格子同样要满足距离要求。
+整格条件比只检查中心更保守。设一扇门宽 $.7$ m，机器人直径 $.6$ m，
+连续中心通道只剩 $.1$ m；若格子也宽 $.1$ m，要让它连同边缘都严格落在通道内就很困难。
+缩小 $\rho$，通常能减少这类离散造成的通路损失。
 
-\section{A* 的三个数与两种邻接}
-$g(n)$ 是从起点到节点 $n$ 已知的最小代价，$h(n)$ 是到目标的下界，优先展开
-\begin{equation} f(n)=g(n)+h(n). \end{equation}
-四邻接每步长 $\rho$，使用 Manhattan 距离；八邻接另有长 $\sqrt2\rho$ 的对角步，使用 octile 距离。
-设到目标的索引差绝对值为 $d_x,d_y$，则
-\begin{align}
-h_4 &= \rho(d_x+d_y),\\
-h_8 &= \rho\bigl[\max(d_x,d_y)+(\sqrt2-1)\min(d_x,d_y)\bigr].
-\end{align}
-无障碍时这就是最短距离；障碍只会让路更长，因此不会高估。
-它们还满足一致性，节点确定后不必反复重新打开。
+\section{A* 如何决定先走向哪个格子}
+把每个自由格的中心视为一个节点，合法的邻接移动视为图上的边。
+四邻接允许上、下、左、右移动，每步长 $\rho$；
+八邻接增加四个对角方向，由勾股定理，每个对角步长为 $\sqrt2\rho$。
+我们要找的是这些边组成的最短路线。
 
+\subsection{三个数分别记录什么}
+对一个节点 $n$，维护三个量：
+\begin{itemize}
+\item $g(n)$：目前已经找到的、从起点走到它的最小路径长度。
+\item $h(n)$：忽略障碍后，从它走到目标至少还需要多远，称为启发式。
+\item $f(n)=g(n)+h(n)$：沿当前路线到达它后，再乐观地走向目标的总长度估计。
+\end{itemize}
+起点的 $g=0$，尚未到达的格子为 $+\infty$。
+将发现但还未展开的节点放进优先队列，每次取 $f$ 最小的一个，检查它的邻居。
+从 $n$ 走到邻居 $v$ 的候选长度是
+\begin{equation}
+g_{\rm candidate}(v)=g(n)+c(n,v),
+\end{equation}
+其中 $c$ 是一步距离。如果它比旧 $g(v)$ 更小，就更新 $g(v)$，并把 $n$ 记为 $v$ 的父节点。
+这个“发现更短的到达方式并替换记录”的操作叫\textbf{松弛}。
+当目标从队列中被取出时，沿父节点链倒着回溯，就能找到整条路线。
+目标刚作为邻居被发现时还可能有更短的到达方式，因此要等它被取出。
+
+\subsection{四邻接和八邻接的启发式从哪里来}
+设当前位置到目标的索引差绝对值为 $d_x,d_y$。
+四邻接的一步只能减少一个坐标差，所以至少需要 $d_x+d_y$ 步，
+无障碍时也确实能用这些步到达：
+\begin{equation}h_4=\rho(d_x+d_y).\end{equation}
+这称为 Manhattan 距离。
+八邻接可以先用对角步同时减少两个坐标差。
+设 $d_x\geq d_y$，走 $d_y$ 次对角后，还需走 $d_x-d_y$ 次横向步，总代价是
+\begin{equation}
+\rho[\sqrt2d_y+(d_x-d_y)]
+=\rho[d_x+(\sqrt2-1)d_y].
+\end{equation}
+为什么尽量用对角步最短？一次向右再向上代价为 $2\rho$，替换成对角步只需 $\sqrt2\rho$，
+所以两轴都还需前进时合并这两步总会缩短路线；走反向步则会增加需要补回的距离。
+交换两轴即可得到对称写法，也称 octile 距离：
+\begin{equation}
+h_8=\rho[\max(d_x,d_y)+(\sqrt2-1)\min(d_x,d_y)].
+\end{equation}
+例如从 $(0,0)$ 到 $(3,2)$，$\rho=1$ m，四邻接需要 5 m，
+八邻接需要 $2\sqrt2+1\approx3.828$ m。
+加入障碍只会删掉一些可走的边，所以忽略障碍所得距离不会高估实际最短路。
+
+八邻接从起点首次展开时，可手算以下队列项：
+\begin{center}\small
+\begin{tabular}{lccc}\toprule
+节点 & $g$/m & $h$/m & $f$/m\\\midrule
+$(1,0)$ & $1$ & $2\sqrt2\approx2.828$ & $3.828$\\
+$(0,1)$ & $1$ & $2+\sqrt2\approx3.414$ & $4.414$\\
+$(1,1)$ & $\sqrt2\approx1.414$ & $1+\sqrt2\approx2.414$ & $3.828$\\\bottomrule
+\end{tabular}
+\end{center}
+表中 $f$ 有并列。代码按 $(f,g,\text{格子编号})$ 排序，
+先选 $f$ 小者，再选 $g$ 小者，最后选编号小者，因而此例先展开 $(1,0)$。
+相同输入每次都使用同一排序，也便于逐步核对搜索过程。
+
+\subsection{为何取出的节点可以确定下来}
+对任意合法邻接 $n\to v$，忽略障碍时，先走这一步再从 $v$ 走到终点也是一条可选路线。
+直接求得的无障碍最短距离不会比它更长，所以
+\begin{equation}h(n)\leq c(n,v)+h(v).\end{equation}
+这个性质称为\textbf{一致性}。它意味着沿路线的 $f$ 不会下降：
+$g(n)+c(n,v)+h(v)\geq g(n)+h(n)$。
+
+由此可说明，每次从队列取出的节点，其 $g$ 已是最短距离。
+假设前面取出的节点都正确，现在取出 $n$，而真实最短路线的长度却小于 $g(n)$。
+沿这条最短路线从起点走，找到第一个还留在队列中的节点 $v$。
+它的前驱已经正确展开，所以松弛已给 $v$ 写入最短的 $g(v)$。
+把一致性沿 $v$ 到 $n$ 的后续边相加，就有
+\begin{equation}
+f(v)=g(v)+h(v)\leq g_{\rm shorter}(n)+h(n)<g(n)+h(n)=f(n).
+\end{equation}
+那么队列应先取出 $v$，与当前取出 $n$ 矛盾。
+所以 \code{closed} 中的节点可以保持已确定状态。若把 $h$ 全部设为零，
+就得到按起点距离向外扩展的 Dijkstra 搜索，可作为手算或程序对照。
+
+\subsection{从邻居循环读懂实现}
+\par\noindent\begin{minipage}{\linewidth}
 \lstinputlisting[language=C++,linerange={astar_neighbors_begin-astar_neighbors_end},
   includerangemarker=false]{../ros2_ws/src/motion2d/src/planning/astar.cpp}
+\end{minipage}\par
+两个循环枚举相邻偏移，排除原地不动及当前邻接规则不允许的方向。
+\code{freeCell} 同时检查边界和阻塞；\code{std::hypot(dx,dy)} 计算
+$\sqrt{dx^2+dy^2}$，乘分辨率后就是一步的米制长度。
+更新 \code{distance} 和 \code{parent} 后，把新的 $(f,g,\text{编号})$ 放回优先队列。
+同一格可能有多个历史队列项，取出时跳过已确定节点或比最新距离更长的旧项。
 
-关键是中间的对角检查：终点自由不代表连线安全。
-例如右邻格被堵、上邻格自由，即使右上格自由，也不能沿对角线擦过右邻障碍的角。
-\textbf{练习 ch11-1} 补完 diagonal\_step.hpp，分别检查两侧被挡的情况。
+对角步还检查两侧轴向格子。例如前面右图中右邻格阻塞，上邻和右上格自由，
+从左下中心直连右上中心会接触右邻格的角点。
+本章把闭区域接触也算碰撞，因此要检查两侧格子，而不只看对角终点。
+\textbf{代码练习 ch11-1：}补完 \path{starter/diagonal_step.hpp}。
 
-程序保留每个节点的父节点，从目标反向回溯，再反转得到格子序列。
-输出折线包含精确请求的起终点；它们可以不在格子中心。
-因为起终格的整个面积已保证安全，格内接到中心的短线仍然安全。
-两个点在同一格时直接相连，不必绕到格子中心。
+输出折线还包含精确请求的起终点，它们可以不在格子中心。
+起终格整个面积已满足间隙条件，格内连接中心的短线也安全；若端点恰在格边上，
+再用下面的闭区间相交检查确认它没有接触旁边的阻塞格。
+两点在同一个自由格内部时直接相连，减少一次不必要的中心绕行。
 
 \clearpage
-\section{未知不是免费的捷径}
+\section{在已观测自由区域内规划}
 只有已观测且概率编码不大于 35 的格子作为原始自由格；未知 $-1$、不确定与占据均默认阻塞。
-这是本课程的规划策略，不是 ROS 强制规定。显式设置 unknown\_blocked=false 可以做乐观探索实验，
-但不能把未观测空间称为已验证安全。
+这是一种先在已观测自由区内行驶的策略。设置 \code{unknown_blocked=false} 后，搜索会允许进入未知区；
+可用它研究探索行为，但机器人需要随新观测持续检查并更新前方路径。
 
 搜索结果必须区分：
 \begin{center}\small
@@ -76,23 +209,65 @@ invalid\_start / invalid\_goal & 起点或终点越界、被堵或接触阻塞�
 unreachable & 两点有效，但自由格图不连通 \\\bottomrule
 \end{tabular}
 \end{center}
-失败时返回空路径和无穷大代价。成功的 grid\_cost 是\textbf{中心节点图}上的最短距离，
-不是含精确端点及后续简化的折线总长。两者的定义不能混用。
+失败时返回空路径和无穷大代价。成功的 \code{grid_cost} 是中心节点图上的最短距离。
+输出折线还加上精确端点到格子中心的连接段，后续简化又可能用直线替换折线，
+所以另外用实际坐标计算长度：
+\begin{equation}
+L=\sum_{i=1}^{N-1}\|p_{i+1}-p_i\|
+=\sum_{i=1}^{N-1}\sqrt{(x_{i+1}-x_i)^2+(y_{i+1}-y_i)^2}.
+\end{equation}
+例如 $(0,0)\to(3,0)\to(3,4)$ 的折线长为 $3+4=7$ m，
+若允许直接连接两端，则长度为 $\sqrt{3^2+4^2}=5$ m。
+分别记录图代价、输出折线长度和简化长度，才能解释它们之间的变化。
 
 \section{删掉折点之前，检查整条线段}
-贪心简化从当前点开始，寻找能直视的最远后续点，再继续。
-这是减少折点的实用方法，不保证连续空间的全局最短路线。
-检查线段 $p(t)=a+t(b-a)$，$t\in[0,1]$ 与每个候选阻塞方格的闭区间是否相交。
-对每个轴施加 $l\leq p(t)\leq u$，把允许的 $t$ 区间相交；非空就是接触或穿过障碍。
+贪心简化从当前点开始，尝试直接连接最远的后续点。
+若连线碰撞，就向前退一个候选点继续尝试；找到可见点后保留它，再处理剩余路径。
+替换后的直线不长于原折线，因为反复使用三角不等式可得
+$\|p_k-p_i\|\leq\sum_{j=i}^{k-1}\|p_{j+1}-p_j\|$。
+它在已有路线的可见点间删减折点，适合把栅格折线整理为后续轨迹的初值。
 
-本实现遍历线段包围框中的格子，采用解析区间裁剪。它检查细障碍、擦角和沿边接触，
-不用固定间距采样“猜测安全”。代价是长斜线可能检查较多格子；之后可优化为 supercover DDA，
-但应保留当前实现作为容易审查的对照。
+\subsection{将二维相交化为一个参数区间}
+线段写为 $p(t)=a+t(b-a)$，$t\in[0,1]$。
+设阻塞格在某一轴上占区间 $[l,u]$，该轴位移为 $\Delta=b-a$。
+线段位于这个轴向区间的条件是
+\begin{equation}l\leq a+t\Delta\leq u.\end{equation}
+若 $\Delta>0$，减去 $a$ 再除以 $\Delta$，得到
+$(l-a)/\Delta\leq t\leq(u-a)/\Delta$。
+若 $\Delta<0$，除以负数会反转不等号，因此交换两个端点即可。
+若 $\Delta=0$，该坐标恒为 $a$：它在 $[l,u]$ 内则本轴不限制 $t$，在外面则整条线都不相交。
+
+从 $[t_{\rm enter},t_{\rm leave}]=[0,1]$ 开始，分别算 $x,y$ 轴允许的区间，更新
+\begin{equation}
+t_{\rm enter}\leftarrow\max(t_{\rm enter},t_{\rm axis,min}),\qquad
+ t_{\rm leave}\leftarrow\min(t_{\rm leave},t_{\rm axis,max}).
+\end{equation}
+若最终 $t_{\rm enter}\leq t_{\rm leave}$，两个轴同时位于方格内的时间参数存在，
+即线段接触或穿过这个格子；若大于，则相交区间为空。
+这称为按轴区间裁剪，对应 \path{src/planning/path_simplifier.cpp} 中的 \code{intersects}。
+
+例如线段 $(0,0)\to(3,2)$，阻塞格为 $[1,2]\times[1,2]$。
+$x$ 轴要求 $t\in[1/3,2/3]$，$y$ 轴要求 $t\in[1/2,1]$，
+交集 $[1/2,2/3]$ 非空，所以直线会穿过格子。
+再看 $(0,0)\to(2,2)$ 与 $[1,2]\times[0,1]$：两轴交集只有 $t=1/2$，
+仍算碰撞，因为线段恰好触到角点 $(1,1)$。
+
+\subsection{先缩小候选格范围，再做精确检查}
+线段的两个坐标各自位于端点的最小值与最大值之间，形成一个包围框。
+
+
+\code{segmentIsFree} 将包围框换成格子索引，遍历其中的阻塞格，并调用上述裁剪函数。
+下界索引多向外取一格，是为了包含线段恰落在格边时另一侧被接触的格子。
+\code{simplifyPath} 则从路径末端向前寻找第一个通过检查的候选点。
+
+这种方法直接判断完整线段与闭方格的交集，能发现两次离散采样之间的细障碍或擦角。
+长斜线的包围框可能包含许多格子，进一步提速时可以研究同时包含边角接触格的
+supercover DDA，再与这个区间裁剪版本对照。
 
 \begin{notebox}
 \textbf{建图射线遍历不能直接当作碰撞检查}\quad 第七章 DDA 在恰好经过角点时同时跨两个轴，
 跳过只被角点触到的旁边格子。这适合那里的观测更新约定，但会漏掉规划中的角点接触。
-相同的网格不表示相同的遍历语义。
+规划需要把这些旁边格子也纳入碰撞检查，才能保持闭区域接触的约定。
 \end{notebox}
 
 \textbf{常见错误：}只看对角终点；把未知默认当作自由；只查简化线段上的少量采样点；
@@ -118,10 +293,10 @@ every last row/.style={after row=\bottomrule}]{data/ch11_astar.csv}
 \end{center}
 本实验裕量为零，半径分别为 0、0.15、0.30 m。四邻接成功时图代价为 4 m，
 八邻接约为 3.12132 m。两种半径的成功代价相同不表示路径完全相同：栅格中可以存在多个等长路线。
-扩展节点数同时受启发式、可用区域和并列排序影响，不能当作一般性能承诺。
+扩展节点数同时受启发式、可用区域和并列排序影响；可以逐项固定这些条件，比较不同配置的搜索工作量。
 
 0.7 m 门能在连续几何中容纳直径 0.6 m 的圆盘，但本例找不到整格都安全的贯通路径。
-这是明确的离散保守性，不是把真实机器人偷偷变大；分辨率、半径与整格安全要求共同决定结果。
+分辨率、半径与整格安全要求共同决定了可用中心区域。将分辨率减半并保持物理门宽不变，可以观察通路是否重新出现。
 下一步接入观测地图后，还要区分几何变窄与尚未看见造成的封闭。
 
 \begin{enumerate}
@@ -129,9 +304,8 @@ every last row/.style={after row=\bottomrule}]{data/ch11_astar.csv}
 \item \textbf{代码：}完成邻居检查，覆盖外边界、两侧被挡和合法对角。
 \item \textbf{实验：}改变半径、分辨率或未知策略，记录可达性、代价与简化点数。
 \end{enumerate}
-\textbf{验收：}30 组 seed=1111 随机栅格与独立 Dijkstra 的最短代价一致；
-另检查已知四/八邻接距离、精确端点、同格路径、窄门、未知、外界、穿角、线段擦边/擦角与简化后安全。
-下面接入 ROS 观测地图和点击目标。
+把启发式改成零，用 Dijkstra 与 A* 比较同一栅格的最短代价，
+再观察展开节点数。即使搜索顺序不同，两者也应给出相同的图最短距离。
 
 \clearpage
 \section{从观测地图接入 ROS 与 RViz}
@@ -156,7 +330,7 @@ ros2 topic echo /plan/status
 输出 & /plan/path、/plan/status & map 折线与显式规划状态 \\\bottomrule
 \end{tabular}
 \end{center}
-规划器不订阅障碍物列表、仿真位姿或真值里程计。它使用选源后的 /odometry；
+规划器通过选源后的 /odometry 读取位置；
 此启动配置的定位来源仍是\textbf{真值}，地图来源则是\textbf{激光观测}。
 后续替换定位来源无需修改 A* 内核。
 
@@ -164,12 +338,12 @@ ros2 topic echo /plan/status
 {}^{map}T_{base}={}^{map}T_{odom}\,{}^{odom}T_{base}.
 \end{equation}
 TF 按里程计采样时刻查询；未能获取时发布 waiting\_transform 并等待下一次尝试。
-不能把 odom 坐标直接当作 map 坐标。观测地图只接受 map 中轴对齐的栅格；
-原点含旋转时明确拒绝，不能悄悄丢掉旋转。
+变换中既有旋转也有平移，按第二章的复合规则计算后，起点才与目标处于同一个 map 坐标系。
+本章的索引公式用于 map 中轴对齐的栅格；若地图原点带旋转，需先变换到栅格局部坐标，作为扩展练习实现。
 
 节点用 5 Hz 定时器合并输入更新：新目标、新地图或起点移动至少 0.05 m 时重新规划。
 一次搜索始终使用同一张配置空间栅格。地图和状态保留最后一条消息，便于晚加入的 RViz 读取。
-地图掩码不是占据概率；不要把它再喂给占据建图或重复膨胀。
+地图掩码中的 0/100 表示当前机器人中心能否通行，和输入地图的占据概率用途不同；半径已在生成掩码时计入。
 \lstinputlisting[language=C++,linerange={planner_snapshot_begin-planner_snapshot_end},
   includerangemarker=false]{../ros2_ws/src/motion2d/src/nodes/planner_node.cpp}
 
@@ -195,15 +369,16 @@ TF 按里程计采样时刻查询；未能获取时发布 waiting\_transform 并
 \caption{默认世界左下角的局部视图。左侧灰色为未知，深色为不满足自由阈值的观测；
 右侧浅蓝含额外膨胀。红线从 $(-8,-8)$ 到 $(-7.5,-8)$ m，两侧都保持米制等比例。}
 \end{figure}
-本次得到 6872 个整格安全的自由格，简化路径含两个端点。
-机器人仍停在起点；给 $(8,8)$ m 的目标返回 invalid\_goal，错误 frame 返回
-invalid\_goal\_frame\_or\_position，两种失败都清空路径。
-还检查输入隔离、时间重置和唯一 TF 来源；独立测试用旋转 $90^\circ$、平移 $(1,2)$ m 的变换验证坐标组合。
-RViz 配置已提供，本次主机验收为无界面 ROS 运行，未将 GUI 画面列为已验收。
+在图示区域，起点到目标位于同一片已观测自由空间内，简化后只需保留两个端点。
+机器人仍停在起点，路径用于描述将来可以走向的位置。
+再给 $(8,8)$ m 的目标，观察 \code{invalid_goal} 状态：该位置可能还未被激光观测到，
+因此无法在当前配置空间中作为有效终点。把消息的 frame 改成错误坐标系时，
+会得到 \code{invalid_goal_frame_or_position}；两种情况下 RViz 中的旧路径都会清除。
+这两个实验分别说明地图信息和坐标约定如何影响同一个规划器。
 
 \textbf{练习 ch11-2：}实现 pathLength，累计相邻实际坐标之间的欧氏距离。
 空路径和单点长度为零；含重复点时不要额外增加距离。
 用 3--4--5 三角形与多段折线验证，比较 A* 的 grid\_cost、真实端点折线长度与简化长度。
 
 \textbf{排查：}看不到路径时，先读 /plan/status，再检查目标 frame、观测是否足够、半径及未知策略。
-在 RViz 勾选 Configuration grid 可查看规划用的掩码。不要为了得到路径而把未知策略悄悄改为乐观。
+在 RViz 勾选 Configuration grid 可查看规划用的掩码。比较已观测自由区域与膨胀后的区域，便能区分未知区域阻断与机器人半径造成的通路收缩。
