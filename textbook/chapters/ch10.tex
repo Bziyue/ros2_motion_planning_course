@@ -1,0 +1,102 @@
+\chapter{回到起点之后：关键帧与位姿图}
+\begin{notebox}
+\textbf{目标}\quad 理解相对约束如何共同调整轨迹，以及为什么回环不只是“画一条线”。\\
+\textbf{先修}\quad 第 02、08、09 章；先隔离优化内核，再接地点识别和传感器。
+\end{notebox}
+
+\section{从一条链变成一张图}
+运行一个只含相对位姿约束的实验：
+\begin{lstlisting}[language=bash]
+ros2 run motion2d pose_graph_demo tmp/ch10_graph
+/usr/bin/python3 scripts/plot_ch10_graph.py
+\end{lstlisting}
+81 个节点沿 $4\times3$ m 矩形行走；每条顺序边带小误差。
+不加回环时，把边依次相乘就得到一条逐渐漂移的链。
+最后加一条“末帧与首帧重合”的测量，优化器让所有节点共同分担矛盾。
+这只是合成位姿图实验，\textbf{尚未验证地点识别或完整 SLAM}。
+
+每个节点是关键帧在 map 中的位姿 $T_i$；一条边的测量 $Z_{ij}$ 把帧 $j$ 的坐标变到帧 $i$。
+理想情况下 $Z_{ij}=T_i^{-1}T_j$。定义
+\begin{equation}
+E_{ij}=Z_{ij}^{-1}T_i^{-1}T_j,\qquad
+ e_{ij}=\begin{bmatrix}p(E_{ij})\\\operatorname{wrap}(\psi_j-\psi_i-\psi_{ij})\end{bmatrix}.
+\end{equation}
+这里取误差变换的平移和角度，\textbf{不是 SE(2) 对数映射}。
+平移单位 m，角度 rad；不能直接让这三个数不分尺度地竞争。用测量标准差构造
+\begin{equation}
+D_{ij}=\operatorname{diag}(1/\sigma_x,1/\sigma_y,1/\sigma_\psi),\qquad
+\widetilde e_{ij}=D_{ij}e_{ij}.
+\end{equation}
+顺序边使用 $\tfrac12\|\widetilde e\|^2$；回环边对范数使用第八章的 Huber 损失。
+默认阈值为 3，单位是已经白化的残差尺度。
+
+\section{为什么必须固定第一帧}
+若对所有位姿左乘同一个固定变换 $A$，则
+\begin{equation}
+(AT_i)^{-1}(AT_j)=T_i^{-1}T_j.
+\end{equation}
+因此相对约束看不到整张图的全局平移与旋转。固定第一帧的 $x,y,\psi$，
+相当于给地图选坐标原点，不是使用机器人真值。程序直接不把首帧写入优化变量，
+不靠一个随意放大的先验权重近似“固定”。图若不连通，其他分量仍有自由度，返回 disconnected。
+
+\clearpage
+\section{两端位姿各贡献一个雅可比}
+令 $q=R_i^\top(p_j-p_i)$、$R_z=R(\psi_{ij})$、
+$J=\left[\begin{smallmatrix}0&-1\\1&0\end{smallmatrix}\right]$。
+对全局位置与航向做加性扰动，则
+\begin{equation}
+A_{ij}=\frac{\partial e}{\partial (p_i,\psi_i)}=
+\begin{bmatrix}-R_z^\top R_i^\top&-R_z^\top Jq\\0\;0&-1\end{bmatrix},\qquad
+B_{ij}=\frac{\partial e}{\partial (p_j,\psi_j)}=
+\begin{bmatrix}R_z^\top R_i^\top&0\\0\;0&1\end{bmatrix}.
+\end{equation}
+航向跨越 $\pm\pi$ 时残差必须归一化；差分测试避开恰好不可微的分支切口。
+\lstinputlisting[language=C++,linerange={graph_residual_begin-graph_residual_end},
+  includerangemarker=false]{../ros2_ws/src/motion2d/src/estimation/pose_graph.cpp}
+
+把 $DA$、$DB$ 放到对应节点的三列中。每条边只连接两个节点，所以只增加四个 $3\times3$ Hessian 块：
+\begin{equation}
+H_{ab}\mathrel{+}=w J_a^\top J_b,\qquad
+ g_a\mathrel{+}=w J_a^\top\widetilde e,\qquad H\delta=-g.
+\end{equation}
+普通边 $w=1$；回环边 $w=\min(1,3/\|\widetilde e\|)$。
+Eigen 稀疏 LDLT 求解增量，再回溯缩短步长，直到实际代价充分下降。
+小步长才报告收敛；迭代耗尽、奇异或线搜索失败都有单独状态。不要把失败的候选图替换当前地图。
+
+\begin{notebox}
+\textbf{鲁棒损失无法证明回环是真的}\quad 一个一维反例：正常边测量 $x=1$，错误回环测量 $x=10$，
+两者 $\sigma=0.1$。普通最小二乘给出 $x=5.5$；只对回环用阈值 3 的 Huber，解仍是 $x=1.3$。
+错误回环的影响变小，却没有消失。必须先做几何验证，再让约束进入图。
+\end{notebox}
+
+\clearpage
+\section{矩形实验与可独立检验的答案}
+固定 seed=1010，沿四条边各走 20 步。每步加独立 $0.01$ m 平移噪声、$0.002$ rad 航向噪声，
+并注入每步 $0.003$ rad 航向偏差。顺序边的测量尺度为 $(.03,.03,.02)$；
+闭环观测为单位变换，尺度 $(.02,.02,.01)$。参考轨迹仅用于评估，不送给优化器。
+\begin{figure}[h]
+\centering\includegraphics[width=\linewidth]{figures/ch10_graph.pdf}
+\caption{合成位姿图的优化前后结果。左图等比例，方块为固定首帧，紫色虚线指出原始链的闭合缺口。}
+\end{figure}
+\begin{center}\small
+\pgfplotstabletypeset[col sep=comma,
+columns={mode,position_rmse,closure_error,final_cost,iterations},
+columns/mode/.style={column name=约束,string type,string replace*={odometry}{顺序边},string replace*={loop}{加回环}},
+columns/position_rmse/.style={column name=位置 RMSE/m,fixed,precision=4},
+columns/closure_error/.style={column name=闭合误差/m,fixed,precision=4},
+columns/final_cost/.style={column name=最终代价,fixed,precision=4},
+columns/iterations/.style={column name=迭代},
+every head row/.style={before row=\toprule,after row=\midrule},
+every last row/.style={after row=\bottomrule}]{data/ch10_graph.csv}
+\end{center}
+顺序边代价几乎为零，因为链本身就是由这些边累乘出来的；这不表示它没有漂移。
+加入新约束后边之间有冲突，最优代价可以大于零，而参考误差反而下降。
+不能只比较两个不同图的最终代价来宣称哪个定位更准确。
+
+\textbf{练习 ch10-1：}补完 edge\_residual.hpp，检查旋转坐标和角度跨界。
+理解题证明左乘不变性；实验题改变回环尺度，比较全程 RMSE、闭合误差、代价与求解状态。
+常见错误包括变换乘法顺序颠倒、只锚定位置却漏掉航向、把错误闭环交给鲁棒核“自动判断”。
+
+\textbf{本增量验收：}雅可比中心差分、非零首帧固定、已知矩形恢复；
+一维两测量的加权解析解；错误回环影响和不连通图状态。
+接下来从真实激光/IMU 里程计选择关键帧，在添加回环前完成几何验证，并重新构建地图。

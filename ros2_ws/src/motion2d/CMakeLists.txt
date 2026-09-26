@@ -21,7 +21,7 @@ add_library(motion2d_core
   src/sim/imu.cpp src/sim/sensor_scheduler.cpp src/mapping/scan_projection.cpp
   src/mapping/occupancy_grid.cpp src/evaluation/map_evaluation.cpp
   src/estimation/scan_matcher.cpp src/estimation/lidar_odometry.cpp src/estimation/imu_predictor.cpp
-  src/estimation/planar_ekf.cpp src/estimation/fusion_timeline.cpp)
+  src/estimation/planar_ekf.cpp src/estimation/fusion_timeline.cpp src/estimation/pose_graph.cpp)
 target_compile_features(motion2d_core PUBLIC cxx_std_17)
 target_compile_options(motion2d_core PRIVATE -Wall -Wextra -Wpedantic)
 target_include_directories(motion2d_core PUBLIC
@@ -143,8 +143,14 @@ add_executable(lidar_imu_demo src/examples/lidar_imu_demo.cpp)
 target_link_libraries(lidar_imu_demo PRIVATE motion2d_core)
 install(TARGETS lidar_imu_demo DESTINATION lib/motion2d)
 
+add_executable(pose_graph_demo src/examples/pose_graph_demo.cpp)
+target_link_libraries(pose_graph_demo PRIVATE motion2d_core)
+install(TARGETS pose_graph_demo DESTINATION lib/motion2d)
+
 if(BUILD_TESTING)
   find_package(ament_cmake_gtest REQUIRED)
+  ament_add_gtest(test_pose_graph test/test_pose_graph.cpp)
+  target_link_libraries(test_pose_graph motion2d_core)
   ament_add_gtest(test_fusion_timeline test/test_fusion_timeline.cpp)
   target_link_libraries(test_fusion_timeline motion2d_core)
   ament_add_gtest(test_planar_ekf test/test_planar_ekf.cpp)

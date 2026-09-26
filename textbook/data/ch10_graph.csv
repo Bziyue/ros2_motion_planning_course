@@ -1,0 +1,3 @@
+mode,position_rmse,closure_error,initial_cost,final_cost,iterations,status
+odometry,0.373488,0.483486,6.49703e-28,6.49703e-28,1,converged
+loop,0.118342,0.000586677,98.6811,1.05899,5,converged
