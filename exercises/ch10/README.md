@@ -16,3 +16,9 @@ g++ -std=c++17 -I/usr/include/eigen3 -Iros2_ws/src/motion2d/include \
 ```
 
 starter预期失败；将starter换成solutions验证参考解。
+
+4. 代码 ch10-2：补完 `map_alignment.hpp`。用同一时刻的map/odom两种机器人位姿求map→odom，
+   原始odom保持不变。上面命令的check_edge.cpp换成check_alignment.cpp；旋转90度手算例容差1e-12。
+5. 实验：运行`slam_demo tmp/ch10_slam`，比较相同输入的回环开/关；分别记录全程关键帧RMSE与末帧误差。
+   提高min_separation或减小candidate_distance，解释回到起点却未触发回环的情况。
+   观察重建地图，说明为什么不能直接把校正后点云追加到旧图。

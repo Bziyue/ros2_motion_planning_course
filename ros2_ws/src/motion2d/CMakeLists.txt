@@ -21,7 +21,7 @@ add_library(motion2d_core
   src/sim/imu.cpp src/sim/sensor_scheduler.cpp src/mapping/scan_projection.cpp
   src/mapping/occupancy_grid.cpp src/evaluation/map_evaluation.cpp
   src/estimation/scan_matcher.cpp src/estimation/lidar_odometry.cpp src/estimation/imu_predictor.cpp
-  src/estimation/planar_ekf.cpp src/estimation/fusion_timeline.cpp src/estimation/pose_graph.cpp)
+  src/estimation/planar_ekf.cpp src/estimation/fusion_timeline.cpp src/estimation/pose_graph.cpp src/estimation/loop_closure.cpp src/estimation/keyframes.cpp)
 target_compile_features(motion2d_core PUBLIC cxx_std_17)
 target_compile_options(motion2d_core PRIVATE -Wall -Wextra -Wpedantic)
 target_include_directories(motion2d_core PUBLIC
@@ -124,14 +124,15 @@ add_executable(lidar_odometry_demo src/examples/lidar_odometry_demo.cpp)
 target_link_libraries(lidar_odometry_demo PRIVATE motion2d_core)
 install(TARGETS lidar_odometry_demo DESTINATION lib/motion2d)
 
-foreach(node lidar_odometry estimated_odometry fusion)
+foreach(node lidar_odometry estimated_odometry fusion slam)
   add_executable(${node}_node src/nodes/${node}_node.cpp src/ros/mapping_messages.cpp)
   target_compile_features(${node}_node PRIVATE cxx_std_20)
   target_compile_options(${node}_node PRIVATE -Wall -Wextra -Wpedantic)
   target_link_libraries(${node}_node PRIVATE motion2d_core rclcpp::rclcpp tf2_ros::tf2_ros
     sensor_msgs::sensor_msgs__rosidl_typesupport_cpp
     nav_msgs::nav_msgs__rosidl_typesupport_cpp
-    std_msgs::std_msgs__rosidl_typesupport_cpp)
+    std_msgs::std_msgs__rosidl_typesupport_cpp
+    visualization_msgs::visualization_msgs__rosidl_typesupport_cpp)
   install(TARGETS ${node}_node DESTINATION lib/motion2d)
 endforeach()
 
@@ -147,8 +148,14 @@ add_executable(pose_graph_demo src/examples/pose_graph_demo.cpp)
 target_link_libraries(pose_graph_demo PRIVATE motion2d_core)
 install(TARGETS pose_graph_demo DESTINATION lib/motion2d)
 
+add_executable(slam_demo src/examples/slam_demo.cpp)
+target_link_libraries(slam_demo PRIVATE motion2d_core)
+install(TARGETS slam_demo DESTINATION lib/motion2d)
+
 if(BUILD_TESTING)
   find_package(ament_cmake_gtest REQUIRED)
+  ament_add_gtest(test_keyframes test/test_keyframes.cpp)
+  target_link_libraries(test_keyframes motion2d_core)
   ament_add_gtest(test_pose_graph test/test_pose_graph.cpp)
   target_link_libraries(test_pose_graph motion2d_core)
   ament_add_gtest(test_fusion_timeline test/test_fusion_timeline.cpp)

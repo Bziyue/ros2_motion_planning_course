@@ -100,3 +100,137 @@ every last row/.style={after row=\bottomrule}]{data/ch10_graph.csv}
 \textbf{本增量验收：}雅可比中心差分、非零首帧固定、已知矩形恢复；
 一维两测量的加权解析解；错误回环影响和不连通图状态。
 接下来从真实激光/IMU 里程计选择关键帧，在添加回环前完成几何验证，并重新构建地图。
+
+\clearpage
+\section{从关键帧中寻找旧地点}
+完整管线沿用第九章前端；后端只接收扫描及同一采样时刻的校正位姿。
+平移超过 0.3 m、航向变化超过 0.25 rad，或距上帧超过 2 s，就保存一个关键帧。
+其中既有原始距离数组，也有机体系的体素点云和局部法向量。
+原始观测不能被优化后的全局点云替代，否则下一次校正时无法重建。
+
+\begin{lstlisting}[language=bash]
+ros2 launch motion2d_bringup ch10.launch.py rviz:=false
+# Another terminal, same ROS environment, repository root:
+/usr/bin/python3 scripts/check_ch10.py
+\end{lstlisting}
+排除最近 20 个关键帧后，只在当前估计位置的 0.8 m 范围内寻找候选，航向差小于 0.6 rad。
+每次最多检查距离最近的三个候选。这利用局部里程计尚未严重漂移的假设，不能代替全局地点识别。
+成功回环后至少等待五个新关键帧，避免高频重复加入同一个地点的相关证据。
+
+\begin{center}\small
+\begin{tabular}{ll}\toprule
+几何检查 & 默认条件 \\\midrule
+双向点到线 ICP & 两个方向都收敛，且没有秩退化 \\
+有效对应比例 & 两个方向均至少 $55\%$ \\
+残差与初值偏离 & RMSE 不超过 0.05 m；校正不超过 0.5 m / 0.25 rad \\
+往返一致性 & 平移不超过 0.03 m，航向不超过 0.02 rad \\\bottomrule
+\end{tabular}
+\end{center}
+若正向变换为 $T_{ij}$，反向为 $T_{ji}$，则一致时 $T_{ij}T_{ji}\approx I$。
+实际检查代码如下；任何一项失败都不把回环加入图。
+\lstinputlisting[language=C++,linerange={loop_cycle_begin-loop_cycle_end},
+  includerangemarker=false]{../ros2_ws/src/motion2d/src/estimation/loop_closure.cpp}
+
+\textbf{不能省略的限制：}平行长墙可能退化，重复房间可能给出自洽但错误的双向匹配。
+这些门限减少误接，不能证明地点身份。相同场景下发现了回环，也不能推导出一般环境的成功率。
+图优化失败时撤掉新回环边；已经成立的局部里程计和顺序边保留。
+
+\clearpage
+\section{回环更新地图坐标，不改写局部里程计}
+同一机器人有局部位姿 $T_{OB}$ 和图优化后的全局位姿 $T_{MB}$，满足
+\begin{equation}
+T_{MB}=T_{MO}T_{OB},\qquad T_{MO}=T_{MB}T_{OB}^{-1}.
+\end{equation}
+用最新关键帧的两种位姿计算 map 到 odom 的校正；所有原始 odom 位姿保持不变。
+\textbf{练习 ch10-2} 完成 map\_alignment.hpp，先手算带 $90^\circ$ 旋转的例子。
+仅把两个位置相减会漏掉旋转，无法得到正确变换。
+
+\lstinputlisting[language=C++,linerange={map_alignment_begin-map_alignment_end},
+  includerangemarker=false]{../ros2_ws/src/motion2d/src/estimation/keyframes.cpp}
+
+一条 TF 边只有一个发布者：SLAM 发布 map 到 odom；estimated 适配器发布 odom 到 base\_link；
+模拟器只保留圆心处传感器的静态外参。回环可以让机器人在 map 中跳到更一致的位置，
+但不会把这个全局位移直接写入局部运动链。第十九章会处理全局目标与局部控制参考的衔接。
+
+\begin{center}\small
+\begin{tabular}{ll}\toprule
+输出 & 含义 \\\midrule
+\texttt{/map/cloud} 与 \texttt{/map} & 按最新图位姿重建的点云与观测栅格 \\
+\texttt{/path/graph\_before} & 固定首帧基准中的原始里程计关键帧 \\
+\texttt{/path/graph\_after} & 同一基准中的优化关键帧 \\
+\texttt{/slam/edges} & 顺序边与紫色回环边 \\
+\texttt{/slam/status} & 更新/拒绝状态及关键帧、回环计数 \\\bottomrule
+\end{tabular}
+\end{center}
+前后路径都用首帧固定的 map 基准比较，不再用当前 map 到 odom 把原始基线变换第二次。
+高频局部轨迹仍由第九章输出；图更新频率是关键帧频率。
+
+\textbf{为什么要重建：}设旧图在 $x=3$ m 有一面墙，优化后这次观测应落在 $x=4$ m。
+直接追加新点会留下两面墙。重建时新建空栅格，再遍历所有保留的原始扫描，
+按照各自优化后的采样位姿重新做射线清空与端点占据；体素点云也重新生成。
+本章只累积关键帧，未知区域仍是未知，世界真值不参与更新。
+
+当前最多保留 200 个关键帧，达到容量报告 capacity\_reached；没有悄悄丢弃锚点或改变图语义。
+全量重建便于初学者理解，却会随着帧数增加变慢。更大场景应学习子图与增量更新。
+
+\clearpage
+\section{实际激光与 IMU 的矩形回放}
+\begin{lstlisting}[language=bash]
+ros2 run motion2d slam_demo tmp/ch10_slam
+/usr/bin/python3 scripts/plot_ch10_slam.py
+\end{lstlisting}
+使用 $14\times12$ m 房间，内部有一个圆与一个三角形。
+半径 0.2 m 的全向圆盘沿 $6\times4$ m 矩形行走，每边 6 s，五次时间规律让它在拐角静止；
+机体 yaw 保持零。四条边均通过整段扫掠检查。
+360 束、距离噪声 0.03 m、激光 10 Hz、IMU 200 Hz，噪声 seed=4242/6060。
+
+\begin{figure}[h]
+\centering\includegraphics[width=\linewidth]{figures/ch10_slam.pdf}
+\caption{同一真实传感器前端输出，分别送给回环关闭和开启的图。误差只统计关键帧；参考轨迹仅用于评估。}
+\end{figure}
+\begin{center}\small
+\pgfplotstabletypeset[col sep=comma,
+columns={mode,keyframes,loops,position_rmse,final_position_error},
+columns/mode/.style={column name=模式,string type,string replace*={no_loop}{关闭回环},string replace*={loop}{开启回环}},
+columns/keyframes/.style={column name=关键帧},columns/loops/.style={column name=回环},
+columns/position_rmse/.style={column name=位置 RMSE/m,fixed,precision=4},
+columns/final_position_error/.style={column name=末关键帧误差/m,fixed,precision=4},
+every head row/.style={before row=\toprule,after row=\midrule},
+every last row/.style={after row=\bottomrule}]{data/ch10_slam.csv}
+\end{center}
+本例在 22.3 s 检查一个候选并接受回环；最后关键帧时间为 22.8 s。
+表中的末帧误差不是 24 s 终点误差，也不是首尾闭合距离。
+激光拒绝 27 帧，EKF 无额外拒绝；失败扫描没有进入图。
+
+回环显著改善了靠近返回地点的关键帧，但部分中间点误差反而略增。
+全程位置 RMSE 只从约 1.44 cm 降至 1.32 cm；不能只用末帧约 1.75 cm 到 0.033 cm 的改善宣传全程效果。
+所有 CSV、原始地图 PGM 与点云 CSV 均可由上述命令重新生成。
+
+\clearpage
+\section{观察重建地图，并检查失败分支}
+\begin{figure}[h]
+\centering\includegraphics[width=\linewidth]{figures/ch10_maps.pdf}
+\caption{两图均由关键帧扫描构建，分辨率 0.1 m。白色自由，深色占据，灰色未知，浅褐色为已观测但不确定；横纵尺度相同。}
+\end{figure}
+本例原始误差只有厘米量级，小于地图分辨率，因此两张全景图很接近。
+不能仅凭图片宣称全图精度大幅提高。地图重建的必要性由独立测试验证：
+将同一观测的墙面移动一个格子后，旧墙位置不再保留占据，新位置正确出现。
+圆与三角形内部没有被光线穿透，仍然保留未知区域。
+
+启动默认 RViz 配置时，应看到优化关键帧、紫色回环边、重建点云和占据图；
+原始世界与真值机器人默认隐藏。可修改配置中的 slam.enable\_loops 为 false 对照。
+本机本次实际 ROS 无界面运行得到 24 个关键帧和一次回环，地图/云/路径时间戳一致。
+map 到 odom 与 odom 到机体各只有一个发布者；订阅检查没有真值或 TF 输入。
+局部里程计最大单步位置变化约 0.0403 m，图优化没有覆盖它；reset 后关键帧回到一个、回环边清空。
+GUI 验收仍受前述主机 OpenGL/时间回拨问题限制，没有用离线图冒充 RViz 截图。
+
+\begin{enumerate}
+\item \textbf{理解：}为什么只有修改 TF、不重建历史点云，会得到坐标正确但几何仍旧扭曲的地图？
+\item \textbf{代码：}完成两道练习，检查边残差的变换顺序和 map 到 odom 的计算。
+\item \textbf{实验：}改变候选距离、关键帧间隔或激光噪声，记录候选数、接受数、拒绝帧与误差。
+\item \textbf{失败：}用单面墙验证退化，用无重叠云验证拒绝；达到图容量时应看到明确状态。
+\end{enumerate}
+
+\textbf{本章边界：}已具备静态小场景的激光/IMU 局部定位、几何回环、图优化和观测地图重建。
+没有实现失锁后的全局重定位、动态物体过滤或长期地图管理。接下来先用真值定位路线学习配置空间与 A*，
+使规划问题可以独立验证，最终再组合成完整导航。

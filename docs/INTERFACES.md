@@ -211,3 +211,13 @@ estimated_odometry 适配器发布 /odometry、运动 TF 与 /path/estimated。�
 - `/fusion/status` 区分等待、激光创新拒绝、过旧、激光陈旧及 IMU 中断；激光超过 .5 s 无校正仍传播但标记陈旧，
   IMU 相邻间隔超过 .1 s 清空初始化并等待激光。控制器必须检查这些状态。
 - reset 先暂停并排空旧消息，分别接收两传感器的新原点；不保证跨网络积压的多轮试验消息自动分代。
+
+## 第 10 章落地：回环后端与全局地图
+
+- 后端 `/scan` 与 `/odometry/scan` 必须同一整数纳秒；只保存有效关键帧。
+- `/map/cloud`、`/map`、`/path/graph_before`、`/path/graph_after` 与 `/slam/edges` 都以map为坐标，
+  各次关键帧更新使用同一时间戳；before是固定首帧基准下的原始里程计基线。
+- `/slam/status` 包括结果名称、frames和loops计数；capacity_reached 表示达到200帧教学容量。
+- `slam_node` 是map→odom的唯一动态发布者，estimated适配器设置publish_map_alignment=false。
+  回环不改写odom轨迹；原始扫描以各自优化位姿重建，不追加到旧地图。
+- 双向几何回环仅在附近旧关键帧上搜索，重复几何仍可能误接；不是失锁后的全局重定位。
