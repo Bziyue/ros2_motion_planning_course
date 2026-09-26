@@ -1,92 +1,205 @@
 \chapter{换一种消元顺序：二维 Spline2D}
 \begin{notebox}
-\textbf{目标}\quad 理解块三对角系统，验证同一最小 jerk 问题的系数与梯度，实测性能。\\
-\textbf{先修}\quad 第 14、15 章；本章固定二维五次，不扩展到任意阶通用框架。
+\textbf{目标}\quad 用连接点导数求同一条最小 jerk 曲线；从 Bézier 凸包计算整段上界；为阿克曼车分别规划路径形状与运动时间。\\
+\textbf{先修}\quad 第14、15章的五次插值、二次型和伴随；第04章的阿克曼平坦映射。
 \end{notebox}
 
-\section{先固定问题，再比较实现}
+\section{相同曲线，另一组未知数}
+第15章直接求每段六个系数。本章先求内部连接点的速度与加速度，再由两端 p/v/a 还原每段系数。
+两种方法固定相同的首尾 p/v/a、内部位置和正时长，最小化相同的 jerk 积分。
+上一章已说明这个问题的解唯一，因此两种消元顺序应当给出同一条曲线。
 \begin{lstlisting}[language=bash]
 ros2 run motion2d spline_demo tmp/ch16_spline
 bash scripts/benchmark_ch16.sh
 /usr/bin/python3 scripts/plot_ch16_spline.py
 \end{lstlisting}
-第一条无需下载。第二条是可选上游对照，使用
-\href{https://github.com/Bziyue/SplineTrajectory}{SplineTrajectory} 的 QuinticSplineND<2>，固定版本为
-\texttt{126525e49a43b0548bc6960e4979dd6b6258f289}。
-上游为 MIT 许可证；对照脚本只在临时目录读取它，课程核心独立实现。
-本章的 Spline2D 和上一章 MINCO 解决\textbf{同一个 clamped 最小 jerk 问题}：
-相同首尾 p/v/a、内部位置和正时长，结果应相同。它不是另一条曲线，也不是把路点当 B-spline 控制点。
+第一条运行本地的两种实现。第二条可选，用
+\href{https://github.com/Bziyue/SplineTrajectory}{SplineTrajectory} 的 \code{QuinticSplineND<2>} 作对照；
+固定版本为 \texttt{126525e49a43b0548bc6960e4979dd6b6258f289}，许可证为 MIT。
+课程核心采用二维五次的独立实现；对照脚本在临时目录读取上游代码。
+本章的路点是曲线必须经过的位置，内部导数由优化确定。
 
-\section{未知数改为连接点的速度与加速度}
-单段边界状态写为 $W_i=[p_i,v_i,a_i,p_{i+1},v_{i+1},a_{i+1}]^T$，每行有 x/y 两列。
-第十四章已能从边界状态求六个系数，因此存在 $C_i=E_i(T_i)W_i$。
-用单位边界依次调用 interpolateQuintic，可以直接构造 $E_i$ 的六列；无需初学者先抄一大组公式。
-代入 jerk 二次型：
-\begin{equation}
- J_i=\operatorname{tr}(W_i^TR_iW_i),\qquad R_i=E_i^TQ_iE_i.
-\end{equation}
-所有位置固定，首尾 v/a 固定，只有内部 $z_k=[v_k,a_k]^T$ 待求。
-每段只含相邻两个节点，所以驻点条件形成对称块三对角系统：
+\section{由端点状态写出每一段的代价}
+\subsection{端点到系数的线性映射}
+记单段端点状态为 $W=[p_0,v_0,a_0,p_1,v_1,a_1]^T$，每一行有 $x,y$ 两列。
+第14章的六边界插值对这些输入是线性的，因此可写成 $C=E(T)W$，$E$ 为 $6\times6$ 矩阵。
+构造 $E$ 的第 $k$ 列时，只需把第 $k$ 个一维边界量设为1，其余设为0，再调用一次插值函数。
+例如 $T=1$、只令 $v_0=1$，得到
+\[
+ p(t)=t-6t^3+8t^4-3t^5,\qquad E_{:,1}=(0,1,0,-6,8,-3)^T.
+\]
+它在左端速度为1，其他五个边界量为0，正好描述“只改变左端速度”如何改变曲线。
+\code{endpointMap} 依次执行六次这样的单位输入，构造完整的 $E$。
+
+将 $C=EW$ 代入上一章的 jerk 二次型，按矩阵乘法结合顺序整理：
+\[
+ J_i=\operatorname{tr}((EW)^TQ(EW))
+    =\operatorname{tr}(W^TRW),\qquad R=E^TQE.
+\]
+$Q$ 作用于系数，$R$ 作用于端点状态；它们只是同一段积分在不同变量下的表示。
+
+\subsection{为什么只耦合相邻节点}
+所有位置固定，首尾速度和加速度也固定，未知量为各内部节点的
+$z_k=(v_k,a_k)^T$；二维时每个 $z_k$ 有两列。
+一段的 $W$ 只包含相邻两个节点，所以一个 $z_k$ 只和 $z_{k-1},z_k,z_{k+1}$ 一起出现在代价里。
+把全部二次式相加，可写成
+\[
+ J=\operatorname{tr}(z^THz)+2\operatorname{tr}(f^Tz)+\text{常数}.
+\]
+$H$ 对称。逐项求导得 $\partial J/\partial z=2(Hz+f)$；令其为0并将已知量移到右边，得到 $Hz=r$，其中 $r=-f$。
+代码采用除去公共因子2后的方程。
+有三个内部节点时，其结构为
 \begin{equation}
  \begin{bmatrix}H_0&B_1^T&0\\B_1&H_1&B_2^T\\0&B_2&H_2\end{bmatrix}
  \begin{bmatrix}z_0\\z_1\\z_2\end{bmatrix}
  =\begin{bmatrix}r_0\\r_1\\r_2\end{bmatrix}.
+ \label{eq:spline-block-system}
 \end{equation}
-每个块为 $2\times2$，右端项有 x/y 两列。这是结构示例，实际块数为 $N-1$。
-从各段 $R_i$ 取出对应 v/a 行列相加，已知位置和边界贡献移至右侧。
+每个块均为 $2\times2$，实际内部节点数为 $N-1$。
+\code{diag} 从相邻段 $R$ 的 v/a 对角子块相加；\code{lower} 保存相邻节点的交叉子块。
+代码先把未知 v/a 填为0，再算 $-RW$，选出内部 v/a 行放入右端，恰好得到已知边界的贡献。
 
-\clearpage
-\section{一个块接一个块消元}
-令 $D_0=H_0$，依次计算
+\textbf{手算两段。}继续用 $0\to1\to2$ m、每段1 s、首尾静止的例子。
+在 $T=1$ 时，$R$ 的左右端 v/a 子块分别为
+\[
+ R_{\rm left}=\begin{bmatrix}192&36\\36&9\end{bmatrix},\qquad
+ R_{\rm right}=\begin{bmatrix}192&-36\\-36&9\end{bmatrix}.
+\]
+内部节点从左右两段各获得一个子块，故
+\[
+ \begin{bmatrix}384&0\\0&18\end{bmatrix}\begin{bmatrix}v_1\\a_1\end{bmatrix}
+ =\begin{bmatrix}720\\0\end{bmatrix}.
+\]
+左右两段的已知位置分别贡献 $(360,-60)^T$、$(360,60)^T$。
+解为 $v_1=1.875$ m/s、$a_1=0$，与第15章的全局五次曲线一致。
+
+\section{块消元是高斯消元的同一件事}
+先看两个节点的方程：
+$H_0z_0+B_1^Tz_1=r_0$、$B_1z_0+H_1z_1=r_1$。
+从第一行解出 $z_0=H_0^{-1}(r_0-B_1^Tz_1)$，代入第二行：
+\[
+ (H_1-B_1H_0^{-1}B_1^T)z_1=r_1-B_1H_0^{-1}r_0.
+\]
+括号内的矩阵叫 Schur 块，它把已消去变量对剩余方程的影响保留下来。
+沿整条链重复这个步骤：
 \begin{equation}
- L_i=B_iD_{i-1}^{-1},\qquad D_i=H_i-L_iB_i^T.
+ D_0=H_0,\qquad L_i=B_iD_{i-1}^{-1},\qquad
+ D_i=H_i-L_iB_i^T.
+ \label{eq:spline-schur}
 \end{equation}
-先解下三角，再解对角块，最后回代。每步固定规模，内存与时间随段数线性增长。
-代码只对 $2\times2$ 正定块用 Cholesky 求解两个单位右端，缓存其逆作用；未显式求整张大矩阵的逆。
+这相当于 $H=LDL^T$：大矩阵 $L$ 的主对角块为单位阵，下方紧邻一条块对角线存 $L_i$。
+求解分三步：
+\begin{align*}
+ y_0&=r_0, & y_i&=r_i-L_i y_{i-1},\\
+ w_i&=D_i^{-1}y_i,\\
+ z_{m-1}&=w_{m-1}, & z_i&=w_i-L_{i+1}^Tz_{i+1},
+\end{align*}
+其中 $m=N-1$。最后一行从右向左回代。
+例如取 $H_0=H_1=2I$、$B_1=-I$、$r_0=(1,0)^T,r_1=0$，则
+$L_1=-I/2,D_1=3I/2,y_1=(1/2,0)^T$，最终
+$z_1=(1/3,0)^T,z_0=(2/3,0)^T$。
+
+\par\noindent\begin{minipage}{\linewidth}
 \lstinputlisting[language=C++,linerange={spline_blocks_begin-spline_blocks_end},
  includerangemarker=false]{../ros2_ws/src/motion2d/src/trajectory/spline2d.cpp}
-得到所有节点 v/a 后，再经 $E_iW_i$ 还原为通用五次轨迹。
-非正时长、维度不匹配、非有限数值或非正定分解均明确失败。任意悬殊时长仍可能损害浮点精度。
+\end{minipage}\par
+\code{off} 保存原来的 $B_i$，\code{lower_[i]} 随后改存 $L_i$，因此更新 $D_i$ 时使用 \code{off.transpose()}。
+每个 $D_i$ 都是 $2\times2$ 正定块，代码用 Cholesky 解两个单位右端，缓存其逆作用。
+它把 $D_i=\left[\begin{smallmatrix}a&b\\b&d\end{smallmatrix}\right]$ 写成 $SS^T$，其中
+\[
+ S=\begin{bmatrix}\sqrt a&0\\b/\sqrt a&\sqrt{d-b^2/a}\end{bmatrix}.
+\]
+将 $SS^T$ 的三个独立元素分别与 $a,b,d$ 相等，就逐个得到这些平方根与商。
+正定性保证根号内为正；随后像第08章一样作两次三角代入。
+\code{solveBlocks} 实现三步代入，再把解写回各节点 v/a；最后用 $E_iW_i$ 得到统一的五次系数。
+每一步只操作固定大小的矩阵，时间与存储均随段数线性增长。
+时长相差过大时，$E,Q$ 中的时间幂次会放大浮点误差；实验中也应检查系数与梯度误差。
 
-\section{能量梯度可以直接看边界}
-第十五章分部积分给出的边界项也能用于梯度。内部位置的导数为两段第五阶导数之差：
+\section{从边界项直接求最小 jerk 的梯度}
+\subsection{移动一个路点}
+第15章的分部积分边界项为
+$2[p'''\cdot\delta p''-p''''\cdot\delta p'+p^{(5)}\cdot\delta p]$。
+内部速度和加速度已是最优值，它们两侧的贡献相互抵消。
+现在把一个内部位置改变 $\delta q_i$，左段右端与右段左端的剩余项是
+$2(p_{i-1}^{(5)}-p_i^{(5)})\cdot\delta q_i$，所以
 \begin{equation}
  \frac{dJ}{dq_i}=2\left(p_{i-1}^{(5)}(T_{i-1})-p_i^{(5)}(0)\right).
 \end{equation}
-每段时长导数可在该段起点计算：
+五次多项式的第五阶导数为常量 $120c_5$，因此代码直接取相邻 $c_5$ 之差乘240。
+
+\subsection{延长一段时间，但保持端点状态}
+先固定这一段的两端 p/v/a，仅让 $T$ 增加 $dT$。
+新终点仍应到达原位置。对 $p(T)$ 用链式法则，系数改变引起的曲线变化满足
+$\delta p(T)+v(T)dT=0$。对速度、加速度同理：
+\[
+ \delta p(T)=-v(T)dT,\qquad
+ \delta p'(T)=-a(T)dT,\qquad
+ \delta p''(T)=-j(T)dT.
+\]
+起点的三种变化均为0。
+积分上限移动贡献 $\|j(T)\|^2dT$，代入边界项又贡献
+$2[-j\cdot j+s_4\cdot a-p^{(5)}\cdot v]dT$。
+相加便得完整时长导数
 \begin{equation}
- \frac{dJ}{dT_i}=-\|p_i'''\|^2+2p_i''''\cdot p_i''-2p_i^{(5)}\cdot p_i'.
+ \frac{dJ}{dT_i}=-\|j\|^2+2s_4\cdot a-2p^{(5)}\cdot v.
+ \label{eq:spline-energy-time}
 \end{equation}
-这是固定端点、路点的\textbf{完整}导数；最优内部导数的变化因驻点条件消去。
-把起点导数代成 $v=c_1,a=2c_2,j=6c_3,s=24c_4,p^{(5)}=120c_5$：
+它既可在终点算，也可在起点算，因为其时间导数为
+\[
+ -2j\cdot s_4+2p^{(5)}\cdot a+2s_4\cdot j
+ -2p^{(6)}\cdot v-2p^{(5)}\cdot a=0.
+\]
+这里使用五次式的 $p^{(6)}=0$。
+改变时长后，最优内部 v/a 也会改变；它们乘上的总代价偏导已为0，因此上述局部计算给出最优总能量的导数。
+在起点代入 $v=c_1,a=2c_2,j=6c_3,s_4=24c_4,p^{(5)}=120c_5$，便得到代码：
+\par\noindent\begin{minipage}{\linewidth}
 \lstinputlisting[language=C++,linerange={spline_energy_gradient_begin-spline_energy_gradient_end},
  includerangemarker=false]{../ros2_ws/src/motion2d/src/trajectory/spline2d.cpp}
-该专用路径无需额外伴随。若加入 ESDF 等其他代价，仍需下一节的一般传播。
+\end{minipage}\par
+这个简短公式专用于最小 jerk 能量。加入避障等其他代价后，使用下面的一般伴随。
 
-\clearpage
-\section{任意代价的伴随如何复用块分解}
-记未知内部导数为 $z$，其能量驻点条件为 $F(z,q,T)=0$，且 $F_z=H$。
-给定系数偏导 $G_i$，先计算边界偏导 $E_i^TG_i$，累加得到 $K_z$。
-再解 $H\lambda=K_z$，因此
+\section{一般代价怎样传过内部导数}
+记内层驻点方程为 $F(z,q,T)=Hz-r=0$，于是
+$H\,dz=-(F_q\,dq+F_T\,dT)$。
+外层总代价 $K$ 的变化为
+$dK=K_z^Tdz+K_q^Tdq+K_T^TdT$；固定 $z$ 时计算后两项。
+先求 $H\lambda=K_z$。由于 $H$ 对称，代入可得
 \begin{equation}
- dK=K_q\,dq+K_T\,dT-\lambda^T(F_q\,dq+F_T\,dT).
+ dK=K_q^Tdq+K_T^TdT-\lambda^T(F_q\,dq+F_T\,dT).
+ \label{eq:spline-general-adjoint}
 \end{equation}
-这里 $K_q,K_T$ 是固定 $z$ 的直接偏导。propagate 复用构造时的块分解求伴随。
-为了计算 $E_T$，令 $M(T)C=W$ 为六个端点条件；由 $E=M^{-1}$ 得
-$E_T=-EM_TE$。$M_T$ 只有末端三行非零，分别是速度、加速度、jerk 基函数。
-然后对 $R=E^TQE$ 用乘积法则；这几步均为每段固定大小矩阵，仍是线性复杂度。
+这里是一维坐标的写法；二维逐列计算并相加。
+给定对系数的偏导 $G_i$，由 $dC_i=E_i\,dW_i$ 得边界偏导 $E_i^TG_i$。
+将相邻段的贡献加到同一节点，选出内部 v/a 行就得到 $K_z$。
+\code{propagate} 调用已有的 \code{solveBlocks} 求 $\lambda$，复用构造曲线时的块分解。
 
-\section{误差验收与本机计时}
-测试固定 seed=1616，1--12 段、非零边界 v/a、不同正时长。
-系数与 MINCO 的相对误差要求低于 $10^{-9}$；MINCO 已另与独立密集 KKT 对照。
-解析能量梯度与通用伴随交叉检查；含速度/加速度软惩罚的一般传播用 $10^{-5}$ 中心差分检查。
+还需计算端点映射随时间的变化。令 $M(T)C=W$ 为六个端点条件，故 $ME=I$。
+两侧求 $T$ 导数得 $M_TE+ME_T=0$，左乘 $E$：
+\begin{equation}
+ E_T=-EM_TE.
+\end{equation}
+$M_T$ 的起点三行为0；终点位置、速度、加速度三行分别变成速度、加速度、jerk 基函数。
+再对 $R=E^TQE$ 用乘积法则：
+\[
+ R_T=E_T^TQE+E^TQ_TE+E^TQE_T,\qquad Q_T=\beta_3(T)^T\beta_3(T).
+\]
+最后一式来自 $Q=\int\beta_3^T\beta_3dt$ 的上限求导。
+对每段，把 $\lambda$ 放到对应边界 v/a 行，其他行补0，记为 $L_i$。
+固定 $z$ 的直接时长贡献为 $\langle G_i,E_TW_i\rangle$；
+伴随修正为 $-\langle L_i,R_TW_i\rangle$，代码分别累加这两项。
+路点梯度则从 $E^TG-RL_i$ 的位置行收集。
+整条传播仍由固定规模的局部运算和一次块求解组成。
 
-\begin{figure}[!ht]
+\section{怎样比较两种实现}
+先比较同一输入下的系数、能量和梯度，再看耗时。
+例如将全部系数排成向量，误差量取
+$e_C=\|C_A-C_B\|_F/\max(1,\|C_A\|_F)$，其中 $\|C\|_F$ 是所有元素平方和开根号。
+小系数时分母至少为1，较大系数时则比较相对误差。
+也可用第15章的中心差分检查输入梯度，每次扰动都重新求内部 v/a。
+\begin{center}\begin{minipage}{\linewidth}\makeatletter\def\@captype{figure}\makeatother
 \centering\includegraphics[width=\linewidth]{figures/ch16_comparison.pdf}
-\caption{同一进程、相同输入下的构造、能量及完整能量梯度总耗时；纵轴为对数。
-不包含地图、碰撞检查、I/O、ROS 或外层非线性优化。}
-\end{figure}
-
+\caption{相同输入下，构造曲线、计算能量及其完整梯度的总耗时。纵轴为对数刻度，相同竖直距离表示相同倍数变化。}
+\end{minipage}\end{center}
 \begin{center}\small
 \begin{tabular}{rrrr}\toprule
 段数 & 教学 MINCO/$\mu$s & 教学 Spline2D/$\mu$s & 固定上游/$\mu$s\\\midrule
@@ -95,255 +208,433 @@ $E_T=-EM_TE$。$M_T$ 只有末端三行非零，分别是速度、加速度、je
 64 & 38.000 & 22.735 & 2.049\\\bottomrule
 \end{tabular}
 \end{center}
-GCC 15.2、Eigen 3.4、C++17，统一 -O3、-fno-fast-math，无 LTO；预热 10 次，21 组各 20 次，取组均值中位数。
-同问题系数相对误差低于 $4.2\times10^{-14}$，能量梯度低于 $6.5\times10^{-13}$。
-教学实现保留较多矩阵运算便于阅读；上游采用专门化公式。本机小实验不能替代完整规划器基准，也不承诺固定加速比。
+这组数据使用 GCC 15.2、Eigen 3.4、C++17，统一编译选项 \code{-O3 -fno-fast-math}，关闭 LTO。
+预热10次后，测21组、每组20次，先求各组均值，再取21个均值的中位数。
+对应系数误差低于 $4.2\times10^{-14}$，能量梯度误差低于 $6.5\times10^{-13}$。
+从4段增到64段，段数增加16倍，两种教学实现的耗时也近似按此比例增长。
+Spline2D 减小了方程规模；上游还使用专门化公式，进一步减少固定规模矩阵运算。
+地图构造、碰撞检查、ROS 通信和外层优化会增加其他开销，可在第19章的闭环中分别计时。
 
-\begin{enumerate}
-\item \textbf{理解：}两种实现消去了不同变量，为何仍得到同一条曲线？
-\item \textbf{代码 ch16-1：}补全 Schur 块，和独立 $4\times4$ 密集方程的解比较。
-\item \textbf{实验：}改变段数与时长尺度，同时报告数值误差、失败状态及耗时，禁止只展示更快的一次。
-\end{enumerate}
+\section{用 Bézier 控制点包住整段曲线}
+\subsection{从二项式展开得到非负权重}
+对 $s\in[0,1]$，二项式展开给出
+$1=(s+(1-s))^n=\sum_{j=0}^n\binom nj s^j(1-s)^{n-j}$。
+其中 $\binom nj=n!/(j!(n-j)!)$，$n!$ 是从1到 $n$ 的整数乘积，约定 $0!=1$。
+定义 Bernstein 基函数 $B_j^n(s)=\binom nj s^j(1-s)^{n-j}$。
+每项非负且和为1，所以
+\[
+ p(s)=\sum_{j=0}^nP_jB_j^n(s)
+\]
+是控制点 $P_j$ 的凸组合。以二次为例，
+$p(s)=(1-s)^2P_0+2s(1-s)P_1+s^2P_2$；$s=1/2$ 时权重为 $1/4,1/2,1/4$。
+
+\subsection{从幂次系数转换}
+第14章的秒制曲线写成 $p(s)=\sum_{k=0}^5c_kT^ks^k$。
+关键是把每个 $s^k$ 改写到同一组五次基函数中。
+由阶乘约分，$\binom5j\binom jk=\binom5k\binom{5-k}{j-k}$，因此
+\begin{align*}
+ \sum_{j=k}^5\frac{\binom jk}{\binom5k}B_j^5(s)
+ &=s^k\sum_{j=k}^5\binom{5-k}{j-k}s^{j-k}(1-s)^{5-j}\\
+ &=s^k(s+(1-s))^{5-k}=s^k.
+\end{align*}
+代回并按 $B_j^5$ 收集系数，就得到
+\begin{equation}
+ P_j=\sum_{k=0}^j\frac{\binom jk}{\binom5k}c_kT^k.
+ \label{eq:power-bezier}
+\end{equation}
+例如 $P_0=c_0$，$P_1=c_0+c_1T/5$，
+$P_2=c_0+2c_1T/5+c_2T^2/10$，$P_5=\sum c_kT^k=p(T)$。
+\code{bezierMap} 按这一比例构造转换矩阵，保留 $T^k$，从而保持秒制时间的含义。
+
+\subsection{从控制点得到整个区间的界}
+若凸走廊的一行约束为 $n^Tp\le b$，且所有控制点满足它，则
+\[
+ n^Tp(s)=\sum_j B_j^n(s)n^TP_j\le\sum_j B_j^n(s)b=b.
+\]
+对所有半空间逐行应用，就把整段曲线包在同一走廊内。
+这里使用第13章检查过的完整配置空间区域；非凸自由空间应先拆成这样的凸区域。
+控制点通常只决定曲线形状，只有首尾点一定落在曲线上。
+
+\begin{center}\begin{minipage}{\linewidth}\makeatletter\def\@captype{figure}\makeatother
+\centering
+\begin{tikzpicture}[x=1.6cm,y=1.6cm,>=stealth,font=\small]
+\fill[pale] (0,0)--(1,2)--(2,0)--cycle;
+\draw[muted,dashed] (0,0)--(1,2)--(2,0)--cycle;
+\draw[tealblue,very thick,domain=0:1,samples=80] plot ({2*\x},{4*\x*(1-\x)});
+\fill (0,0) circle(1.3pt) node[below]{$P_0=(0,0)$};
+\fill (1,2) circle(1.3pt) node[above]{$P_1=(1,2)$};
+\fill (2,0) circle(1.3pt) node[below]{$P_2=(2,0)$};
+\fill[tealblue] (1,1) circle(1.5pt);
+\node[tealblue] at(1,.45){$p(1/2)=(1,1)$};
+\draw[->,tealblue] (1,.63)--(1,.95);
+\begin{scope}[xshift=6.2cm]
+\draw[muted,dashed] (0,0)--(1,2)--(2,0);
+\draw[navy] (0,0)--(.5,1)--(1,1);
+\draw[tealblue] (1,1)--(1.5,1)--(2,0);
+\draw[tealblue,very thick,domain=0:1,samples=80] plot ({2*\x},{4*\x*(1-\x)});
+\foreach \x/\y in {0/0,.5/1,1/1,1.5/1,2/0}{\fill (\x,\y) circle(1.1pt);}
+\node[above] at(.5,1){$A$};\node[above] at(1.5,1){$B$};
+\node[below] at(1,1){$C$};
+\node at(1,-.45){二分后的两组控制点};
+\end{scope}
+\end{tikzpicture}
+\caption{左：曲线在控制三角形内，$P_1$ 并不在曲线上。右：二分保持曲线不变，左右控制三角形更贴近曲线。两图坐标单位长度相同。}
+\end{minipage}\end{center}
 
 \clearpage
-\section{不改曲线，只换成 Bézier 控制点}
-将秒制多项式改用归一化时间 $s=t/T$。五次 Bernstein 基函数
-$B_j^5(s)=\binom{5}{j}s^j(1-s)^{5-j}$ 非负且和为一，因此
-\begin{equation}
- p(s)=\sum_{j=0}^5P_j B_j^5(s),\qquad
- P_j=\sum_{k=0}^j\frac{\binom{j}{k}}{\binom{5}{k}}c_kT^k.
-\end{equation}
-$P_j$ 是另一种表示的控制点；它们通常不在曲线上。若全部控制点位于同一个凸多边形，
-它们的任何凸组合都在其中，故整段曲线都在其中。
-这里的多边形必须先经过第十三章的\textbf{完整区域配置空间检查}，不能只检查多边形顶点。
-不能把“控制点处 ESDF 足够大”替换成该证明：一般自由空间不是凸集。
-
-速度与加速度也有控制点，其凸包分别包含整段导数：
+\section{导数控制点与递归二分}
+\subsection{为什么导数由相邻差决定}
+对 Bernstein 基函数用乘积法则，可得
+\[
+ \frac{dB_j^n}{ds}=n(B_{j-1}^{n-1}-B_j^{n-1}),
+\]
+下标越界的项取0。例如第一项 $j\binom nj s^{j-1}(1-s)^{n-j}=nB_{j-1}^{n-1}$，第二项同理。
+对 $p=\sum P_jB_j^n$ 求导并移动求和下标：
+\[
+ \frac{dp}{ds}=n\sum_{j=0}^{n-1}(P_{j+1}-P_j)B_j^{n-1}(s).
+\]
+再乘 $ds/dt=1/T$。五次曲线的速度和加速度控制点因此为
 \begin{equation}
  V_j=\frac5T(P_{j+1}-P_j),\qquad
  A_j=\frac{20}{T^2}(P_{j+2}-2P_{j+1}+P_j).
 \end{equation}
-由范数凸性，$\max_j\|V_j\|$ 和 $\max_j\|A_j\|$ 是整个区间的上界。
-它们可能偏保守，但不是某几个轨迹采样点的最大值。
+由三角不等式，$\|\sum B_jV_j\|\le\sum B_j\|V_j\|\le\max_j\|V_j\|$。
+所以控制点范数的最大值是整个区间的导数上界。
 
-\section{二分能缩紧界，不能改变事实}
-de Casteljau 递推把相邻控制点取平均，得到精确表示左右半段的新控制点。
-重复二分后，对每个小段作同样检查。曲线与时间未改变；位置凸包逐步缩紧，速度/加速度用对应小段时长计算。
-默认深度 5，每段检查 32 个子段；接口允许 0--10。
+\subsection{de Casteljau：反复作线性插值}
+给定控制点 $P_j^{(0)}=P_j$，递推
+\[
+ P_j^{(r)}=(1-s)P_j^{(r-1)}+sP_{j+1}^{(r-1)}.
+\]
+每轮少一个点，最后 $P_0^{(n)}=p(s)$。
+原因是 Bernstein 基函数满足
+$B_j^n=(1-s)B_j^{n-1}+sB_{j-1}^{n-1}$：代入后每次插值恰好把次数提高一阶。
+把递推展开，原点 $P_j$ 被选到的路径有 $\binom nj$ 条，每条权重为 $s^j(1-s)^{n-j}$，也得到同一公式。
+
+取 $s=1/2$ 时每一步取平均。
+递推三角形的左边界 $P_0^{(0)},P_0^{(1)},\ldots,P_0^{(n)}$ 构成左半段控制点；
+右边界倒序构成右半段控制点。
+左边界点可显式写为 $L_i=2^{-i}\sum_{k=0}^i\binom ikP_k$。
+代入左半段的 Bernstein 展开，并交换求和次序：
+\begin{align*}
+ \sum_{i=0}^n B_i^n(r)L_i
+ &=\sum_{k=0}^nP_k\binom nk(r/2)^k
+   \sum_{i=k}^n\binom{n-k}{i-k}(r/2)^{i-k}(1-r)^{n-i}\\
+ &=\sum_{k=0}^nP_k\binom nk(r/2)^k(1-r/2)^{n-k}=p(r/2).
+\end{align*}
+第一步仍使用二项式系数约分，第二步使用二项式展开。
+右边界倒序可同样得到 $p((1+r)/2)$。
+上图的二次例子有
+$A=(P_0+P_1)/2=(0.5,1)$，$B=(P_1+P_2)/2=(1.5,1)$，$C=(A+B)/2=(1,1)$。
+左半段是 $(P_0,A,C)$，右半段是 $(C,B,P_2)$。
+
+子段控制点是原点的凸组合，凸包会缩小，而表示的曲线保持不变。
+检查导数时，子段的物理时长也要减半。
+以1 m、2 s、静止到静止的五次直线为例，其控制点为 $[0,0,0,1,1,1]$ m。
+未细分的速度上界为 $5/2=2.5$ m/s，而第14章解析峰值为 $15/16=0.9375$ m/s。
+二分后的局部控制点可不断收紧这个差距。
+
+\par\noindent\begin{minipage}{\linewidth}
 \lstinputlisting[language=C++,linerange={bezier_certificate_begin-bezier_certificate_end},
  includerangemarker=false]{../ros2_ws/src/motion2d/src/trajectory/bezier_bounds.cpp}
-certifyBezier 必须收到每段对应的已验证区域。所有半空间残差不大于 $10^{-9}$，且导数上界不超过物理上限加同样的数值容差，
-才报告 certified。$10^{-9}$ 是浮点比较容差，不是机器人避障裕量。
-未通过只说明该充分条件无法认证，也可能确实越界；不能据此断言曲线必然碰撞。
+\end{minipage}\par
+代码先检查每个位置控制点的半空间残差，再由相邻差计算导数上界。
+\code{bound} 在递归二分后调用这一段，传入对应子段时长；默认深度5，每段有32个叶子区间。
+若上界满足限制，就可确认整段满足限制。
+若上界超限，可增加细分深度或查看实际曲线：例如上例的2.5 m/s上界超出1 m/s，但真实曲线峰值仍低于1 m/s。
+接口中的 $10^{-9}$ 用于浮点比较；几何避障余量由走廊与机器人半径决定。
 
-\clearpage
-\section{加入控制点代价，再独立认证}
-沿用上一章的正时长变量与外层 BFGS，新增 optimizeSpline 选择实际第二种内核。
-两种实现共用同一份优化器和代价；没有复制一套配置工厂。
-对控制点的走廊残差、导数范数违反量加入三次正部惩罚。
-bezierCost 将梯度传回系数和时长，显式包含 $T^k$ 的导数；之后由样条伴随传回路点和时间。
-它是控制点代价之和，不是对时间的数值积分，权重也不能照搬上一章后就假设同尺度。
+\section{对控制点求导，引导曲线进入走廊}
+设转换为 $P=M(T)C$，控制点代价对 $P$ 的偏导为 $G_P$。
+由 $dP=M\,dC+M_TC\,dT$，逐项内积得到
+\[
+ G_C=M^TG_P,\qquad g_T=\langle G_P,M_TC\rangle.
+\]
+位置转换的第 $k$ 列正比于 $T^k$，故其时间导数为原列乘 $k/T$。
+若转换的是第 $r$ 阶导数，原系数 $c_k$ 经求导后乘 $T^{k-r}$，相应导数改为乘 $(k-r)/T$。
+\code{mapDerivative} 正是按列乘这个因子；\code{bezierCost} 再把控制点梯度传回系数和时间，最后接上样条伴随。
+控制点代价是有限项之和，各项使用第15章的三次正部惩罚；它的权重按这个求和目标选取。
 
 \begin{lstlisting}[language=bash]
 ros2 run motion2d bezier_demo tmp/ch16_bezier
 /usr/bin/python3 scripts/plot_ch16_bezier.py
 \end{lstlisting}
-同一墙体栅格、初始路点/时长和端点；第三组额外使用控制点代价，走廊权重 50000、额外余量 0.04 m。
-三组的目标定义并不完全相同，\textbf{不把总代价大小用作横向优劣结论}，改看时长与约束检查。
-
-\begin{figure}[!ht]
+实验使用同一墙体栅格、初始路点、时长和边界。
+第三组增加控制点走廊代价，权重50000，额外余量0.04 m。
+\begin{center}\begin{minipage}{\linewidth}\makeatletter\def\@captype{figure}\makeatother
 \centering\includegraphics[width=\linewidth]{figures/ch16_bezier.pdf}
-\caption{只使用轨迹采样软惩罚仍可能离开凸走廊；控制点惩罚把本次解推回可认证范围。
-青色曲线与其他曲线均从同一初值开始，后验认证独立于优化器状态。}
-\end{figure}
+\caption{控制点代价把曲线推向走廊内部。优化完成后，重新用整段凸包检查位置和导数，比较各组的时长与残差。}
+\end{minipage}\end{center}
+控制点版本的最大走廊残差为 $-0.03427$ m，速度和加速度连续上界也满足限制；
+只使用轨迹采样惩罚的版本残差为正。
+各组目标项不同，因此使用时长和约束残差比较结果。
+实际机器人还会有定位与跟踪误差，规划时应为这些误差预留空间；第19章把地图更新与跟踪接成闭环。
 
-控制点版本本次返回 converged，整段走廊最大残差为 $-0.03427$ m，并通过速度/加速度连续上界检查；
-原采样惩罚版本残差为正，认证失败。
-即使在地图上认证成功，也只证明\textbf{参考圆心曲线相对于这份固定栅格}满足所设条件。
-定位误差、追踪误差及地图更新需要额外裕量和后续在线处理。
-
-验证包括：Bernstein/de Casteljau 值与原多项式导数逐点一致；控制点代价的系数/时长差分；
-端点安全但中间越界的二次曲线反例；静止到静止 1 m、2 s 曲线的速度和加速度解析峰值。
-后者未细分时界较保守，细分后能认证速度 $\leq1$ m/s、加速度 $\leq1.5$ m/s$^2$。
-\begin{enumerate}
-\item \textbf{推导：}为什么控制点在凸走廊内是充分条件，却不是必要条件？
-\item \textbf{代码 ch16-2：}补全归一化基底映射中的二项式比例，保留 $T^k$。
-\item \textbf{实验：}从深度 0 增到 5，记录上界收紧和耗时变化；确认轨迹采样结果完全不变。
-\end{enumerate}
-
-\clearpage
-\section{认证候选与实际执行分开}
-\begin{lstlisting}[language=bash]
-ros2 launch motion2d_bringup ch16.launch.py rviz:=true
-# Place a goal in observed free space, then explicitly execute:
-ros2 service call /trajectory/execute std_srvs/srv/Trigger '{}'
-# Automated paused / single-step acceptance:
-/usr/bin/python3 scripts/check_ch16.py
-\end{lstlisting}
-本章配置采用 Spline2D、控制点软惩罚和独立连续认证。
-只有优化器收敛且 certifyBezier 通过，planner 才发布 /plan/certified\_candidate。
-它携带完整五次系数、规划时 odom 时间戳和固定 yaw；start\_time=0 表示候选曲线的局部原点，\textbf{不触发执行}。
-空 pieces 撤销候选；未收敛或认证失败时仍可看到诊断预览，但无法作为本章执行源。
-
-将 map 中曲线固定到 odom 时，令 $p_o=Rp_m+t$，则
-\begin{equation}
- c_{o,0}=Rc_{m,0}+t,\qquad c_{o,k}=Rc_{m,k}\ (k>0).
-\end{equation}
-只对常数项加平移；速度、加速度和更高阶系数只旋转。刚性变换保持范数与包含关系。
-候选不会因之后的 map/odom 变换更新而反复移动；第十九章再处理新地图下的重规划。
-
-trajectory.source=certified 让服务读取此候选。发送实际命令前检查：
-\begin{itemize}
-\item 候选与当前 odom 时间差在 $[0,0.5]$ s，起点与当前位置一致。
-\item 机器人静止、首尾 v/a 为零、yaw 与当前一致，才能与等待/停止段连续衔接。
-\item 通过后才设置绝对开始时间 now+0.25 s，并发布 /plan/trajectory。
-\end{itemize}
-求解与执行分开，能避免点击目标时不知不觉让机器人运动；仿真仍保留原来的整段扫掠检查。
-静态地图上的曲线认证不能替代实际执行时的检测。
-
-\paragraph{ROS 验收与常见错误}
-默认真值定位、观测建图，起点 $(-8,-8)$ m、近目标 $(-7.5,-8)$ m。
-脚本确认候选曲线经过认证但机器人保持静止；显式服务调用后，用接收的系数独立计算 p/v/a，
-与每个仿真 tick 对照。发送非法目标后候选清空、执行服务拒绝；reset 后也不能复用旧候选。
-另有带旋转和平移的单元测试，检查导数只旋转、常数项才平移。
-
-RViz 预期同时显示几何优化预览和已发送命令的带时轨迹，圆盘沿后者运动。
-本机 ROS 消息和无界面执行已验证；GUI 仍未在当前桌面限制下验收。
-若服务拒绝，先看“候选过期/机器人未静止/起点不一致”，而不是绕开条件发送旧系数。
-
-\begin{enumerate}
-\item \textbf{理解：}为什么对每个系数都加 TF 平移，会使速度、加速度一起出错？
-\item \textbf{实验：}先预览再步进，确认没有自动执行；执行后验证 p/v/a，而不只检查最终位置。
-\item \textbf{扩展准备：}若当前机器人正在运动，写出新轨迹起点必须匹配的 p/v/a 条件；暂不删除本章静止检查。
-\end{enumerate}
-
-\clearpage
-\section{补充：力约束也要检查整段}
-第15章的力软惩罚仍是有限采样。对本课程线性受力映射，$F(t)$ 与 $\dot F(t)$
-都是多项式，可以继续使用 Bézier 凸包。若 $p(t)=\sum_{k=0}^5c_kt^k$，越界系数视为零，则
+\section{力与力变化率也可以求连续上界}
+对全向惯性模型，$F=ma+c_vv$ 仍是多项式。
+把 $v=\sum_{k=0}^4(k+1)c_{k+1}t^k$ 和
+$a=\sum_{k=0}^3(k+2)(k+1)c_{k+2}t^k$ 相加，得到
 \begin{equation}
  F_k=m(k+2)(k+1)c_{k+2}+c_v(k+1)c_{k+1},\qquad
  (\dot F)_k=(k+1)F_{k+1}.
 \end{equation}
-将力多项式转换成 Bézier 控制点 $B_k$。范数是凸函数，所以
-$\|F(t)\|\le\max_k\|B_k\|$；对力变化率同理。细分收紧的是\textbf{整段充分上界}，
-不是增加几个采样点后声称连续安全。
+越界系数取0。力最高四次，补一个零系数后仍可使用五次 Bézier 转换。
+将力的控制点记为 $B_j^F$，同一三角不等式给出
+$\|F(t)\|\le\max_j\|B_j^F\|$，力变化率同理。
+\par\noindent\begin{minipage}{\linewidth}
 \lstinputlisting[language=C++,linerange={force_polynomial_begin-force_polynomial_end},
  includerangemarker=false]{../ros2_ws/src/motion2d/src/trajectory/bezier_bounds.cpp}
-\code{certifyForce} 可单独检查力；启用 dynamics 后，\code{certifyBezier} 会同时要求
-走廊、速度、加速度、力和力变化率通过。因而第19章的优化候选及回退轨迹也都受同一检查，
-不会在优化失败后悄悄换成未检查力的回退曲线。
+\end{minipage}\par
+\code{vectorBound} 直接细分力多项式，收集叶子控制点范数；\code{certifyForce} 比较力和力变化率上限。
+在 \code{certifyBezier} 中启用 dynamics 后，位置、速度、加速度、力和力变化率会一起检查。
 
-这项认证针对固定质量/阻尼、固定地图中的名义轨迹；跟踪误差与模型偏差仍需额外余量。
-分段连接若只满足 C$^2$，力连续但力导数可以跳变；本检查给出每段两侧的有限变化率界，
-没有限制更高阶导数，也不约束力导数的跃变大小。
-
-\begin{enumerate}
-\item \textbf{推导：}写出只有一维匀加速且含阻尼时的力控制点，验证上界包含真实峰值。
-\item \textbf{代码阅读：}在 certifyBezier 最后找到 certifyForce；解释为何检查失败必须阻止发送候选。
-\item \textbf{实验：}将 force\_planning\_demo 的质量从 1 改到 3，再把细分深度从 0 改到 5，
-记录上界与密集采样峰值。上界应不小于采样峰值，不能用密集采样替代上界。
-\end{enumerate}
+例如一维 $p(t)=t^2/2$ m、$0\le t\le2$ s，取 $m=2$ kg、$c_v=0.5$ kg/s，
+有 $F(t)=2+0.5t$ N、$\dot F=0.5$ N/s。
+它在五次基下的力控制点为 $B_j^F=2+j/5$ N，因此上界为3 N，恰好等于末端峰值。
+若分段曲线只有 p/v/a 连续，力也连续，力变化率可能在接点跳变；每一侧的幅值分别由所属段的界控制。
 
 \clearpage
-\section{阿克曼起停轨迹：分开几何与时间}\label{sec:ackplan}
-不能直接将全向 MINCO 的任意曲线交给阿克曼车。本节使用第04章模型，固定路点位置与朝向，
-优化正的切向长度和段时长。几何路径仍是五次多项式，复用第14章的端点插值：
-\begin{equation}
-\begin{aligned}
-q_i(0)&=p_i, &q_i(1)&=p_{i+1},\\
-q_i'(0)&=\ell_i e_i, &q_i'(1)&=\ell_{i+1}e_{i+1},\\
-q_i''(0)&=0, &q_i''(1)&=0.
-\end{aligned}
-\end{equation}
-其中 $e_i=(\cos\psi_i,\sin\psi_i)^T$，$\ell_i>0$。连接处共享朝向；几何端点二阶导数为零，
-所以端点转角为零。实际时间进度取
-\begin{equation}
-u=h(r)=10r^3-15r^4+6r^5,\qquad r=t/T,\qquad p(t)=q(h(t/T)).
-\end{equation}
-$h'(0)=h'(1)=h''(0)=h''(1)=0$，每段都从静止平滑起步、静止结束。
-这是一种容易理解的起停规划，不是连续高速过弯的完整最优控制器。
-$q'(u)$ 在整个区间内仍须非零；切向长度为正只保证端点，不能替代整段检查。
+\section{在 ROS 中预览并执行一条认证曲线}
+\begin{lstlisting}[language=bash]
+ros2 launch motion2d_bringup ch16.launch.py rviz:=true
+# Set a goal in observed free space, then execute the candidate:
+ros2 service call /trajectory/execute std_srvs/srv/Trigger '{}'
+/usr/bin/python3 scripts/check_ch16.py
+\end{lstlisting}
+本章配置选择 Spline2D、控制点惩罚和连续界检查。
+优化收敛且所有上界满足限制后，planner 发布 /plan/certified\_candidate，包含完整五次系数、规划时刻和固定 yaw。
+候选的 start\_time=0 表示局部时间原点；执行服务收到请求后，才设置绝对开始时间为 now+0.25 s，发布 /plan/trajectory。
+在 RViz 中先观察优化预览，再调用服务，便能对照带时间轨迹与机器人运动。
 
-用第04章映射对 $q',q'',q'''$ 求几何量 $n_g,a_g,\kappa,\delta,\delta'_g$。
-令 $d=\dot u,e=\ddot u$，物理量为
+候选由规划时刻的变换固定到 odom 系。
+沿用第14章 $p_o=Rp_m+t$ 的系数变换：常数项 $c_{o,0}=Rc_{m,0}+t$，其余项 $c_{o,k}=Rc_{m,k}$。
+执行时使用这份固定坐标下的系数，后续 map/odom 更新由新一轮规划处理。
+本章从静止起步，服务要求候选年龄在0到0.5 s内、起点和 yaw 与当前状态一致，且当前速度以及候选首尾 v/a 为0。
+这样等待段、运动段和结束段能按 p/v/a 连续相接。
+
+默认起点为 $(-8,-8)$ m，可先选 $(-7.5,-8)$ m 的近目标。
+\code{check_ch16.py} 从接收的系数独立计算各时刻 p/v/a，再和仿真状态比较。
+若服务返回候选过期、机器人未静止或起点不一致，重新规划并检查当前里程计。
+非法目标、重置或规划失败会撤销旧候选；这些状态可从预览与服务返回信息观察。
+
+\section{阿克曼起停轨迹：先定路径，再定进度}\label{sec:ackplan}
+阿克曼车的速度方向与车头一致，且转角由路径曲率决定。
+规划时除了经过的位置，还要给出各路点朝向。
+本节固定路点 $p_i$ 和朝向 $\psi_i$，令单位切向
+$e_i=(\cos\psi_i,\sin\psi_i)^T$，优化正切向长度 $\ell_i$ 和段时长 $T_i$。
+先构造参数 $u\in[0,1]$ 下的几何五次路径：
+\begin{equation}
+ \begin{aligned}
+ q_i(0)&=p_i,&q_i(1)&=p_{i+1},\\
+ q_i'(0)&=\ell_ie_i,&q_i'(1)&=\ell_{i+1}e_{i+1},\\
+ q_i''(0)&=0,&q_i''(1)&=0.
+ \end{aligned}
+ \label{eq:ack-geometric-boundary}
+\end{equation}
+这里撇号表示对\textbf{几何参数 $u$} 求导，$q'$ 的单位是 m。
+共享切向使相邻段朝向相同，端点 $q''=0$ 使端点曲率与转角为0。
+时间进度使用第14章的停靠函数：
+\[
+ r=t/T,\qquad u=h(r)=10r^3-15r^4+6r^5,\qquad p(t)=q(h(t/T)).
+\]
+$h'$ 在区间内非负，且端点 $h'=h''=0$，所以机器人前进并在每个路点平滑停车。
+路径切向 $q'$ 仍保持非零，停车来自进度 $\dot u=0$。
+这样即使停下，保存的路径仍给出了起步朝向。
+
+\begin{center}\begin{minipage}{\linewidth}\makeatletter\def\@captype{figure}\makeatother
+\centering
+\begin{tikzpicture}[>=stealth,font=\small]
+\begin{scope}[x=1.5cm,y=1.5cm]
+\draw[tealblue,very thick,domain=0:1,samples=80] plot ({2*\x},{.6*(10*\x^3-15*\x^4+6*\x^5)});
+\fill (0,0) circle(1.2pt);\fill (2,.6) circle(1.2pt);
+\draw[->,navy,thick] (0,0)--(.6,0) node[midway,below]{$q'(0)$};
+\draw[->,navy,thick] (2,.6)--(2.6,.6);
+\node[above] at(1,.85){几何路径：方向由切向给出};
+\node[below] at(1,-.35){端点切向非零，$u\in[0,1]$};
+\end{scope}
+\begin{scope}[xshift=6cm,x=3cm,y=2.1cm]
+\draw[->] (0,0)--(1.13,0) node[right]{$r$};
+\draw[->] (0,0)--(0,1.12) node[above]{$u$};
+\draw[tealblue,very thick,domain=0:1,samples=80] plot (\x,{10*\x^3-15*\x^4+6*\x^5});
+\draw[muted,dashed] (1,0)--(1,1)--(0,1);
+\node[below] at(1,0){1};\node[left] at(0,1){1};
+\node[below,align=center] at(.5,-.22){时间进度：端点斜率为0};
+\end{scope}
+\end{tikzpicture}
+\caption{路径形状和时间进度分别保存。延长时长会降低速度与加速度，路径曲率保持不变。左图几何坐标采用相同比例。}
+\end{minipage}\end{center}
+这条路线适用于前进、逐段停车的参考。
+A* 折线提供位置初值，给定朝向后还需检查转弯能力；运动中的轨迹接续需要另外匹配小车的速度与转角状态。
+
+\section{把几何导数换成物理量}
+为便于核对第04章，令几何导数 $v_g=q',a_g^{\rm vec}=q'',j_g=q'''$，定义
+\[
+ n_g=\|q'\|,\quad b_g=q'^Tq'',\quad H_g=[q',q''],\quad
+ a_g=\frac{b_g}{n_g},\quad \kappa=\frac{H_g}{n_g^3}.
+\]
+$[x,y]=x_xy_y-x_yy_x$ 是二维叉积。这里 $a_g=dn_g/du$ 是标量，区别于向量 $q''$。
+由第04章的推导，
+\[
+ \psi_g'=H_g/n_g^2,\quad \delta=\arctan(L\kappa),\quad
+ \delta_g'=\frac{L\kappa_g'}{1+(L\kappa)^2},\quad
+ a_{\perp,g}=H_g/n_g.
+\]
+这些量先由几何路径计算，$L$ 是轴距。
+令 $d=\dot u=h'(r)/T$、$e=\ddot u=h''(r)/T^2$，链式法则给出
 \begin{align}
-s&=n_gd,& \dot s&=a_gd^2+n_ge,\\
-F&=m(a_gd^2+n_ge)+cn_gd,& r_\delta&=\delta'_g d,\\
-\dot\psi&=\psi'_g d,& a_\perp&=a_{\perp,g}d^2.
+ \dot p&=q'd,& \ddot p&=q''d^2+q'e,\\
+ s&=n_gd,& \dot s&=a_gd^2+n_ge,\\
+ F&=m(a_gd^2+n_ge)+cn_gd,& r_\delta&=\delta_g'd,\\
+ \dot\psi&=\psi_g'd,& a_\perp&=a_{\perp,g}d^2.
+ \label{eq:ack-warp}
 \end{align}
-几何朝向、曲率和转角保持不变。即使 $d=0$，这些公式仍能使用已保存的几何路径：
+速度式用 $d\ge0$；对它求时间导数，$dn_g/dt=a_gd$，于是得到纵向加速度。
+侧向加速度来自 $s^2\kappa=(n_gd)^2H_g/n_g^3$。
+$d,e$ 单位分别为 $\mathrm{s^{-1}},\mathrm{s^{-2}}$，代入后 $s,\dot s,F$ 恢复物理单位。
+\par\noindent\begin{minipage}{\linewidth}
 \lstinputlisting[language=C++,linerange={ackermann_warp_begin-ackermann_warp_end},
  includerangemarker=false]{../ros2_ws/src/motion2d/src/trajectory/ackermann_trajectory.cpp}
-\textbf{边界：}这条规划路线只做前进、逐段停车；没有倒车支路、动态障碍预测，
-也不接受运动中的任意新参考。A* 只提供几何初值，不能证明小车一定能通过每个弯。
+\end{minipage}\par
+\code{q.speed} 在这一步表示 $n_g$，\code{q.longitudinal_acceleration} 表示 $a_g$；
+\code{h.rate} 和 \code{h.acceleration} 分别为 $d,e$。
+几何端点的 $q'$ 非零，因此几何平坦映射可正常求值；再乘 $d=e=0$，就得到停车状态。
 
-\clearpage
-\section{从小车的物理限制反传到路径}
-对速度、纵向力、转角、转向速率、侧向加速度使用与第15章相同的归一化立方铰链代价。
-先通过时间变换反传，再通过几何平坦映射反传：
+\section{小车约束的反向传播}
+\subsection{先传过时间进度}
+对速度、力、转角、转向速率和侧向加速度分别使用无量纲残差
+$h_z=z^2/z_*^2-1$，代价为 $w[h_z]_+^3$。
+其偏导 $\bar z=6w[h_z]_+^2z/z_*^2$ 与第15章同理。
+实现中软目标取对应检查上限的85\%，权重为100。
+对式\eqref{eq:ack-warp}逐项求偏导即可反传。
+先令
+$g_s=\bar s+c\bar F$、$g_a=\overline{\dot s}+m\bar F$，把力对速度和纵向加速度的贡献合并。
+几何量收到
+\begin{align*}
+ \bar n_g&=g_sd+g_ae,& \bar a_g&=g_ad^2,\\
+ \overline{\psi_g'}&=\overline{\dot\psi}\,d,&
+ \overline{\delta_g'}&=\bar r_\delta d,&
+ \bar a_{\perp,g}&=\bar a_\perp d^2.
+\end{align*}
+转角、朝向和曲率本身保持原值，相关偏导直接传回。
+进度导数收到
+\begin{align}
+ \bar d&=g_sn_g+2g_aa_gd+\overline{\dot\psi}\psi_g'
+             +\bar r_\delta\delta_g'+2\bar a_\perp a_{\perp,g}d,\\
+ \bar e&=g_an_g.
+\end{align}
+例如只启用力代价时，$\bar n_g=(me+cd)\bar F$、$\bar a_g=md^2\bar F$，
+可直接对 $F=m(a_gd^2+n_ge)+cn_gd$ 求偏导核对。
+随后把几何量的偏导交给第04章的 \code{ackermannBackward}，得到对 $q',q'',q'''$ 的偏导。
+
+\subsection{固定归一化节点时，时间改变了什么}
+本节在固定 $r$ 节点积分，此时 $u=h(r)$ 固定，几何路径的采样位置也固定。
+只有 $d=h'(r)/T$ 和 $e=h''(r)/T^2$ 随 $T$ 变化：
+\[
+ \frac{\partial d}{\partial T}=-\frac dT,\qquad
+ \frac{\partial e}{\partial T}=-\frac{2e}T.
+\]
+将一个梯形节点的代价 $\omega(T/K_s)P$ 求导：
 \begin{equation}
-\bar z_{\rm physical}\ \longrightarrow\ (\bar z_g,\bar d,\bar e)
-\ \longrightarrow\ (\bar q',\bar q'',\bar q''')\ \longrightarrow\ (\bar C,\bar\ell,\bar T).
+ g_T\mathrel{+}=\omega\left[\frac{P}{K_s}
+       -\frac{T/K_s}{T}(\bar d\,d+2\bar e\,e)\right].
 \end{equation}
-例如 $\bar F$ 给出 $\bar a_g\mathrel{+}=m d^2\bar F$，
-$\bar n_g\mathrel{+}=(me+cd)\bar F$。
-固定归一化节点 $r$ 时，$u=h(r)$ 不随 $T$ 变，而
-$\partial d/\partial T=-d/T$，$\partial e/\partial T=-2e/T$。
-因此本节的直接时长链与第15章按秒表示多项式的链不同：
+第一项为积分权重变化，第二项为物理进度变化。
+第15章用秒制多项式，此处用固定几何路径；两种表示各自按自己的计算依赖求导。
+\par\noindent\begin{minipage}{\linewidth}
 \lstinputlisting[language=C++,linerange={ackermann_cost_reverse_begin-ackermann_cost_reverse_end},
  includerangemarker=false]{../ros2_ws/src/motion2d/src/trajectory/ackermann_trajectory.cpp}
-不是把两种表示的时间偏导相加，否则会重复计数。几何系数对端点切向长度的导数
-来自五次 Hermite 插值，例如对左端速度的系数向量为 $(0,1,0,-6,8,-3)^T$。
-长度取 $\ell=e^\eta$，时长取 $T=0.1+e^\tau$，最后再应用指数链式法则。
+\end{minipage}\par
+代码的 \code{warped.rate}、\code{warped.acceleration} 分别为 $\bar d,\bar e$。
+几何系数偏导由各阶基函数乘状态偏导累加，与第15章相同，但基函数在 $u$ 处求值。
 
-本节用小型 BFGS 优化这些变量。它不是 MINCO 的另一种名字：
-固定朝向与非完整约束改变了可调参数。正向模型、反向偏导和端点插值分别保留清晰的函数。
-后续若引入新的曲线表示，仍可复用同一个物理映射及梯度。
+\subsection{最后传回切向长度与时长变量}
+式\eqref{eq:ack-geometric-boundary}的左端切向为 $\ell_ie_i$。
+本章开头已算出单位左端速度的系数向量
+$b_L=(0,1,0,-6,8,-3)^T$；单位右端速度对应
+$b_R=(0,0,0,-4,7,-3)^T$，可由第14章六边界公式同样代入得到。
+所以对左端长度，$\partial C/\partial\ell_i=b_Le_i^T$，代价导数为
+$\langle G_C,b_Le_i^T\rangle=(G_C^Tb_L)\cdot e_i$；右端同理。
+一个内部长度同时作用于左右两段，累加两段贡献。
+取 $\ell_i=e^{\eta_i}$、$T_i=0.1+e^{\tau_i}$，最后分别乘 $\ell_i$、$T_i-0.1$。
 
-\textbf{练习 ch16-3：}固定几何路径和 $r$，推导 $\partial F/\partial T$，完成
-starter 目录中的 \code{warp_force.hpp}。分别指出惯性项与阻尼项的时长缩放次方。
-\begin{lstlisting}[language=bash,numbers=none]
-g++ -std=c++17 -Iexercises/ch16/starter \
-  exercises/ch16/check_warp.cpp -o /tmp/ch16_warp
-/tmp/ch16_warp
-\end{lstlisting}
+外层还加入 $0.02\sum_i(\ell_i-\ell_i^0)^2$，使切向长度靠近初值；
+它对 $\eta_i$ 的导数为 $0.04(\ell_i-\ell_i^0)\ell_i$。
+端点初值取相邻路点距离，内部初值取左右段距离的平均。
+\code{planAckermann} 把这些梯度交给 BFGS，同时调整路径形状与行驶时间。
 
-\clearpage
-\section{先验证能转弯，再决定是否减速}
-\code{certifyAckermann} 将几何 Bézier 控制点递归二分，在每个小区间求导数凸包。
-首先检查所有位置控制点在对应的已验证圆盘配置空间走廊内。
-再沿该小段弦方向 $e_c$ 取
-$n_{\min}=\min_i e_c^TV_i>0$，证明整段切向非零；$n_{\max}=\max_i\|V_i\|$。
+\section{先检查转弯形状，再检查行驶快慢}
+\subsection{用小段凸包保证切向非零}
+阿克曼平坦映射含 $1/\|q'\|$，所以先要确认几何切向处处非零。
+将几何 Bézier 递归二分，叶子区间长度记为 $\Delta u$。
+导数控制点按 $5/\Delta u$、$4/\Delta u$、$3/\Delta u$ 逐次作差，得到相对于原参数 $u$ 的 $V_i,A_j,J_k$。
+选小段首尾弦的单位方向 $e_c$，定义
+\[
+ n_{\min}=\min_i e_c^TV_i,\qquad n_{\max}=\max_i\|V_i\|.
+\]
+因为 $q'$ 是 $V_i$ 的凸组合，$e_c^Tq'\ge n_{\min}$；又由投影长度不超过向量长度，
+$\|q'\|\ge e_c^Tq'\ge n_{\min}$。
+若 $n_{\min}>0$，便得到整个小段的正切向下界；上界仍由三角不等式给出 $n_g\le n_{\max}$。
+例如 $V_0=(2,0),V_1=(2,1),V_2=(3,0)$、$e_c=(1,0)$ 时，$n_{\min}=2$，所有凸组合都位于直线 $v_x=2$ 的右侧，远离原点。
 
-叉积与点积是双线性的，故枚举速度/加速度控制点对，可得到整段
-$|[q',q'']|\le H$、$|q'^Tq''|\le B$；速度/jerk 控制点对给出
-$|[q',q''']|\le H'$。于是
+\subsection{对点积和叉积求界}
+设 $q'=\sum_i\alpha_iV_i$、$q''=\sum_j\beta_jA_j$，两组权重均非负且和为1。
+叉积的双线性给出
+$[q',q'']=\sum_{ij}\alpha_i\beta_j[V_i,A_j]$，这些乘积权重也和为1。
+因此枚举控制点对即可得到
+\[
+ H=\max_{ij}|[V_i,A_j]|,\quad B=\max_{ij}|V_i^TA_j|,\quad
+ H_1=\max_{ik}|[V_i,J_k]|.
+\]
+分别有 $|H_g|\le H,|b_g|\le B,|[q',q''']|\le H_1$。
+由 $n_g'=b_g/n_g$、$H_g'=[q',q''']$，对 $\kappa=H_g/n_g^3$ 求导：
+\[
+ \kappa_g'=\frac{[q',q''']}{n_g^3}-\frac{3H_gb_g}{n_g^5}.
+\]
+将分子换成绝对值上界、正分母换成下界，得到
+\begin{equation}
+ |\kappa|\le\frac H{n_{\min}^3},\qquad
+ |\kappa_g'|\le\frac{H_1}{n_{\min}^3}+\frac{3HB}{n_{\min}^5}.
+\end{equation}
+
+\subsection{组合成执行器上界}
+第14章已求出 $\max h'=15/8$、$\max|h''|=10/\sqrt3$，因此令
+$d_{\max}=15/(8T)$、$e_{\max}=10/(\sqrt3T^2)$。
+把刚得到的几何界代入物理式：
 \begin{align}
- |\kappa|&\le H/n_{\min}^3,\\
- |\kappa'_g|&\le H'/n_{\min}^3+3HB/n_{\min}^5.
+ s_{\max}^{\rm bound}&=n_{\max}d_{\max},\\
+ |F|^{\rm bound}&=m\left(\frac B{n_{\min}}d_{\max}^2+n_{\max}e_{\max}\right)
+                  +cn_{\max}d_{\max},\\
+ |\delta|^{\rm bound}&=\arctan\left(\frac{LH}{n_{\min}^3}\right),\\
+ |r_\delta|^{\rm bound}&=L\left(\frac{H_1}{n_{\min}^3}+\frac{3HB}{n_{\min}^5}\right)d_{\max},\\
+ |a_\perp|^{\rm bound}&=\frac H{n_{\min}}d_{\max}^2.
 \end{align}
-进度导数有全局界 $d\le1.875/T$、$|e|\le10/(\sqrt3 T^2)$。
-组合这些界得到速度、力、转角、转向速率和侧向加速度的\textbf{连续充分上界}。
-它可能比实际峰值保守，尤其是转向速率的分母用下界 1；不能把认证失败直接解释为
-数学上绝对无解。算法会明确报告“不获认证”。
+转角式使用 $\arctan$ 单调递增；转向速率式使用分母 $1+(L\kappa)^2\ge1$。
+每一叶子区间分别求界，再取最大值。
+上界可能偏宽，尤其是路径切向下界较小时；更细的区间有助于缩紧几何界。
 
-\begin{enumerate}
-\item 优化器先收敛，再查位置、切向和转角；任何一项不获认证就拒绝曲线。
-\item 几何已通过而动力学界过大时，每次将时长乘 1.2，最多尝试20次，并重新认证。
-\item 只有全部通过才返回可执行曲线。输出 retiming\_steps，明确最终时间含保守减速，
-不将它冒充优化器的原始最优解。
-\end{enumerate}
-转角取决于路径曲率；延长 $T$ 不会降低它。因此没有“转不过弯就一直减速”的回退。
-没有实现的倒车或绕行搜索也不会被全向位置跳变代替。
+延长 $T$ 会降低速度、受力和转向速率，但转角界保持不变。
+因此程序先要求位置凸包、切向和转角通过检查。
+几何合格而动力学界超限时，每次把时长乘1.2，再检查一次，最多增加20次；
+\code{retiming_steps} 记录优化后又进行了多少次这样的时间延长。
 
-\textbf{运行：}
 \begin{lstlisting}[language=bash,numbers=none]
 ros2 run motion2d ackermann_planning_demo tmp/ackermann_planning
 \end{lstlisting}
-默认从 $(0,0,0)$ 到 $(2,0.3,0)$，起终点静止；控制跟踪见下一章。
-边界与走廊是这个离线实验显式提供的输入，不声称它来自未知环境探索。
+示例使用给定走廊，从 $(0,0,0)$ 到 $(2,0.3,0)$，起终点静止。
+先观察转角与切向检查，再看动力学界及最终时长。
+若把最大转角设得很小，应调整路径形状或朝向；单纯减速无法改变曲率要求。
+下一章使用这条曲线产生前馈，并加入小车的跟踪反馈。
 
-\textbf{实验：}把最大转角设得很小，确认认证拒绝且不返回执行曲线。
-再保持几何不变增加时长，比较转角不变、动态界降低。
-阅读 continuous bounds 测试，核对密集采样只用于交叉检查上界，没有被称为连续证明。
+\section{练习：由局部运算检查整条链}
+\begin{enumerate}
+\item 用单位端点输入构造 $E$ 的右端速度列，核对 $b_R$；由 $R=E^TQE$ 算出两段手算例子的内部 $H$ 与右端。
+\item \textbf{代码 ch16-1：}补全 Schur 块，先对照本章 $H_0=H_1=2I,B_1=-I$ 的手算，再与密集方程求解比较。
+\item 对静止到静止1 m、2 s的曲线，在起点与终点分别代入式\eqref{eq:spline-energy-time}，核对完整时长梯度。
+\item \textbf{代码 ch16-2：}补全幂次到 Bézier 的二项式比例。把 $p(t)=1+2t+3t^2,T=2$ 转为五次控制点，检查两端和中点。
+\item 手算二次图例的两组子段控制点；解释控制点上界超限时，为什么继续细分可能改变检查结果。
+\item 对 $p=t^2/2$ 的力例子，分别计算力控制点、力变化率控制点和它们的最大范数。
+\item \textbf{代码 ch16-3：}固定几何路径和 $r$，对 $F=m(a_gd^2+n_ge)+cn_gd$ 求时长偏导，区分惯性项与阻尼项。
+\item 固定几何路径，把时长翻倍，列出速度、惯性力、阻尼力、转角、转向速率和侧向加速度的变化比例。
+\item 运行三种演示；改变细分深度0到5，记录上界和耗时，并核对相同曲线的采样值保持一致。
+\end{enumerate}
+编译命令、手算提示和 ROS 实验步骤见 \code{exercises/ch16/README.md}。
