@@ -634,3 +634,10 @@ PDF142页，SHA-256 `c56881e727e8473fdf62fbe10636da043984b946f969c8ce89801368eed
 可选CUDA配置构建成功，212项测试0失败。GPU测试40个随机自由位姿×1440束、圆相切/共线/部分FOV、近回波NaN、无回波inf、容量边界、同一组噪声误差后再逐束比对，2e-5m容差；练习solutions PASS、starter FAIL。本地工具链脚本重复运行验证成功，校验官方SHA256并保留LICENSE，不修改系统。
 16个独立合成计时夹具（0/16/128/512障碍×90/720/4096/16384束），每组20预热+60测量，CUDA double/FMA-off、128线程/块；数据textbook/data/ch20_cuda.csv。有限float距离最大差0；首setup含上下文初始化61.07ms，其余.0286–.1101ms，上传单列.00193–.01213ms。720束/16障碍CPU P50 .08728ms，GPU驻留扫描含回传.06626ms（1.32倍）；16384束/512障碍57.9132/6.78392ms（8.54倍）。90束GPU较慢；内核/回传/驻留总时长均单列，未声称ROS端到端加速。
 PDF145页，SHA-256 `d5d8887e780f63ac59fcea93d0f319225b7007e45dbf2e7d24bfaaa447517b50`；新增物理143–145及目录7页阅读大小检查。首稿参数长串溢出、三行文字孤立到近空白页；缩短安装说明和关闭开关表述后重编，最新代码/公式/双对数图/外置图例/表格/页脚无重叠裁切；未重查其他章节。
+
+## ch20 ROS扫描发布与独立CPU构建
+
+GPU配置主机3包构建、212项测试通过。domain80顺序CPU/CUDA×90/720/16384束，ch05 seed42随机世界、reference圆运动、10Hz/σ=.01m，各101帧0–10s，剔除10帧后91帧统计；逐stamp/逐束噪声结果NaN/inf类别一致，有限值最大差0，reset初始扫描一致，唯一/clock。CSV在textbook/data/ch20_ros.csv，完整扫描和阶段样本在tmp/ch20_ros。
+发布线程total P50/P95(ms)：90束CPU .07056/.07522，CUDA .13444/.17741；720束CPU .335761/.504941，CUDA .162291/.210060；16384束CPU3.823172/4.409494，CUDA .841812/.952053。噪声、构造、发布、GPU内核和回传独立计时；total不包含诊断自身、调试Marker、DDS接收和RViz，未称作传输延迟。
+另在全新tmp/cpu_build、tmp/cpu_install构建三包，MOTION2D_ENABLE_CUDA=OFF，不查找nvcc；209项测试0失败。CPU程序请求cuda以明确错误退出1，未静默fallback；domain81/ch05原验收720束通过时间、编码、暂停/reset、TF、光束起点与SensorDataQoS。仅CMake向非motion包传递未使用选项的提示，无算法编译错误。
+PDF146页，SHA-256 `52cad2eb3ec2d75d3718e9a4a95fc588d9f817e8b6c17848cc78ffb52de1da6f`；新增物理146页与目录7页阅读大小复核，表格/代码/页脚无重叠裁切，其他旧章不重查。GPU RViz画面未验收，沿用已披露GUI限制。

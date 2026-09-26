@@ -29,6 +29,8 @@
 #include "motion2d/sim/robot_model.hpp"
 #include "motion2d/sim/sim_clock.hpp"
 #include "motion2d/sim/sensor_scheduler.hpp"
+#include "motion2d/sim/lidar_cuda.hpp"
+#include <motion2d_interfaces/msg/lidar_timing.hpp>
 
 namespace motion2d
 {
@@ -234,29 +236,56 @@ private:
     lidar_seed_ = static_cast<std::uint32_t>(seed);
     lidar_random_.seed(lidar_seed_);
     lidar_schedule_ = readSchedule("lidar.rate", 10.0);
-    if (declare_parameter<std::string>("lidar.backend", "cpu") != "cpu" ||
-      declare_parameter<std::string>("lidar.scan_model", "snapshot") != "snapshot")
-    {
-      throw std::invalid_argument("Chapter 05 supports lidar backend=cpu, scan_model=snapshot only");
+    lidar_backend_=declare_parameter<std::string>("lidar.backend","cpu");
+    if(lidar_backend_!="cpu" && lidar_backend_!="cuda") throw std::invalid_argument("Expected lidar.backend cpu or cuda");
+    if(declare_parameter<std::string>("lidar.scan_model","snapshot")!="snapshot")
+      throw std::invalid_argument("Only snapshot scan timing is implemented");
+    if(lidar_backend_=="cuda") {
+#ifdef MOTION2D_HAS_CUDA
+      lidar_cuda_=std::make_unique<CudaLidar>(world_,lidar_config_.beams);
+#else
+      throw std::invalid_argument("CUDA backend requested in a CPU build; enable MOTION2D_ENABLE_CUDA or select cpu");
+#endif
     }
+    if(declare_parameter("lidar.profile",false))
+      lidar_timing_pub_=create_publisher<motion2d_interfaces::msg::LidarTiming>("/sim/lidar_timing",100);
     scan_pub_ = create_publisher<sensor_msgs::msg::LaserScan>("/scan", rclcpp::SensorDataQoS());
     if (declare_parameter("lidar.visualize_beams", true)) {
       beam_pub_ = create_publisher<visualization_msgs::msg::MarkerArray>(
         "/visualization/lidar", rclcpp::QoS(1).reliable().transient_local());
     }
     RCLCPP_INFO(get_logger(),
-      "CPU snapshot lidar: %d beams, %.3f Hz, range [%.3f, %.3f] m, sigma=%.4f m, seed=%u",
-      lidar_config_.beams, 1.0 / lidar_schedule_->period(), lidar_config_.range_min, lidar_config_.range_max,
+      "%s snapshot lidar: %d beams, %.3f Hz, range [%.3f, %.3f] m, sigma=%.4f m, seed=%u",
+      lidar_backend_.c_str(), lidar_config_.beams, 1.0 / lidar_schedule_->period(), lidar_config_.range_min, lidar_config_.range_max,
       lidar_config_.range_stddev, lidar_seed_);
   }
 
   void publishLidar(const State2D & sampled, std::int64_t stamp)
   {
-    auto ranges = scanCpu(world_, sampled.pose, lidar_config_);
+    const auto begin=std::chrono::steady_clock::now();CudaScanTiming gpu_timing;
+    std::vector<float> ranges;
+#ifdef MOTION2D_HAS_CUDA
+    if(lidar_cuda_) ranges=lidar_cuda_->scan(sampled.pose,lidar_config_,lidar_timing_pub_ ? &gpu_timing : nullptr);
+    else
+#endif
+      ranges=scanCpu(world_,sampled.pose,lidar_config_);
+    const auto scanned=std::chrono::steady_clock::now();
     addRangeNoise(ranges, lidar_config_, lidar_random_);
+    const auto noisy=std::chrono::steady_clock::now();
     const auto scan = toLaserScan(lidar_config_, ranges,
       rclcpp::Time(stamp, RCL_ROS_TIME), lidar_schedule_->period());
-    scan_pub_->publish(scan);
+    const auto message=std::chrono::steady_clock::now();scan_pub_->publish(scan);
+    const auto published=std::chrono::steady_clock::now();
+    if(lidar_timing_pub_) {
+      const auto elapsed=[](auto a,auto b){return std::chrono::duration<double>(b-a).count();};
+      motion2d_interfaces::msg::LidarTiming timing;timing.header=scan.header;timing.backend=lidar_backend_;timing.beams=lidar_config_.beams;
+      const double na=std::numeric_limits<double>::quiet_NaN();
+      timing.kernel_seconds=lidar_backend_=="cuda" ? gpu_timing.kernel_seconds : na;
+      timing.download_seconds=lidar_backend_=="cuda" ? gpu_timing.download_seconds : na;
+      timing.scan_seconds=elapsed(begin,scanned);timing.noise_seconds=elapsed(scanned,noisy);
+      timing.message_seconds=elapsed(noisy,message);timing.publish_seconds=elapsed(message,published);
+      timing.total_seconds=elapsed(begin,published);lidar_timing_pub_->publish(timing);
+    }
     if (beam_pub_) {beam_pub_->publish(lidarBeamMarkers(scan, sampled.pose));}
   }
 
@@ -631,6 +660,11 @@ private:
   Wrench2D wrench_command_;
   InertialParameters inertia_;
   LidarConfig lidar_config_;
+  std::string lidar_backend_;
+  rclcpp::Publisher<motion2d_interfaces::msg::LidarTiming>::SharedPtr lidar_timing_pub_;
+#ifdef MOTION2D_HAS_CUDA
+  std::unique_ptr<CudaLidar> lidar_cuda_;
+#endif
   ImuNoise imu_noise_;
   double gravity_ = 9.81;
   std::uint32_t imu_seed_ = 6060;

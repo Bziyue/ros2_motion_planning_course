@@ -326,3 +326,8 @@ NavigationNode订阅/map、/odometry、/scan（只检查时间）、/goal_pose�
 规划5Hz、控制50Hz（A理想点200Hz），未来.15s交接，优化预算.04s，等待ACK时不发第二候选。`NavigationStatus` 含状态、规划/优化状态、墙钟求解时长、接受数与停车数。
 默认激光.35s、odom.12s、map3s过期触发停车；只有仿真时钟推进才判过期。时间回退清空目标；新目标也显式停车。静止后自动重试当前目标，不承诺完备探索。
 C默认初始yaw=0，估计odom的轴与仿真物理输入轴一致、原点在第一帧；改初始yaw必须同时实现力向量坐标适配，不能仅平移目标。A/B真值适配器明确world=map=odom。
+
+### ch20 CUDA后端与性能诊断
+
+`lidar.backend=cpu|cuda` 启动时选择；CPU-only构建请求cuda抛出清晰错误。CUDA理想扫描返回共同float数组编码，随后仍由CPU共享噪声函数处理；timestamp仍来自SensorScheduler，不由GPU墙钟替代。
+`lidar.profile=false`默认；true时发布`/sim/lidar_timing` LidarTiming。header是采集stamp/laser；scan/noise/message/publish/total以墙钟秒计，CUDA另列kernel事件时间/download，CPU两个字段NaN。total至publish返回，不含DDS接收、RViz、调试Marker或诊断自身；不可称为完整传输延迟。静态几何/输出/事件复用，reset不重新上传。

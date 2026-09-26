@@ -126,6 +126,10 @@ target_link_libraries(simulator_node PRIVATE motion2d_interfaces::motion2d_inter
   sensor_msgs::sensor_msgs__rosidl_typesupport_cpp
   nav_msgs::nav_msgs__rosidl_typesupport_cpp
   std_srvs::std_srvs__rosidl_typesupport_cpp)
+if(MOTION2D_ENABLE_CUDA)
+  target_link_libraries(simulator_node PRIVATE motion2d_cuda)
+  target_compile_definitions(simulator_node PRIVATE MOTION2D_HAS_CUDA)
+endif()
 install(TARGETS simulator_node DESTINATION lib/motion2d)
 
 add_executable(truth_odometry_node src/nodes/truth_odometry_node.cpp)

@@ -104,3 +104,51 @@ CUDA 事件测内核，墙钟测同步后的回传和整次扫描；只量异步
 这不是所有场景位级一致的承诺，仍保留浮点容差及特殊值检查。
 练习 ch20-1 补齐 ray-circle 根选择，并解释为什么增加障碍、但不增加束数，未必能让 GPU 获益。
 完整 ROS 噪声、消息构建和发布成本仍需在节点中另测，不能由此表推断。
+
+\clearpage
+\section{接入 ROS，再测一次}
+\begin{lstlisting}[language=bash]
+ros2 launch motion2d_bringup ch20.launch.py backend:=cuda beams:=720
+ros2 service call /sim/pause std_srvs/srv/SetBool "{data: false}"
+# Separate experiment: starts and closes its own CPU/CUDA launches.
+python3 scripts/run_ch20.py
+\end{lstlisting}
+仿真器通过 lidar.backend 在 cpu 与 cuda 之间选择；参数只在启动时读取。
+CUDA 构建关闭时若请求 cuda，会明确报错，不静默切回 CPU。
+几何和输出缓存跨扫描复用；reset 只重置仿真时间与同一条噪声随机流，不重复上传不变的世界。
+不论后端如何，\textbf{采集时间戳、激光坐标、量程编码和消息 QoS 都相同}。
+RViz 可直接查看 /scan 命中点；/clock 仍只有仿真器一个发布者。
+
+默认关闭性能诊断，选学 launch 开启 lidar.profile，输出结构化 /sim/lidar\_timing。
+其中扫描、噪声、消息构造、publish 调用耗时相加为本次总耗时；
+GPU 另列事件内核与回传，CPU 对这两个不适用字段填 NaN。
+总耗时截至 publish 返回，不包含订阅者接收、RViz 渲染、调试光束或诊断消息自身。
+这说明发布线程花了多久，不是 DDS 传输延迟的直接测量。
+
+\begin{center}\small
+\begin{tabular}{lrrrrr}\toprule
+后端/束 & 扫描/ms & 噪声/ms & 发布/ms & 总P50/ms & 总P95/ms\\\midrule
+CPU/90 & 0.0559 & 0.0041 & 0.0091 & 0.0706 & 0.0752\\
+CUDA/90 & 0.1203 & 0.0039 & 0.0086 & 0.1344 & 0.1774\\
+CPU/720 & 0.2993 & 0.0248 & 0.0092 & 0.3358 & 0.5049\\
+CUDA/720 & 0.1262 & 0.0246 & 0.0095 & 0.1623 & 0.2101\\
+CPU/16384 & 3.5454 & 0.2585 & 0.0105 & 3.8232 & 4.4095\\
+CUDA/16384 & 0.3700 & 0.4665 & 0.0111 & 0.8418 & 0.9521\\\bottomrule
+\end{tabular}
+\end{center}
+各阶段列为 P50；消息构造约 0.0007--0.0022 ms，完整 CSV 中另列。
+分位数不满足可加性，不能用表中各列 P50 的和校验总 P50。
+90 束时 GPU 仍更慢；720 束与 16384 束的发布线程总 P50 分别约改善 2.07 和 4.54 倍。
+噪声仍在 CPU 执行，在大束数下已经是不可忽视的一部分；两组运行中的 CPU 时钟、缓存和调度也会影响阶段耗时。
+
+这里采用第 05 章 seed=42 的随机世界、解析圆运动、10 Hz 扫描与 0.01 m 高斯测距噪声，
+不同于上一节的合成计时夹具，不能直接将两张表的比值拼接。
+每种后端采集 0--10 s 的 101 帧，剔除前 10 帧后统计剩余 91 帧。
+三个束数组均逐时间戳、逐束比对有噪声结果，本次最大差为 0；reset 重放初始扫描也通过。
+完整数据为 textbook/data/ch20\_ros.csv。
+
+\paragraph{验收与练习}
+分别运行 CPU 和 CUDA，先核对数组及 NaN/$+\infty$ 类别，再看计时。
+将诊断关闭、打开，比较性能测量自身的开销；不要把 profiler 的开销算成传感器物理延迟。
+若增加逐束采集畸变，应改变每束的采集状态和时间语义，不能仅把本章 snapshot 内核改成更快就宣称完成了畸变模拟。
+GPU 后端与无 GPU 的完整主线应分别在构建矩阵中检验。

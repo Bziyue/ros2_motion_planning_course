@@ -28,3 +28,19 @@ CPU与CUDA均返回float：近于min为NaN，超max为+inf；同一角度规范�
 
 GPU测试含40个自由随机位姿、相切/共线/部分视场、near-hit NaN/no-return inf、共享噪声与容量边界。
 没有GPU时不启用这个测试目标；显式启用CUDA但设备不可用时应失败，不冒充CPU成功。
+
+## ROS后端与消息时间
+
+```bash
+ros2 launch motion2d_bringup ch20.launch.py backend:=cuda beams:=720
+ros2 service call /sim/pause std_srvs/srv/SetBool "{data: false}"
+# Another isolated experiment, no other launch required:
+python3 scripts/run_ch20.py
+```
+`lidar.backend=cpu|cuda` 是启动参数，仍为snapshot；CUDA-disabled构建请求cuda明确报错。
+`lidar.profile` 默认false；本章launch启用，在 `/sim/lidar_timing` 输出scan/noise/message/publish/total墙钟秒，CUDA另有kernel/download，CPU填NaN。
+总耗时至publish返回，排除诊断本身、调试Marker和接收/显示。GPU只负责理想距离，共同CPU噪声函数与reset随机流不变；世界显存跨reset保留。
+
+`run_ch20.py` 依次启动CPU/CUDA×90/720/16384束，各采集0–10s的101帧，逐束比较有噪声距离及特殊值；10帧预热后统计。使用ch05真实随机世界，与核心benchmark的合成几何不同。
+CSV见textbook/data/ch20_ros.csv；本机总P50的CPU/CUDA分别.0706/.1344、.3358/.1623、3.8232/.8418ms。小束数GPU更慢，完整发布线程收益不能用内核比值代替。所有时间是主机实测，不是实时上界。
+RViz默认不生成昂贵的逐束Marker，直接看LaserScan；GUI本机仍未验收。
