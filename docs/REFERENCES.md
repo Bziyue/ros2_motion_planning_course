@@ -17,3 +17,5 @@ SplineTrajectory 的性能数字依赖具体问题、优化设置和硬件。教
 第 06 章补充：[REP-145 原始文件](https://github.com/ros-infrastructure/rep/blob/master/rep-0145.rst)（状态为 Draft）用于核对传感器轴、比力、静止向上 +g 与原始 IMU 不含融合姿态的约定。再次核对本机 Imu.msg：协方差为行主序，未知为全零，不提供某项估计时其协方差首元素为 -1。课程使用 /imu/data_raw，不把真值姿态写入 orientation。
 
 第 05 章补充：再次核对主机 LaserScan.msg 与 [官方原始定义](https://raw.githubusercontent.com/ros2/common_interfaces/rolling/sensor_msgs/msg/LaserScan.msg)，并阅读 [REP-117](https://raw.githubusercontent.com/ros-infrastructure/rep/master/rep-0117.rst)。REP-117 区分 -inf（过近）、NaN（无效）与 +inf（无回波）。已批准的课程契约将近距盲区统一编码为 NaN、让建图跳过，因此不宣称完整实现 REP-117 的三种编码；转换到真实硬件时必须保留这一区别。官方 HTML 文档本次受访问保护，采用原始源文件和本机定义核对。
+
+第 07 章补充：核对本机 nav_msgs/Odometry、OccupancyGrid、MapMetaData 与 sensor_msgs/PointCloud2，以及 [Odometry 原始定义](https://github.com/ros2/common_interfaces/blob/rolling/nav_msgs/msg/Odometry.msg)、[OccupancyGrid 原始定义](https://github.com/ros2/common_interfaces/blob/rolling/nav_msgs/msg/OccupancyGrid.msg)、[PointCloud2 原始定义](https://github.com/ros2/common_interfaces/blob/rolling/sensor_msgs/msg/PointCloud2.msg)。Odometry 的位姿与速度使用不同的声明帧；栅格按 x 最快的行主序排列，原点是 (0,0) 格的左下角。OccupancyGrid 值域由应用约定，本课程采用 -1 未知、0-100 占据概率百分比。

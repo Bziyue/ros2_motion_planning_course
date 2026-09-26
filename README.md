@@ -2,7 +2,7 @@
 
 从二维世界、圆盘机器人和模拟传感器开始，逐步学习定位建图、路径与轨迹规划、跟踪控制。教材、代码和练习按章节对应。
 
-**当前状态：第 01-06 章已完成。** 已有随机世界、四种机器人模型、CPU 激光雷达、六轴白噪声 IMU、统一传感器时间调度与统计/漂移实验。大纲提交为 `5c0c642`；每完成一个可运行、已验证的功能就单独提交，教材和练习同步更新。真值里程计适配、建图、SLAM 和规划尚未实现。
+**当前状态：第 01-06 章已完成，第 07 章实施中。** 已有随机世界、四种机器人模型、CPU 激光雷达、六轴白噪声 IMU、统一传感器时间调度与统计/漂移实验。大纲提交为 `5c0c642`；每完成一个可运行、已验证的功能就单独提交，教材和练习同步更新。已接入真值里程计适配；点云、建图、SLAM 和规划尚未完成。
 
 [教材 PDF](output/pdf/course.pdf) · [实施进度](docs/PROGRESS.md) · [主机验收记录](docs/VALIDATION.md)
 
@@ -14,6 +14,7 @@
 | 04 | [机器人模型](chapters/ch04/README.md) | [ch04](exercises/ch04/README.md) | `ch04.launch.py` |
 | 05 | [CPU 激光雷达](chapters/ch05/README.md) | [ch05](exercises/ch05/README.md) | `ch05.launch.py` |
 | 06 | [IMU 与传感器时间](chapters/ch06/README.md) | [ch06](exercises/ch06/README.md) | `ch06.launch.py` |
+| 07 | [真值里程计与观测建图](chapters/ch07/README.md) | [ch07](exercises/ch07/README.md) | `ch07.launch.py` |
 
 ~~~bash
 source /opt/ros/lyrical/setup.bash

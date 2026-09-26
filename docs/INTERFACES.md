@@ -2,7 +2,7 @@
 
 状态：v0.1，随批准大纲进入实施。这里规定课程将使用的语义，实际已实现范围见 [PROGRESS.md](PROGRESS.md)。优先标准消息；实际需要第二种实现或跨节点传输时才增加抽象。
 
-第 04 章落地约定：simulator 独占时钟，发布 /sim/pose、/sim/velocity、/sim/acceleration 真值调试消息。此章 map 与 odom 重合，真值 TF 暂由 simulator 发布；第 07 章才拆出里程计选源适配器。理想到点在下一 tick 执行，失败扫掠冻结上一个有效状态和时间，/sim/status=collision_predicted，必须 reset 开新试验。不把这个调试入口供给后续 SLAM。
+第 04 章落地约定：simulator 独占时钟，发布 /sim/pose、/sim/velocity、/sim/acceleration 真值调试消息。此章 map 与 odom 重合，真值 TF 暂由 simulator 发布；第 07 章已拆出 truth_odometry 适配器。理想到点在下一 tick 执行，失败扫掠冻结上一个有效状态和时间，/sim/status=collision_predicted，必须 reset 开新试验。不把这个调试入口供给后续 SLAM。
 
 已实现三个互斥模型 ideal/velocity/inertial，只订阅对应命令。速度支持 odom/base_link，力仅支持 odom。有限二维输入、命令 frame/时间、物理参数均在边界校验。速度限模长；力每轴独立限幅。保持输入在模拟时间中超时，速度模式切零速度，惯性模式撤力并继续积分。惯性核心用线性阻尼系统的零阶保持解析离散，碰撞增加曲线与弦的偏差上界；质量与阻尼配置可直接供后续 MPC 使用。
 
@@ -110,7 +110,7 @@ g_world = [0, 0, -9.81] m/s²
 
 reference 按绝对时刻求解析轨迹，inertial/velocity 在最近接受区间内用当时保持的输入进行解析分步。ideal 仅在 tick 末端跳变，不插值瞬移且禁止 IMU。恰好落在 tick 末端的 IMU 采用刚结束区间的加速度（左极限）；新命令不改写已发布样本。t=0 是新试验的初始状态，发力命令在之后的区间生效。
 
-模拟器在每个采样时刻发布对应的真值 odom→base_link TF，并补发 tick 末端 TF；同一时刻两传感器共享一次 TF。暂停时只重复真值/时钟/TF 心跳，不重新抽取噪声；单步只释放本步到期样本；碰撞拒绝整个区间，时间与采样序号都冻结。此处 TF 仅属于当前 truth 教学阶段；后续定位适配器不能与它同时发布同一条边。
+模拟器在每个采样时刻发布原子的 /ground_truth/odometry，并补发 tick 末端状态；同一时刻两传感器共享一次真值发布。第 07 章由 truth_odometry 适配器负责 /odometry、map→odom 和 odom→base_link；launch 强制 publish_truth_tf=false。第 04–06 章默认仍由模拟器直接广播这两条 TF。暂停时只重复真值/时钟/TF 心跳，不重新抽取噪声；单步只释放本步到期样本；碰撞拒绝整个区间，时间与采样序号都冻结。这些 TF 只属于显式 truth 教学模式；后续估计入口将替换真值适配器。原始真值使用可靠、transient-local、深度 100 的队列，选源 /odometry 使用可靠、volatile、深度 100；重复的暂停心跳不算新观测。
 
 传感器使用与订阅端匹配的 SensorDataQoS；控制/轨迹采用小队列和明确可靠性；静态/低频地图使用适合晚加入 RViz2 的 transient-local 配置。具体值在第 02 章验证，不复制未经检验的 QoS 模板。
 

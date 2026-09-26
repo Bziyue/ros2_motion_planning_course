@@ -1,0 +1,97 @@
+\addtocontents{toc}{\protect\newpage}
+\chapter{位姿已知时，如何从观测建图}\label{ch:mapping}
+\begin{notebox}
+\textbf{目标}\quad 将定位与建图分开，用已知位姿解释激光观测，逐步得到规划可用的地图。\\
+\textbf{先修}\quad SE(2)、连续运动、激光编码，以及第六章的采样时间。
+\end{notebox}
+
+\section{先给建图一个已知的位姿}
+在同时学习定位和建图之前，先假设位姿完全已知。这能把“点为什么落错地方”拆成两个问题：
+是位姿不准，还是扫描投影和地图更新出了错？本章使用仿真真值做定位基线，仍只靠激光观测建图。
+障碍物列表属于模拟器和独立评估，不交给建图节点。
+
+\begin{center}
+\begin{tikzpicture}[>=Stealth,node distance=8mm,
+ box/.style={draw=tealblue,fill=pale,rounded corners,align=center,minimum height=9mm}]
+\node[box] (sim) {模拟器};
+\node[box,right=of sim] (raw) {原子真值\\world / ground\_truth\_base};
+\node[box,below=of raw] (adapter) {显式 truth 适配器};
+\node[box,right=28mm of adapter] (map) {观测建图};
+\draw[->] (sim)--(raw);
+\draw[->] (raw)--(adapter);
+\draw[->] (adapter)--node[above]{/odometry}(map);
+\draw[->] (sim.south)|-node[pos=.65,below]{/scan}
+ ([yshift=-8mm]map.south)--(map.south);
+\end{tikzpicture}
+\end{center}
+
+\code{/ground_truth/odometry} 保留独立的真值帧标识，不直接建立对应 TF 边。
+适配器输出统一入口 \code{/odometry}，使用 odom / base\_link。
+本章 world、map、odom 的原点与轴向相同，因此转换只需明确改写帧标识；
+初始位置 (-8,-8) 不会偷偷变为 (0,0)。这是一项\textbf{已知的坐标对齐约定}，
+不是任意两个坐标系都能通过改字符串实现变换。
+
+\begin{center}
+\begin{tabular}{ll}
+\toprule
+TF 边 & 唯一发布者\\\midrule
+map $\to$ odom & truth\_odometry，单位变换\\
+odom $\to$ base\_link & truth\_odometry，随采样状态变化\\
+base\_link $\to$ laser / imu\_link & simulator，固定圆心外参\\
+\bottomrule
+\end{tabular}
+\end{center}
+后续换成激光里程计或 SLAM 时，会替换这个真值入口。不能继续保留一条隐藏的真值 TF，
+让估计器从中读取答案；每条 TF 边也不能同时由两个节点发布。
+
+\clearpage
+\section{同一条里程计消息里的两种坐标系}
+依据主机与\href{https://github.com/ros2/common_interfaces/blob/rolling/nav_msgs/msg/Odometry.msg}{官方 Odometry 定义}，
+pose 在 \code{header.frame_id}，twist 在 \code{child_frame_id}。
+本章内部保存世界速度 $v_W$，写入消息前需要计算
+\begin{equation}
+v_B=R(\psi)^\top v_W,\qquad \omega_B=(0,0,\dot\psi).
+\end{equation}
+例如 $\psi=\pi/2$、$v_W=(2,1)$，则 $v_B=(1,-2)$ m/s。
+速度只转轴，不加位移；把位置 p 加到速度上不仅物理意义错误，单位也不一致。
+
+\lstinputlisting[language=C++,linerange={truth_odometry_begin-truth_odometry_end},
+ includerangemarker=false]{../ros2_ws/src/motion2d/src/ros/odometry_messages.cpp}
+
+位姿、速度、时间都来自同一个 \code{State2D}。
+若分别订阅位置与速度，再按“最新一条”拼接，可能混合不同采样时刻，尤其在转弯时不一致。
+本章原子消息避免了这种额外误差。零协方差表示仿真给出的精确状态，
+不代表真实定位系统能达到零误差。
+
+\textbf{练习 ch07-1：}补全 \path{exercises/ch07/starter/body_velocity.hpp}。
+先手算正 $90^\circ$ 和 $180^\circ$ 旋转，再运行检查。思考圆参考中世界速度为何变化，
+机体前向速度却始终为 $r\omega$。
+
+\clearpage
+\section{运行真值适配器并核对 TF}
+从 ros2\_ws 构建、加载 install 后运行：
+\begin{lstlisting}[language=bash,numbers=none]
+ros2 launch motion2d_bringup ch07.launch.py rviz:=false
+# Another terminal, same ROS environment
+/usr/bin/python3 ../scripts/check_ch07_odometry.py
+\end{lstlisting}
+默认圆参考、200 Hz 物理。真值还覆盖非整数频率传感器的精确采样时刻。
+暂停期间里程计和 TF 可重复当前时间，方便晚加入的显示节点；重复时间戳不能算作新观测。
+检查脚本核对原始/选源消息、机体速度、TF 位姿、唯一时钟与唯一运动 TF 发布者。
+
+\lstinputlisting[language=C++,linerange={truth_adapter_begin-truth_adapter_end},
+ includerangemarker=false]{../ros2_ws/src/motion2d/src/nodes/truth_odometry_node.cpp}
+
+第七章 launch 强制关闭模拟器的 \code{publish_truth_tf}，把运动 TF 交给适配器。
+第 04-06 章仍默认开启旧显示方式；不要同时启动两个章节。
+去掉 \code{rviz:=false} 可观察里程计箭头、机器人与扫描。
+本机 RViz 的重置缓存/关闭异常仍按第六章记录，自动 reset 检查建议先不开 GUI。
+
+\begin{lstlisting}[language=bash,numbers=none]
+# Repository root: standalone exercise
+g++ -std=c++17 -I/usr/include/eigen3 -Iexercises/ch07/starter \
+  exercises/ch07/check_velocity.cpp -o /tmp/ch07_velocity
+/tmp/ch07_velocity
+\end{lstlisting}
+\textbf{常见错误：}世界速度直接写入 body twist；把起点重定位为零却没同步地图；
+同时打开模拟器与适配器的运动 TF；把本章真值基线称为 SLAM。

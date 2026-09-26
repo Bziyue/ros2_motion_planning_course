@@ -11,6 +11,7 @@ find_package(std_srvs REQUIRED)
 find_package(std_msgs REQUIRED)
 find_package(tf2_ros REQUIRED)
 find_package(sensor_msgs REQUIRED)
+find_package(nav_msgs REQUIRED)
 
 add_library(motion2d_core
   src/geometry/se2.cpp src/geometry/obstacles.cpp
@@ -79,7 +80,7 @@ target_link_libraries(world_scene_node PRIVATE motion2d_core rclcpp::rclcpp
 install(TARGETS world_scene_node DESTINATION lib/motion2d)
 
 add_executable(simulator_node src/nodes/simulator_node.cpp src/ros/lidar_messages.cpp
-  src/ros/imu_messages.cpp)
+  src/ros/imu_messages.cpp src/ros/odometry_messages.cpp)
 target_compile_features(simulator_node PRIVATE cxx_std_20)
 target_compile_options(simulator_node PRIVATE -Wall -Wextra -Wpedantic)
 target_link_libraries(simulator_node PRIVATE motion2d_core rclcpp::rclcpp tf2_ros::tf2_ros
@@ -88,8 +89,17 @@ target_link_libraries(simulator_node PRIVATE motion2d_core rclcpp::rclcpp tf2_ro
   rosgraph_msgs::rosgraph_msgs__rosidl_typesupport_cpp
   std_msgs::std_msgs__rosidl_typesupport_cpp
   sensor_msgs::sensor_msgs__rosidl_typesupport_cpp
+  nav_msgs::nav_msgs__rosidl_typesupport_cpp
   std_srvs::std_srvs__rosidl_typesupport_cpp)
 install(TARGETS simulator_node DESTINATION lib/motion2d)
+
+add_executable(truth_odometry_node src/nodes/truth_odometry_node.cpp)
+target_compile_features(truth_odometry_node PRIVATE cxx_std_20)
+target_compile_options(truth_odometry_node PRIVATE -Wall -Wextra -Wpedantic)
+target_link_libraries(truth_odometry_node PRIVATE rclcpp::rclcpp tf2_ros::tf2_ros
+  nav_msgs::nav_msgs__rosidl_typesupport_cpp
+  geometry_msgs::geometry_msgs__rosidl_typesupport_cpp)
+install(TARGETS truth_odometry_node DESTINATION lib/motion2d)
 
 if(BUILD_TESTING)
   find_package(ament_cmake_gtest REQUIRED)
@@ -109,6 +119,9 @@ if(BUILD_TESTING)
   target_link_libraries(test_imu motion2d_core)
   ament_add_gtest(test_sensor_scheduler test/test_sensor_scheduler.cpp)
   target_link_libraries(test_sensor_scheduler motion2d_core)
+  ament_add_gtest(test_odometry test/test_odometry.cpp src/ros/odometry_messages.cpp)
+  target_compile_features(test_odometry PRIVATE cxx_std_20)
+  target_link_libraries(test_odometry motion2d_core nav_msgs::nav_msgs__rosidl_typesupport_cpp)
 endif()
 
 ament_package()

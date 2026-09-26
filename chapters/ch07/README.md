@@ -1,0 +1,44 @@
+# 第 07 章：真值里程计、激光点云与观测建图
+
+先修 01-06。当前完成真值里程计与 TF 责任划分；点云、占据栅格和分辨率实验在本章后续独立功能中实现。
+
+## 先明确本章已知什么
+
+本章已知机器人真值位姿，用传感器观测建图；它不是 SLAM。建图将只读取 /scan 与统一的 /odometry，不能读取世界几何或 /sim 调试数据。完整几何仅用于独立评估。
+
+| 输出/边 | 发布者 | 含义 |
+| --- | --- | --- |
+| /ground_truth/odometry | simulator | world / ground_truth_base，原子真值消息，不广播这条真值 TF |
+| /odometry | truth_odometry | odom / base_link，本章明确选择真值 |
+| map → odom | truth_odometry | 固定单位变换 |
+| odom → base_link | truth_odometry | 每个真值状态/采样时刻的动态变换 |
+| base_link → laser、imu_link | simulator | 固定圆心外参 |
+| /clock | simulator | 唯一模拟时间 |
+
+world、map、odom 在本章使用同一原点与方向。起点 (-8,-8) 不改成 (0,0)，以后要重新定原点必须显式做坐标变换。没有把 world/ground_truth_base 加进 TF 树，防止估计器意外读取真值定位。
+
+Odometry 的 pose 用 header.frame_id，twist 用 child_frame_id。内部世界速度先乘 R(yaw)^T，再写入消息；位置、速度和时间来自同一个 State2D，不能拼接两个不同回调时刻的 /sim/pose 与 /sim/velocity。真值协方差为零代表这个确定性仿真状态，不是实际定位精度承诺。
+
+## 运行与验收
+
+从 ros2_ws 构建并加载 install 后：
+
+~~~bash
+ros2 launch motion2d_bringup ch07.launch.py rviz:=false
+# 另一终端，同 ROS 环境
+/usr/bin/python3 ../scripts/check_ch07_odometry.py
+~~~
+
+默认 reference 圆轨迹，IMU/雷达继承第 06 章。去掉 rviz:=false 可显示里程计箭头、机器人与扫描；主机 RViz 的 reset/关闭异常仍见 docs/VALIDATION.md，自动重置验收建议先不启动 GUI。
+
+ch07.launch.py 强制 simulator.publish_truth_tf=false，适配器独占运动 TF。直接运行模拟器时默认 true，以兼容第 04-06 章；不要手动同时启动旧场景与适配器。当前仅实现 truth 选源，SLAM/estimated 尚未实现。
+
+## 代码与练习
+
+- src/ros/odometry_messages.cpp：truthOdometry，世界位姿与机体速度。
+- src/nodes/truth_odometry_node.cpp：显式 truth 适配与 TF 所有权。
+- src/nodes/simulator_node.cpp：在 tick 末端和传感器采样时刻发布原子真值。
+- test/test_odometry.cpp：手算旋转、时间、帧和协方差。
+- [练习 ch07-1](../../exercises/ch07/README.md)：机体速度转换。
+
+暂停时 /odometry 与 TF 有同一时间戳的心跳，观测处理不能把它当成新运动或重复地图证据。reset 从 t=0 开始新试验，下游消费者需要清理时序历史。

@@ -24,6 +24,7 @@
 #include "motion2d/ros/world_parameters.hpp"
 #include "motion2d/ros/lidar_messages.hpp"
 #include "motion2d/ros/imu_messages.hpp"
+#include "motion2d/ros/odometry_messages.hpp"
 #include "motion2d/sim/robot_model.hpp"
 #include "motion2d/sim/sim_clock.hpp"
 #include "motion2d/sim/sensor_scheduler.hpp"
@@ -39,8 +40,10 @@ class Simulator : public rclcpp::Node
 {
 public:
   Simulator() : Node("simulator"), clock_(readStep()),
-    broadcaster_(*this), static_broadcaster_(*this)
+    static_broadcaster_(*this)
   {
+    publish_truth_tf_ = declare_parameter("publish_truth_tf", true);
+    if (publish_truth_tf_) {broadcaster_ = std::make_unique<tf2_ros::TransformBroadcaster>(*this);}
     const WorldConfig config = readWorldConfig(*this);
     world_ = generateWorld(config);
     radius_ = config.robot_radius;
@@ -71,6 +74,8 @@ public:
     clock_.setPaused(declare_parameter("start_paused", false));
     const auto retained = rclcpp::QoS(1).reliable().transient_local();
     clock_pub_ = create_publisher<rosgraph_msgs::msg::Clock>("/clock", 1);
+    truth_pub_ = create_publisher<nav_msgs::msg::Odometry>(
+      "/ground_truth/odometry", rclcpp::QoS(100).reliable().transient_local());
     pose_pub_ = create_publisher<geometry_msgs::msg::PoseStamped>("/sim/pose", retained);
     velocity_pub_ = create_publisher<geometry_msgs::msg::TwistStamped>("/sim/velocity", retained);
     acceleration_pub_ = create_publisher<geometry_msgs::msg::AccelStamped>("/sim/acceleration", retained);
@@ -151,12 +156,12 @@ private:
       const auto stamp = std::min(laser_time, imu_time);
       if (stamp > now) {break;}
       const auto sampled = acquisitionState(stamp);
-      publishTransform(sampled.pose, stamp);
+      publishTruth(sampled, stamp);
       last_transform = stamp;
       if (stamp == laser_time) {publishLidar(sampled, stamp); lidar_schedule_->advance();}
       if (stamp == imu_time) {publishImu(sampled, stamp); imu_schedule_->advance();}
     }
-    if (last_transform != now) {publishTransform(state_.pose, now);}
+    if (last_transform != now) {publishTruth(state_, now);}
   }
   // sensor_dispatch_end
 
@@ -464,6 +469,7 @@ private:
     for (const auto & frames : std::vector<std::pair<std::string, std::string>>{
         {"map", "odom"}, {"base_link", "laser"}, {"base_link", "imu_link"}})
     {
+      if (frames.first == "map" && !publish_truth_tf_) {continue;}
       geometry_msgs::msg::TransformStamped t;
       t.header.frame_id = frames.first;
       t.child_frame_id = frames.second;
@@ -501,8 +507,12 @@ private:
     publishSensors();  // Includes exact acquisition TF and the endpoint/paused heartbeat TF.
   }
 
-  void publishTransform(const Pose2D & pose, std::int64_t stamp)
+  void publishTruth(const State2D & state, std::int64_t stamp)
   {
+    const auto time = rclcpp::Time(stamp, RCL_ROS_TIME);
+    truth_pub_->publish(truthOdometry(state, time));
+    if (!publish_truth_tf_) {return;}
+    const auto & pose = state.pose;
     geometry_msgs::msg::TransformStamped tf;
     tf.header.stamp = rclcpp::Time(stamp, RCL_ROS_TIME);
     tf.header.frame_id = "odom";
@@ -511,7 +521,7 @@ private:
     tf.transform.translation.y = pose.position.y();
     tf.transform.rotation.z = std::sin(pose.yaw / 2);
     tf.transform.rotation.w = std::cos(pose.yaw / 2);
-    broadcaster_.sendTransform(tf);
+    broadcaster_->sendTransform(tf);
   }
 
   void rememberPosition()
@@ -580,11 +590,13 @@ private:
   double reference_radius_ = 1.0, reference_omega_ = .4;
   std::int64_t command_deadline_ = 0;
   bool blocked_ = false, have_command_ = false;
+  bool publish_truth_tf_ = true;  ///< Legacy ch04-06 view; ch07 assigns TF to its adapter.
   std::string model_, status_;
   std::deque<geometry_msgs::msg::Point> trail_;
-  tf2_ros::TransformBroadcaster broadcaster_;
+  std::unique_ptr<tf2_ros::TransformBroadcaster> broadcaster_;
   tf2_ros::StaticTransformBroadcaster static_broadcaster_;
   rclcpp::Publisher<rosgraph_msgs::msg::Clock>::SharedPtr clock_pub_;
+  rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr truth_pub_;
   rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr pose_pub_;
   rclcpp::Publisher<geometry_msgs::msg::TwistStamped>::SharedPtr velocity_pub_;
   rclcpp::Publisher<geometry_msgs::msg::AccelStamped>::SharedPtr acceleration_pub_;
