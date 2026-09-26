@@ -1,0 +1,7 @@
+radius,neighbors,status,grid_cost,expanded,raw_points,simplified_points
+0,4,found,4,317,41,2
+0,8,found,3.12132,142,26,2
+0.15,4,found,4,281,41,4
+0.15,8,found,3.12132,114,26,4
+0.3,4,unreachable,inf,283,0,0
+0.3,8,unreachable,inf,283,0,0

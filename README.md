@@ -2,7 +2,7 @@
 
 从二维世界、圆盘机器人和模拟传感器开始，逐步学习定位建图、路径与轨迹规划、跟踪控制。教材、代码和练习按章节对应。
 
-**当前状态：第 01-08 章已完成。** 已有随机世界、四种机器人模型、CPU 激光雷达、六轴白噪声 IMU、统一传感器时间调度与统计/漂移实验。大纲提交为 `5c0c642`；每完成一个可运行、已验证的功能就单独提交，教材和练习同步更新。已接入真值里程计、同时间扫描点云、观测占据栅格与独立评估；SLAM 和规划尚未完成。
+**当前状态：第 01–10 章已完成，第 11 章配置空间与 A* 内核已实现。** 已有随机世界、四种机器人模型、CPU 激光雷达、六轴白噪声 IMU、统一传感器时间、真值建图、激光/IMU 融合与回环 SLAM。大纲提交为 `5c0c642`；每完成一个可运行、已验证的功能就单独提交，教材和练习同步更新。规划的 ROS 接入与后续轨迹控制继续实施。
 
 [教材 PDF](output/pdf/course.pdf) · [实施进度](docs/PROGRESS.md) · [主机验收记录](docs/VALIDATION.md)
 
@@ -21,6 +21,9 @@
 | 06 | [IMU 与传感器时间](chapters/ch06/README.md) | [ch06](exercises/ch06/README.md) | `ch06.launch.py` |
 | 07 | [真值里程计与观测建图](chapters/ch07/README.md) | [ch07](exercises/ch07/README.md) | `ch07.launch.py` |
 | 08 | [扫描匹配与激光里程计](chapters/ch08/README.md) | [ch08](exercises/ch08/README.md) | `ch08.launch.py` |
+| 09 | [IMU 预测与时间融合](chapters/ch09/README.md) | [ch09](exercises/ch09/README.md) | `ch09.launch.py` |
+| 10 | [关键帧回环 SLAM](chapters/ch10/README.md) | [ch10](exercises/ch10/README.md) | `ch10.launch.py` |
+| 11 | [配置空间与 A*](chapters/ch11/README.md) | [ch11](exercises/ch11/README.md) | 内核演示 `astar_demo` |
 
 ~~~bash
 source /opt/ros/lyrical/setup.bash
@@ -54,7 +57,7 @@ ros2 launch motion2d_bringup ch08.launch.py
 
 仿真与传感器 → 真值里程计和激光建图 → 激光/IMU 定位 → 闭环 SLAM → A* → ESDF 与安全走廊 → 二维 MINCO / SplineTrajectory → PD / MPC → 在线重规划。CUDA 激光仿真为选学章节。
 
-采用已批准的全向圆盘与 C++17 算法主线，当前已完成第 01-08 章的环境、机器人、传感器、观测建图与激光里程计。大纲 PDF 保留为原始审阅记录，实际教材使用独立 PDF。
+采用已批准的全向圆盘与 C++17 算法主线。大纲 PDF 保留为原始审阅记录，实际教材使用独立 PDF。
 
 ## 当前目录
 
