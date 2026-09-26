@@ -2,7 +2,7 @@
 
 版本：v0.1，2026-09-26。**已批准，逐功能实施。** 本文件保留完整计划；实际完成状态见 [PROGRESS.md](PROGRESS.md)，原始 PDF 审阅稿保留不改。
 
-本文件是课程范围与章节映射的主要依据。`textbook/outline.tex` 和 `output/pdf/course_outline.pdf` 是用于快速审阅的排版摘要；修改章节范围时同步更新。所有课程源文件、launch、习题和验收实验均为计划，不表示已经存在或通过测试。
+本文件是课程范围与章节映射的主要依据。`textbook/outline.tex` 和 `output/pdf/course_outline.pdf` 保留原始审阅摘要。第 01-03 章已实现，代码映射以下文和各章 README 为准；其他章节的源文件、launch、习题和验收实验仍是计划。
 
 ## 1. 课程目标与学习路线
 
@@ -39,7 +39,7 @@
 
 计划只用三个 ROS 包：算法与薄节点 `motion2d`、启动配置 `motion2d_bringup`、必要自定义消息 `motion2d_interfaces`。算法按目录分层，不按章节复制。
 
-以下 `sim/foo.cpp` 等算法路径均相对于 **计划中的** `ros2_ws/src/motion2d/src/`，相应声明位于 `include/motion2d/`。每章共同有：
+以下 `sim/foo.cpp` 等算法路径均相对于 `ros2_ws/src/motion2d/src/`，相应声明位于 `include/motion2d/`。每章共同有：
 
 - `textbook/chapters/chNN.tex`：正文与真实代码摘录。
 - `chapters/chNN/README.md`：先修知识、命令、参数、预期现象。
@@ -55,7 +55,7 @@
 
 - **目标**：理解工作空间、package、node、topic、launch，显示固定网格和一个圆盘。
 - **内容**：本机 Lyrical 检查；干净环境的安装路线；colcon；source 顺序；rclcpp 发布 Marker；RViz2 Fixed Frame；统一仿真时间的预告。
-- **计划代码**：`nodes/hello_scene_node.cpp`；最小 `CMakeLists.txt` / `package.xml`；`ch01.launch.py`。
+- **已实现代码**：`nodes/hello_scene_node.cpp`；最小 `CMakeLists.txt` / `package.xml`；`ch01.launch.py`。
 - **练习**：解释 topic 类型与节点的区别；补完一个圆形 Marker；改变半径、颜色、坐标，记录显示变化。
 - **验收**：从新终端按教材命令构建并启动；RViz2 显示圆盘，命令行能查看消息；还没有机器人运动或 SLAM。
 
@@ -63,7 +63,7 @@
 
 - **目标**：能够把雷达点从机体系变换到世界系，读懂时间戳和 TF 树。
 - **内容/公式**：`p_world = R(yaw) p_body + t`；角度归一化；SI；`map → odom → base_link`；`laser` 与 `imu_link` 静态外参；仿真时钟、频率与简单 QoS。
-- **计划代码**：`geometry/se2.cpp`；`sim/sim_clock.cpp`；消息转换函数；TF 发布薄节点。
+- **已实现代码**：`geometry/se2.cpp`；`sim/sim_clock.cpp`；`nodes/frame_demo_node.cpp`；`ch02.launch.py`。
 - **练习**：手算旋转 90 度的点；实现变换的逆；比较错误时间戳与正确时间戳的显示。
 - **验收**：正反变换恢复原点；TF 每个子帧只有一个父帧；暂停时 `/clock` 与仿真状态同时停止。
 
@@ -71,7 +71,7 @@
 
 - **目标**：构建可复现、可配置、可验证的简单静态环境。
 - **内容/公式**：边界矩形、随机圆、通过随机点凸包生成的凸多边形；点在线段/多边形内；点到边界距离；圆盘碰撞；种子、起终点净空与可达性检查。凹多边形分解为选做。
-- **计划代码**：`geometry/intersection.cpp`；`sim/world.cpp`；`sim/world_generator.cpp`；障碍物 Marker 发布。
+- **已实现代码**：`geometry/obstacles.cpp`；`sim/world.cpp`；`sim/world_generator.cpp`；`nodes/world_scene_node.cpp`；`ch03.launch.py`。
 - **练习**：理解“碰撞半径”和图形尺寸；补完点到线段距离；固定种子改变障碍密度，解释不可达场景。
 - **验收**：同一参数与种子重复生成同一世界；圆和多边形均显示；无效多边形不进入世界；失败场景报告原因，不静默换种子。
 
@@ -243,8 +243,8 @@ C++ 使用普通值类型、Eigen 和薄节点，关键接口及公式采用 Dox
 
 | 阶段 | 章节 | 实际交付目标 | 当前状态 |
 | --- | --- | --- | --- |
-| S0 | 本轮 | 仓库、协作约定、大纲、接口草案、PDF 审阅稿 | 待审阅 |
-| S1 | 01-03 | 主机教程、最小 ROS 2 场景、随机障碍环境 | 未实施 |
+| S0 | 初始化 | 仓库、协作约定、大纲、接口草案、PDF 审阅稿 | 已批准 |
+| S1 | 01-03 | 主机教程、最小 ROS 2 场景、随机障碍环境 | 已完成 |
 | S2 | 04-07 | 模型、CPU 激光、IMU、真值里程计与建图 | 未实施 |
 | S3 | 08-10 | 激光/IMU 里程计、回环 SLAM | 未实施 |
 | S4 | 11-14 | A*、ESDF、走廊、五次轨迹、理想执行 | 未实施 |
@@ -252,13 +252,13 @@ C++ 使用普通值类型、Eigen 和薄节点，关键接口及公式采用 Dox
 | S6 | 17-19 | PD/MPC、综合闭环、实验教材 | 未实施 |
 | S7 | 20、附录 | CUDA 和所选进阶主题 | 未实施 |
 
-每阶段交付代码、正文、练习、运行说明和一次端到端演示，不到最后才补教材。建议首先批准 S1；如果用户明确批准更大范围，就在该范围内连续推进。
+每阶段交付代码、正文、练习、运行说明和一次端到端演示，不到最后才补教材。用户已批准按大纲实施；每个独立功能完成后立即提交。
 
-## 7. 请审阅的选择
+## 7. 已批准的主线选择
 
 1. **驱动模型**：推荐全向圆盘作为主线，差速扫地机器人放附录；也可改成差速主线，但会调整后半部分的规划和控制内容。
 2. **实现语言**：推荐 C++17 / Eigen 实现算法，Python 用于 launch、绘图与实验；ROS 消息和数学尽量保持简单。
-3. **第一阶段**：推荐先交付 01-03 章，再进入传感器和机器人运动；本轮不提前实现。
+3. **第一阶段**：先交付 01-03 章，再进入传感器和机器人运动；S1 已完成。
 4. **课程重点**：默认包含小尺度闭环 SLAM、二维 MINCO/SplineTrajectory 核心和线性 MPC；三维飞行动力学、大型 SLAM 系统和完整上游库复刻不属于当前计划。
 
 原始资料与固定上游版本见 [REFERENCES.md](REFERENCES.md)。

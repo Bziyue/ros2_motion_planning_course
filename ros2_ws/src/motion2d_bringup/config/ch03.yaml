@@ -1,0 +1,27 @@
+/**:
+  ros__parameters:
+    use_sim_time: true
+    x: -8.0       # Shared start/body position, m
+    y: -8.0
+    radius: 0.20  # Shared body/collision radius, m
+frame_demo:
+  ros__parameters:
+    dt: 0.005
+    yaw: 0.0
+    yaw_rate: 0.0
+    show_ray: false
+world_scene:
+  ros__parameters:
+    seed: 42
+    width: 20.0
+    height: 20.0
+    circle_count: 8
+    polygon_count: 8
+    size_min: 0.35          # circle radius or polygon sampling disk radius, m
+    size_max: 1.2
+    polygon_samples: 8     # hull may have fewer vertices
+    goal_x: 8.0
+    goal_y: 8.0
+    margin: 0.05
+    require_connected: true
+    check_resolution: 0.25 # conservative flood-fill cell size, m

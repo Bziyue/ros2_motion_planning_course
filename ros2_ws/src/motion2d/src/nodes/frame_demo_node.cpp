@@ -30,6 +30,7 @@ public:
     yaw_ = declare_parameter("yaw", kPi / 2.0);
     yaw_rate_ = declare_parameter("yaw_rate", 0.2);
     radius_ = declare_parameter("radius", 0.2);
+    show_ray_ = declare_parameter("show_ray", true);
     if (!std::isfinite(x_) || !std::isfinite(y_) || !std::isfinite(yaw_) ||
       !std::isfinite(yaw_rate_) || !std::isfinite(radius_) || radius_ <= 0.0)
     {
@@ -159,12 +160,14 @@ private:
     ray.color.r = 0.2F;
     ray.color.b = 0.9F;
     visualization_msgs::msg::MarkerArray markers;
-    markers.markers = {disk, ray};
+    markers.markers = {disk};
+    if (show_ray_) {markers.markers.push_back(ray);}
     marker_pub_->publish(markers);
   }
 
   SimClock clock_;
   double x_, y_, yaw_, yaw_rate_, radius_;
+  bool show_ray_;
   tf2_ros::TransformBroadcaster broadcaster_;
   tf2_ros::StaticTransformBroadcaster static_broadcaster_;
   rclcpp::Publisher<rosgraph_msgs::msg::Clock>::SharedPtr clock_pub_;

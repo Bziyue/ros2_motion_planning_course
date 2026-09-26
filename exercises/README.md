@@ -1,6 +1,6 @@
 # 习题组织
 
-各章安排理解、代码和实验三类练习，按 `chNN/` 逐步创建。入口：[ch01](ch01/README.md)、[ch02](ch02/README.md)。
+各章安排理解、代码和实验三类练习，按 `chNN/` 逐步创建。入口：[ch01](ch01/README.md)、[ch02](ch02/README.md)、[ch03](ch03/README.md)。
 
 ```text
 chNN/
