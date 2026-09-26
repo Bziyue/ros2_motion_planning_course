@@ -146,6 +146,8 @@ reference 按绝对时刻求解析轨迹，inertial/velocity 在最近接受区�
 
 第 07 章已发布观测 /map：mapping 独立配置固定范围，map=odom 的显式 truth 基线。DDA 清理射线，有限端点占据，+inf 仅清理量程内，NaN 无更新；每帧每格一次、命中优先。未知 -1，已观测为 0–100 概率取整；默认 log-odds 增量 logit(.7)/logit(.4)、截断 ±4。/map 使用可靠 transient-local 深度 1，header 保留最后插入扫描时间。时间回退清图，先等待暂停状态下的首帧再恢复。
 
+独立评估 rasterizeTruth 仅用于 mapping_demo：完整几何与格子接触即占据，使用圆/方格距离和凸多边形 SAT，不调用 raycast 或地图更新。evaluateObserved 记录 observed/uncertain，仅对明确分类的观测格统计误判；未知不作为自由，局部指标不代表全图完成度。
+
 ## 8. SLAM、规划、轨迹与控制的连接
 
 SLAM 输出连续 odom、全局地图和 `map → odom`；关键帧位置图只在静态小场景内实现。局部配准失败要影响状态与地图更新；不静默插入未经验证的扫描。

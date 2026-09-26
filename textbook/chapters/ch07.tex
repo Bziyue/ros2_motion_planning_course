@@ -336,3 +336,144 @@ ros2 launch motion2d_bringup ch07.launch.py
 已观测格数从 9579 增至 10154；晚加入接收、暂停、首帧重播和连续零时刻 reset 均通过。
 扫描配对与真值适配器检查也已回归。
 本机 RViz 的既有 reset/退出问题仍未修复；截图在自动检查后重新运行 GUI 获取。
+
+\clearpage
+\section{独立真值栅格：只能用来评估}
+“用真值位姿建图”与“直接把真值地图交给建图器”是两件事。
+本章 \code{mapping_demo} 先生成扫描，再只用扫描和位姿更新观测图；
+更新结束后才调用 \code{rasterizeTruth} 生成对照。
+运行中的 \code{mapping_node} 不调用这个评估函数。
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=\linewidth]{figures/ch07_truth_observed.png}
+\caption{相同 0.1 m 分辨率，左侧为独立几何参考，右侧为 160 帧无噪声观测。
+灰色未知没有被补全；橙线是采样轨迹。参考图不作为建图输入。}
+\end{figure}
+
+参考格子只要与实体或房间边界接触就记占据。圆用“圆心到方格最近点的距离”
+与半径比较；凸多边形用分离轴检验。它遍历完整几何，
+\textbf{不调用射线模拟器或地图更新函数}，从而避免用同一个建图结果检验自己。
+这仍是数值仿真的交叉验证，不是外部实测真值。
+
+评估先记录 observed 比例，再排除 unknown 与 uncertain，
+仅对有明确判断的格子统计 TP、FP、FN、TN。TP 是正确的占据预测，FP 是把参考自由格判为占据，
+FN 是把参考占据格判为自由，TN 是正确的自由预测。
+\begin{equation}
+ {\rm precision}=\frac{\rm TP}{\rm TP+FP},\qquad
+ {\rm recall}_{\rm evaluated}=\frac{\rm TP}{\rm TP+FN}.
+\end{equation}
+分母为零时记 NaN，而不是填 100\%。这里的 recall 只针对已评估格子，
+\textbf{不是整张世界地图的召回率}；unknown 也不能当作预测正确的自由格。
+
+整格接触真障碍的参考规则比单射线“穿过了一部分格子”更保守。
+因此无噪声也可能有 FN；它揭示栅格边界与观测模型的差异，
+不能直接解读为米制定位误差或连续碰撞安全证明。
+
+\clearpage
+\section{实验一：分辨率、噪声与评价指标}
+固定世界 seed=42、8 圆/8 多边形，沿一米圆参考运动，
+在 $t=0,0.1,\ldots,15.9$ s 采集 160 帧、每帧 720 束、最大量程 10 m。
+噪声 seed=4242，$\sigma=0/0.05$ m。
+每组噪声的扫描只生成一次，在三种分辨率上复用；
+角度和量程采用与 LaserScan 一致的 float32 元数据。
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=\linewidth]{figures/ch07_resolution.png}
+\caption{相同位置的局部放大。白色自由、青色不确定、深色占据、灰色未知。
+上排无噪声，下排 $\sigma=0.05$ m；列方向分辨率逐渐变粗。}
+\end{figure}
+
+地图始终覆盖 $22\times22$ m；格数依次为 $440^2,220^2,110^2$。
+分辨率减半会使二维格数变为四倍，但不会增加雷达原本没有测到的信息。
+图中边界随着分辨率和噪声变厚，细格也会保留角采样造成的间隙。
+
+\begin{center}\small
+\pgfplotstabletypeset[
+ col sep=comma,
+ columns={resolution,sigma,coverage,precision,recall},
+ columns/resolution/.style={column name={$\rho$/m},fixed,precision=2},
+ columns/sigma/.style={column name={$\sigma$/m},fixed,precision=2},
+ columns/coverage/.style={column name={观测比例},fixed,precision=3},
+ columns/precision/.style={column name={precision},fixed,precision=3},
+ columns/recall/.style={column name={局部 recall},fixed,precision=3},
+ every head row/.style={before row=\toprule,after row=\midrule},
+ every last row/.style={after row=\bottomrule}
+]{data/ch07_mapping.csv}
+\end{center}
+完整 CSV 同时保存不确定格数与四项计数。不要只挑更高的 recall：
+噪声让部分障碍内部也被“看到”，把占据带画厚，可能提高此指标；
+观测比例增大也可能来自越过真实表面的噪声，不能称为探索能力变强。
+
+\clearpage
+\section{实验二：墙到底变厚了多少米}
+用空房间隔离形状与遮挡因素：右墙位于 $x=4.03$ m，
+雷达静止在原点，161 束覆盖 $[-0.4,0.4]$ rad、量程 6 m。
+每组 160 帧、seed=4242，比较 $\sigma=0,0.05,0.10$ m。
+4.03 避开格线，减少“真实墙恰落在两个格子之间”的量化混淆。
+
+在格心 $y\in[-1,1]$ m 的每一行，取 $x\in[3,5]$ m 内被判占据的首末格，
+计算跨度，再对有占据的行求平均：
+\begin{equation}
+ w_y=(i_{x,\max}-i_{x,\min}+1)\rho,\qquad
+ \bar w=\frac1{N_{\rm rows}}\sum_y w_y.
+\end{equation}
+跨度包括中间间隙，并非逐格相加的实体面积；
+没有占据的行不参与均值，必须同时报告行数，防止漏检被平均值掩盖。
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=\linewidth]{figures/ch07_wall.png}
+\caption{左：实测平均占据跨度。右：细格、大噪声的局部地图，
+虚线为真实墙面。简化逆传感器模型会生成偏厚、偏移的占据带。}
+\end{figure}
+
+\begin{center}\small
+\pgfplotstabletypeset[
+ col sep=comma, columns={resolution,sigma,mean_width,rows},
+ columns/resolution/.style={column name={$\rho$/m},fixed,precision=2},
+ columns/sigma/.style={column name={$\sigma$/m},fixed,precision=2},
+ columns/mean_width/.style={column name={平均跨度/m},fixed,precision=3},
+ columns/rows/.style={column name={有效行数},fixed,precision=0},
+ every head row/.style={before row=\toprule,after row=\midrule},
+ every last row/.style={after row=\bottomrule}
+]{data/ch07_wall.csv}
+\end{center}
+无噪声时，本实验占据带是一格厚；0.1 m 分辨率下，
+噪声从 0 增至 0.05 m 时，平均跨度由 0.10 增至 0.32 m。
+这不是障碍真正变厚，而是有限格长、端点噪声和证据更新共同造成的结果。
+降低分辨率数值不能自动修复测距误差；更合理的逆传感器模型留作进阶。
+
+\clearpage
+\section{复现实验与本章练习}
+\begin{lstlisting}[language=bash,numbers=none]
+# Repository root, after sourcing the ROS install environment
+ros2 run motion2d mapping_demo tmp/ch07_eval
+/usr/bin/python3 scripts/plot_ch07.py tmp/ch07_eval textbook/figures
+# Exercise ch07-4 (replace starter with solutions for reference)
+g++ -std=c++17 -Iexercises/ch07/starter \
+  exercises/ch07/check_metrics.cpp -o /tmp/ch07_metrics
+/tmp/ch07_metrics
+\end{lstlisting}
+绘图使用主机 Matplotlib/NumPy。CSV 保存在实验目录；教材表格读取
+\path{textbook/data/ch07_mapping.csv} 与 \path{ch07_wall.csv} 的已验收副本。
+PGM 文件是紧凑实验数据，255 表示未知，其余为概率百分比，绘图按物理 y 轴向上显示。
+同机同标准库的两次运行，全部 18 个输出文件逐字节一致。
+
+\lstinputlisting[language=C++,linerange={observed_metrics_begin-observed_metrics_end},
+ includerangemarker=false]{../ros2_ws/src/motion2d/src/evaluation/map_evaluation.cpp}
+
+\begin{enumerate}
+\item \textbf{理解：}为什么已知定位仍会得到不完整地图？
+  为什么更大的观测比例或 recall 不一定代表更好？
+\item \textbf{代码 ch07-4：}完成 \path{starter/observed_metrics.hpp}。
+  必须先排除 -1 与 36--64，再统计四项计数；35/65 是包含端点的阈值。
+\item \textbf{实验：}保持世界、轨迹、量程、束数与扫描序列相同，仅改变分辨率。
+  报告格数、观测比例、四项计数、不确定数量与米制墙厚。
+  再改变噪声；说明表面变厚如何影响精度与召回率。
+\end{enumerate}
+
+\textbf{完成边界：}本章具备已知位姿下的观测建图，四道代码练习与参考解同步，
+不是 SLAM。下一章先研究如何从扫描本身估计运动；在得到可验证的估计位姿之前，
+不把真值 TF 混入估计器。建图接口仍是扫描加位姿。

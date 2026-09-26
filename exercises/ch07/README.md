@@ -27,3 +27,11 @@ g++ -std=c++17 -I/usr/include/eigen3 -Iexercises/ch07/starter \
 - 代码 ch07-3：补完 starter/grid_traversal.hpp 的 DDA 循环，源文件换为 check_traversal.cpp 编译。覆盖水平/竖直、正反对角线、角点、同格和终点格线；必须终止且不重复访问。
 - 实验：运行 check_ch07_map.py，然后查看 RViz 的地图；完整世界对照默认关闭。被挡住的区域和远处目标应仍是灰色未知，不能因没有点云就刷白。reset 后首帧地图应与第一次首帧逐字节一致。
 - 评分：访问次序六例全部通过；讲清有限命中的终点优先、无回波不制造边界障碍、每帧每格至多更新一次。
+
+## 观测域评估与墙厚实验
+
+- 理解：若 70% 地图未知，把 unknown 算成预测自由会怎样改变评价？为什么噪声增大后局部召回率可能上升？
+- 代码 ch07-4：补完 starter/observed_metrics.hpp；用 check_metrics.cpp 编译检查。输出 {TP,FP,FN,TN}，排除 -1 与 36..64；35 与 65 保留。
+- 实验：从仓库根目录运行 `ros2 run motion2d mapping_demo tmp/ch07_eval` 和 `/usr/bin/python3 scripts/plot_ch07.py tmp/ch07_eval textbook/figures`。对照 ch07_mapping.csv 与 ch07_wall.csv，分别解释分辨率、噪声和米制墙厚。
+- 扩展：把直墙移到格线上，观察无噪声时的一格/两格差异；更改 hit/miss 概率时保留同一批扫描再比较，避免把随机输入变化混入算法比较。
+- 评分：三组混淆计数正确；保留 unknown/uncertain 数量、空分母为未定义、注明参考占据按整格接触计算；墙厚同时给单位与有效行数。复现参数、种子和本地提交版本可查。

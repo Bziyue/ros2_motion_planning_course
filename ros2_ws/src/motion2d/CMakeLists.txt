@@ -19,7 +19,7 @@ add_library(motion2d_core
   src/sim/ideal_model.cpp src/sim/swept_collision.cpp src/sim/velocity_model.cpp
   src/sim/inertial_model.cpp src/sim/reference_model.cpp src/sim/raycast.cpp src/sim/lidar_cpu.cpp
   src/sim/imu.cpp src/sim/sensor_scheduler.cpp src/mapping/scan_projection.cpp
-  src/mapping/occupancy_grid.cpp)
+  src/mapping/occupancy_grid.cpp src/evaluation/map_evaluation.cpp)
 target_compile_features(motion2d_core PUBLIC cxx_std_17)
 target_compile_options(motion2d_core PRIVATE -Wall -Wextra -Wpedantic)
 target_include_directories(motion2d_core PUBLIC
@@ -51,6 +51,10 @@ install(TARGETS imu_demo DESTINATION lib/motion2d)
 add_executable(imu_noise_demo src/examples/imu_noise_demo.cpp)
 target_link_libraries(imu_noise_demo PRIVATE motion2d_core)
 install(TARGETS imu_noise_demo DESTINATION lib/motion2d)
+add_executable(mapping_demo src/examples/mapping_demo.cpp)
+target_compile_options(mapping_demo PRIVATE -Wall -Wextra -Wpedantic)
+target_link_libraries(mapping_demo PRIVATE motion2d_core)
+install(TARGETS mapping_demo DESTINATION lib/motion2d)
 ament_export_targets(motion2d_core_targets HAS_LIBRARY_TARGET)
 ament_export_dependencies(Eigen3)
 
@@ -135,6 +139,8 @@ if(BUILD_TESTING)
   target_link_libraries(test_scan_projection motion2d_core)
   ament_add_gtest(test_occupancy_grid test/test_occupancy_grid.cpp)
   target_link_libraries(test_occupancy_grid motion2d_core)
+  ament_add_gtest(test_map_evaluation test/test_map_evaluation.cpp)
+  target_link_libraries(test_map_evaluation motion2d_core)
   ament_add_gtest(test_mapping_messages test/test_mapping_messages.cpp src/ros/mapping_messages.cpp)
   target_compile_features(test_mapping_messages PRIVATE cxx_std_20)
   target_link_libraries(test_mapping_messages motion2d_core
