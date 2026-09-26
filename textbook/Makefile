@@ -1,6 +1,7 @@
 .PHONY: all course outline
 
 PYTHON ?= /usr/bin/python3
+REVIEW_CHAPTER ?=
 
 all: course
 
@@ -8,7 +9,7 @@ course:
 	mkdir -p ../tmp/pdfs/course ../output/pdf
 	latexmk -xelatex -interaction=nonstopmode -halt-on-error -outdir=../tmp/pdfs/course -jobname=course course.tex
 	cp ../tmp/pdfs/course/course.pdf ../output/pdf/course.pdf
-	$(PYTHON) ../scripts/render_pdf_review.py ../output/pdf/course.pdf ../tmp/pdfs/review/course --latex-log ../tmp/pdfs/course/course.log
+	$(PYTHON) ../scripts/render_pdf_review.py ../output/pdf/course.pdf ../tmp/pdfs/review/course --latex-log ../tmp/pdfs/course/course.log $(if $(REVIEW_CHAPTER),--chapter $(REVIEW_CHAPTER))
 
 outline:
 	mkdir -p ../tmp/pdfs/latex ../output/pdf

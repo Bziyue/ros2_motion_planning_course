@@ -56,3 +56,5 @@ ros2 topic echo /visualization/robot --once --qos-durability transient_local
 - 不可见：检查 Fixed Frame、Marker 话题、alpha 与订阅持久性。
 - 编译器标准错误：ROS 节点使用 C++20，不强制降为 C++17。
 - 练习见 [ch01 习题](../../exercises/ch01/README.md)，正文见 [course.pdf](../../output/pdf/course.pdf)。
+
+教材重修补充了工作空间目录、两次source、build/launch分工、Marker逐字段解释和节点生命周期。建议先预测尺寸，再用topic echo与RViz对照；新增阅读练习见习题目录。
