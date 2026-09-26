@@ -1,20 +1,19 @@
-# 附录D：录制、回放与可复现实验
+# 附录D：固定输入，重放与比较
 
-EXERCISE(appD-1)：补全传感器话题选择，输出只能是scan和原始IMU；缺少输入时明确失败。
+1. **EXERCISE(appD-1)**：补全 `starter/topics.py` 中传感器话题选择函数，按scan、原始IMU顺序输出，缺少输入时抛出ValueError。
+
 ```bash
 PYTHONPATH=exercises/appD/starter /usr/bin/python3 exercises/appD/check_topics.py
 ```
-参考解在solutions。评分：含真值/TF/clock混合输入时筛选正确50%，仅两传感器时25%，缺IMU时明确报错25%。
-提示：使用明确允许列表，不靠匹配名字中的“sensor”。
 
-实验：执行 `python3 scripts/run_appD.py --output tmp/my_replay`，阅读summary.json和bag元数据。
-为何存储时间和header.stamp可能差一个时钟周期？为什么不能改header来消除这点差异？
-为什么检查序列化消息的字段值比比较重新编码后的CDR填充字节更合适？
+混合真值/TF/clock列表筛选50%，仅两传感器25%，缺IMU报错25%。参考解在 `solutions`。
 
-理解：回放时停止模拟器。若两个算法都发布map→odom，应串行比较或使用完整的独立命名空间/TF树。
-先固定同一传感器记录、输入里程计来源、版本、参数及ATE对齐规则，再比较结果。
-现有SLAM外部对照作为接入练习，本机验收对象是课程自身SLAM回放，未声称其他系统已实测。
+2. 手算采集间隔.005s、角速度.2rad/s，在播放倍率.5与2下的墙钟间隔和角度积分增量。区分header.stamp、存储时间与本机等待时间。
+3. 执行 `python3 scripts/run_appD.py --output tmp/my_replay`，使用新的输出目录。阅读summary.json、bag元数据与录制/播放日志，检查文件条数、处理终点和观测地图。
+4. 解释录制器最近收到的clock为何可能与传感器stamp差一个更新间隔。设计一个保留两种时刻的表格，检查回放是否保持header。
+5. 从 `scripts/run_appD.py` 的digest函数追踪字段展开、排序编码与散列。分别改变量程、frame或协方差中的一个值，预测摘要变化；说明为什么先解码字段再比较。
+6. 画出map→odom→base_link及laser/imu_link两条外参，标出发布者。尝试更换外参时，先手算一个点的变换再观察RViz。
+7. 设计外部SLAM对照：固定bag，列出扫描、外参、里程计与IMU信息来源；串行运行以保持TF边的发布者唯一，按第19章相同规则评价。
+8. 运行 `bash scripts/build_api.sh`，从偏置函数的API追到实现与调用点。复制 `docs/EXPERIMENT_REPORT_TEMPLATE.md`，填写附录C实验的问题、预测、输入、命令、数据和结论。
 
-API练习：运行 `bash scripts/build_api.sh`，从函数文档找出坐标系/单位/前提/失败方式。
-报告练习：复制`docs/EXPERIMENT_REPORT_TEMPLATE.md`，填写附录C的两频率实验；只改密度重跑，先预测方差的缩放。
-逐项记录版本/命令/原始数据、失败次数及PDF本次新增页的检查结果，不用模板空项冒充结果。
+回放先核对输入完整性，再评价算法输出。保持一组实验只改变一个因素，便于解释结果。

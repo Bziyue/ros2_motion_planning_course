@@ -27,11 +27,13 @@ def stamp(message):
     return message.header.stamp.sec*10**9+message.header.stamp.nanosec
 
 
+# replay_digest_begin
 def digest(message):
     # CDR alignment padding is unspecified and may differ when reserialized.
     # Compare every message value, including covariances, frame and timestamp.
     value=json.dumps(message_to_ordereddict(message),sort_keys=True,separators=(',',':'))
     return hashlib.sha256(value.encode()).hexdigest()
+# replay_digest_end
 
 
 def main():

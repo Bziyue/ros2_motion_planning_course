@@ -1,120 +1,226 @@
 \chapter{记录、回放与外部工具}
 \begin{notebox}
-\textbf{目标}\quad 关闭模拟器后，仅凭记录的激光和 IMU 重新生成里程计与观测地图。\\
-\textbf{先修}\quad 第 06、09、10 章；终端已 source 主机 ROS 与课程工作空间。
+\textbf{目标}\quad 保存一段传感器观测，关闭模拟器后重新生成里程计与地图；学会检查时间和输入一致性。\\
+\textbf{先修}\quad 第 06、09、10 章；终端已加载主机 ROS 与课程工作空间。
 \end{notebox}
-\section{传感器时间与文件时间是两件事}
-rosbag2 保存消息及存储时间戳。传感器 header.stamp 表示采集时刻；
-录制器收到消息时，还会记录当时看到的时钟值。
-使用仿真时间录制，避免把从零开始的传感器时刻与系统日历时间混用。
-\begin{lstlisting}[language=bash]
-# With one course simulator already running:
+\section{把一次运行变成可以反复使用的输入}
+调试 SLAM 时，重新运动所产生的传感器序列可能因初值、运动或噪声而变化，难以判断结果变化来自参数还是输入。
+rosbag2 把话题消息和时间存进文件；之后可将同一批扫描和 IMU 测量重新送给估计器。
+这样调整匹配阈值或滤波噪声后，可以在相同观测上比较结果。
+
+本实验只录制 \code{/scan} 与 \code{/imu/data_raw}。
+估计里程计、map/odom 变换和地图由新运行的算法重新计算；传感器安装外参由回放 launch 提供。
+如果同时播放旧估计的 TF，新旧两个算法会发布同一条变换边，显示和坐标查询便可能交替使用不同结果。
+因此先画清“保存的输入”和“重新计算的输出”：
+\begin{center}\begin{minipage}{\linewidth}\makeatletter\def\@captype{figure}\makeatother
+\centering
+\begin{tikzpicture}[>=stealth,font=\small,
+ box/.style={draw=tealblue,fill=pale,rounded corners,minimum height=.85cm,align=center}]
+\node[box,minimum width=2cm] (bag) at (0,0) {传感器 bag};
+\node[box,minimum width=2.5cm] (player) at (4,0) {播放器};
+\node[box,minimum width=3cm] (est) at (9,0) {雷达里程计与融合\\关键帧 SLAM};
+\node[box,minimum width=3cm] (out) at (9,-2) {新里程计、TF\\观测地图与点云};
+\draw[->] (bag)--(player);
+\draw[->] (player)--node[above]{激光、IMU}(est);
+\draw[->] (player.south)--++(0,-.85)-|node[pos=.25,below]{/clock}(est.south west);
+\draw[->] (est)--(out);
+\end{tikzpicture}
+\caption{回放的数据流。文件提供固定观测，播放器提供仿真时钟，估计器从观测重新计算状态与地图。}
+\end{minipage}\end{center}
+
+\section{先区分采集、存储与墙钟时间}
+一条消息涉及三种时刻：
+\begin{center}\small
+\begin{tabular}{lp{10cm}}\toprule
+符号 & 含义与用途\\\midrule
+$t_s$ & 消息 header.stamp 中的采集时间，决定测量对应哪个物理状态\\
+$t_r$ & 录制器写入 bag 的接收/存储时间，播放器据此安排发送顺序\\
+$w$ & 运行程序所经历的墙钟时间，用于观察播放速度与计算耗时\\\bottomrule
+\end{tabular}
+\end{center}
+使用仿真时间录制时，$t_r$ 取录制器最近收到的 /clock 值；$t_s$ 则已在传感器消息中填写。
+两个话题到达的先后可能不同，因此二者可相差一个时钟更新间隔。
+例如消息的采集时间为 1.000 s，而录制器刚看到的时钟仍为 0.995 s，文件会保留这两个值。
+估计器积分使用相邻 header 的差，存储时间用于重放调度。
+具体选项可查阅 \href{https://github.com/ros2/rosbag2#simulation-time}{rosbag2 的仿真时间说明}，
+并用本机 \code{ros2 bag record --help} 核对当前命令行。
+
+\subsection{先录制一小段传感器}
+按第 10 章启动仿真，保持暂停。在另一个终端启动录制器，再恢复仿真：
+\begin{lstlisting}[language=bash,numbers=none]
+# Terminal B; choose a fresh output directory.
 ros2 bag record --use-sim-time -o tmp/my_sensors \
   --topics /scan /imu/data_raw
-# Ctrl+C closes the bag; then stop the simulator and old estimators.
+# Terminal C, after the recorder discovers both topics:
+ros2 service call /sim/pause std_srvs/srv/SetBool "{data: false}"
+\end{lstlisting}
+录制数秒后在终端 B 按 Ctrl+C，让文件关闭；随后停止仿真与旧估计节点。
+录制器收到第一个 /clock 后才开始写入消息，因此最初进入文件的采样可能晚于仿真零时刻。
+用下面的命令检查文件实际包含的话题、条数和时间范围：
+\begin{lstlisting}[language=bash,numbers=none]
 ros2 bag info tmp/my_sensors
 \end{lstlisting}
-只录制两类观测，使重新运行的估计器自己计算 TF 与地图。
-原始姿态和地图不是 SLAM 输入，记录全部话题再一起回放会混入旧结果或引入发布者冲突。
-消息内部的 frame、采集时间、协方差与噪声样本均应保留。
+如果条数明显偏少，先检查录制器何时发现传感器、QoS 是否匹配，再检查发布频率。
+消息内部的 frame、量程、协方差、噪声样本和采集时间均随消息保存。
 
-\section{谁来发布时钟与变换}
-\begin{lstlisting}[language=bash]
-# Terminal A, no simulator in this launch:
+\section{半速播放为什么仍用原来的积分步长}
+在新的终端中启动只含估计节点的回放栈，再启动播放器：
+\begin{lstlisting}[language=bash,numbers=none]
+# Terminal A; this launch contains estimators and sensor extrinsics.
 ros2 launch motion2d_bringup replay_slam.launch.py rviz:=true
-# Terminal B:
+# Terminal B; the simulator and old estimators have stopped.
 ros2 bag play tmp/my_sensors --clock 200 --rate 0.5
 \end{lstlisting}
-播放器拥有唯一 /clock；所有估计节点使用仿真时间。
-半速播放改变消息到达的墙钟速度，不能把 IMU 积分步长也乘二。
-录制时采用的每条消息采集时间仍是滤波器的时间依据。
+播放器是这一回放系统的 /clock 发布者，估计节点均使用仿真时间。
+设播放倍率为 $r>0$，文件中两条消息的存储时差为 $\Delta t_r$，
+则计划的墙钟发送间隔为 $\Delta w=\Delta t_r/r$。
+半速 $r=0.5$ 时，计算机有两倍墙钟时间处理同一段运动；消息内部 $t_s$ 保持原值。
 
-此启动文件复用第 10 章雷达里程计、融合、估计里程计适配和 SLAM 四个节点。
-估计适配器独占 odom 到 base\_link，SLAM 独占 map 到 odom；
-两个静态发布器只提供圆心重合、朝向一致的 laser 与 imu\_link 外参。
-它们适用于本课程的记录，不代表真实传感器不需要外参标定。
-RViz 预期显示重建地图、点云和估计轨迹；本机此次验收使用无界面模式。
+例如陀螺测量为 0.2 rad/s，两条 IMU 采集时间相差 0.005 s，积分得到
+\[
+ \Delta\psi=\omega\Delta t_s=0.2\times0.005=0.001\ \mathrm{rad}.
+\]
+半速回放时，这两条消息可能相隔约 0.010 s 墙钟时间到达，角度增量仍为 0.001 rad。
+若改用到达间隔积分，就会错误地将机器人转速或运动时长放大。
 
-\clearpage
-\section{做一次真正的录制与回放验收}
-在仓库根目录运行下面的脚本；输出目录中的 sensors 不应已存在。
-\begin{lstlisting}[language=bash]
+\begin{center}\begin{minipage}{\linewidth}\makeatletter\def\@captype{figure}\makeatother
+\centering
+\begin{tikzpicture}[x=1cm,y=1cm,>=stealth,font=\small]
+\node[anchor=east] at (-.6,0){采集时刻 / s};
+\node[anchor=east] at (-.6,-1.7){回放经过时间 / s};
+\draw[->,muted] (0,0)--(8,0);\draw[->,muted] (0,-1.7)--(8,-1.7);
+\foreach \x/\s/\w in {1/1.000/0,4/1.005/0.010,7/1.010/0.020}{
+ \draw[dashed,linecolor] (\x,-.15)--(\x,-1.55);
+ \fill[tealblue] (\x,0) circle (.05) node[above]{$\s$};
+ \fill[navy] (\x,-1.7) circle (.05) node[below]{$\w$};
+}
+\node[fill=white,inner sep=3pt] at (4,-.85){同一条消息，header 保持原值};
+\end{tikzpicture}
+\caption{半速播放的时间对照。为突出比例，图中假设存储时差等于采集时差；实际回放发送顺序由文件时间决定。}
+\end{minipage}\end{center}
+
+\subsection{TF 每条边由谁计算}
+回放 launch 复用雷达里程计、IMU 融合、估计里程计适配与关键帧 SLAM 四个节点。
+雷达里程计提供扫描位姿，融合节点结合 IMU，适配器将融合结果转换为统一里程计接口。
+TF 分工为：
+\begin{center}\small
+\begin{tabular}{ll}\toprule
+变换边 & 发布者\\\midrule
+map $\to$ odom & 关键帧 SLAM\\
+odom $\to$ base\_link & 估计里程计适配器\\
+base\_link $\to$ laser & 静态雷达外参发布器\\
+base\_link $\to$ imu\_link & 静态 IMU 外参发布器\\\bottomrule
+\end{tabular}
+\end{center}
+课程传感器与圆盘中心重合、朝向一致，所以两条外参是零平移、零旋转。
+更换真实记录时，应填入标定的安装位姿，使扫描与惯性测量转换到正确机体系。
+RViz 的 Fixed Frame 设为 map，观察新生成的占据地图、注册点云与估计轨迹。
+若点云跟随错误的坐标移动，先检查 frame 名称和这四条边的时间，再调整 SLAM 参数。
+
+\section{用自动实验追踪每一条输入}
+在仓库根目录可运行完整录制与回放例子，输出路径应是新的目录：
+\begin{lstlisting}[language=bash,numbers=none]
 /usr/bin/python3 scripts/run_appD.py --output tmp/my_replay
 \end{lstlisting}
-脚本在独立 ROS 域内先启动暂停的 reference 模型，等待录制器订阅两类传感器后运行六秒，
-关闭录制器与模拟器，再启动仅含估计的栈并半速回放。
-使用第 10 章参数：720 束、10 Hz 雷达，200 Hz 白噪声 IMU，seed=42 的随机世界。
+脚本在独立 ROS 域内启动暂停的 reference 模型，等待录制器订阅两类传感器，推进至六秒后停止。
+它关闭录制器和模拟器，再启动上述估计栈并半速回放。
+场景采用 seed42 随机世界、720 束/10 Hz 激光和 200 Hz 白噪声 IMU，参数来自第 10 章。
 
-本机 rosbag2 0.33.3 实测记录了 59 帧激光、1180 帧 IMU，存储时间从 0.105 到 6.000 s。
-早期等待首个时钟/订阅建立的样本没有进入记录；因此不能用“六秒乘频率”替代文件计数。
-存储时刻与采集时刻最大相差 0.005 s，录制器使用最近收到的 /clock；
-这些不是新的物理采样时间，回放保留 header。
+\subsection{先比较字段，再解释结果}
+本次记录中的每条传感器消息都有本话题内唯一的采集时间戳。脚本建立
+“话题 $+$ 采集纳秒 $\to$ 字段摘要”的对应，用它配对现场接收、文件读取与回放接收的消息。
+纳秒值为
+\[
+ t_{\rm ns}=10^9\,\text{sec}+\text{nanosec},
+\]
+保留整数能避免把纳秒转换成浮点秒后丢失末位。
+字段摘要的核心是下面几行：
+\lstinputlisting[language=Python,linerange={replay_digest_begin-replay_digest_end},includerangemarker=false]{../scripts/run_appD.py}
+\code{message_to_ordereddict} 展开消息的每个字段，JSON 固定键顺序与分隔符，
+SHA-256 把该表示变为便于比较的固定长度摘要。相同字段将产生相同摘要；发现不同摘要时，
+再展开消息查找具体差异。量程中的 NaN、无回波、frame、stamp 和协方差都参与比较。
 
-回放所有消息的字段值与记录一致，最后里程计时刻为 6.000 s；
-观测地图有 12556 个已观测格，累计点云 537 点。
-检查还确认估计器不订阅真值、模拟器已停止、估计 TF 边存在且播放器只有一个时钟。
-这些指标验证回放链路，不用于宣称 SLAM 精度、回环能力或不同系统性能。
+这样比较关注测量本身。CDR 序列化还可能插入用于对齐的填充字节，重新编码时填充值可以变化。
+例如某个按 4 字节对齐的字段前已有 1 字节内容，就需补 3 字节以移动到下一个 4 字节边界。
+这些填充用于存放布局，解码后的测量数值由真正字段决定。
+因此检查传感器重放时，先解码再比较字段，可以排除填充差异的干扰。
 
-\paragraph{一个容易误判的检查}
-CDR 序列化有对齐填充字节，重新编码时这些字节未必相同。
-本脚本将解码后的每个字段转为固定次序的数据表示再求散列，包含 stamp、frame、量测和协方差。
-它检查量测语义一致，不要求无意义的填充字节一致；NaN 和无回波编码也保留。
+\subsection{怎样读这次记录的统计量}
+随教材保存的一组结果为：59 帧扫描、1180 帧 IMU，存储时间从 0.105 到 6.000 s，
+存储与采集时刻最大相差 0.005 s。
+初始时钟与订阅建立影响了文件起点，因此应以文件实际条数为准。
+回放结束后，最后里程计时刻为 6.000 s，地图有 12556 个已观测格，累计点云有 537 点。
+它们分别说明输入记录长度、估计处理进度以及地图是否已累积观测。
+对应字段见 \code{textbook/data/appD_replay.json}。
 
-\section{与现有二维 SLAM 对照的接入练习}
-例如接入 slam\_toolbox 时，先按其版本文档准备扫描、标定外参及所要求的里程计 TF。
-若外部算法只使用雷达而课程算法融合 IMU，应分别列出传感器与先验差异，
-不能把两者结果当作同输入下的纯算法比较。
-禁止用真值里程计帮助一个系统，再隐藏这个条件。
+先确认回放输入逐字段一致，再检查估计输出的完整性。
+研究定位精度时，另保存独立的评价真值，按第 19 章做时间对齐并计算 ATE/RPE；
+研究地图质量时，在已观测区域比较墙体位置、厚度与占据分类。
+这种顺序有助于区分输入丢失、时间处理错误和算法估计误差。
 
-在同一 bag 上串行运行两个系统，避免争抢 TF；记录版本、参数、初值、回放速率、计算预算、
-失败次数和第 19 章定义的 ATE/RPE。地图质量只在已观测区域评估。
-本附录提供接入协议，外部 SLAM 的安装和对照是选做实验，本机未宣称已运行。
+\section{在同一记录上接入外部二维 SLAM}
+选做对照可使用 \href{https://github.com/SteveMacenski/slam_toolbox#api}{slam\_toolbox 的官方接口说明}：
+输入扫描与 odom 到 base 的有效变换，由算法输出地图。
+先为目标版本整理输入表，写清扫描话题、外参、里程计来源和坐标名称。
+如果一个系统直接融合 IMU，另一个通过融合里程计间接使用 IMU，应把这条信息路径写进比较条件。
 
-\paragraph{练习}
-appD-1 从含时钟、TF、地图和真值的话题列表中选出两类传感器，缺少 IMU 时应明确失败。
-再说明为什么重放旧 map 到 odom 会使“重新建图”实验失去意义。
+对照时按如下顺序准备：
+\begin{enumerate}
+\item 固定同一份传感器 bag 与外参；确定每个算法可获得哪些观测和先验。
+\item 串行运行两个系统，使每次只有一个发布者计算 map/odom；每次从新的算法状态开始。
+\item 固定回放速率、初值和计算预算，保存参数、版本、状态及输出轨迹。
+\item 用同一评价真值、时间交集与 ATE/RPE 定义比较；同时记录失败次数与地图质量。
+\end{enumerate}
+若某个系统获得更精确的里程计先验，结果就同时反映先验与算法的作用。
+可先比较整套系统，再固定共同先验做第二组实验，逐步缩小影响因素。
 
-\clearpage
-\section{从教材跳到 API 文档}
-教材按概念安排，API 文档按函数和类型检索。两者共同解释输入、输出、单位与前提。
-仓库根目录的 Doxyfile 扫描算法和 ROS 边界头文件，输出到临时目录：
-\begin{lstlisting}[language=bash]
+\section{从教材找到函数说明，再回到代码}
+教材按问题展开推导，API 文档按函数名和类型检索。
+在仓库根目录运行
+\begin{lstlisting}[language=bash,numbers=none]
 bash scripts/build_api.sh
 # Open tmp/doxygen/html/index.html in a browser.
 \end{lstlisting}
-脚本优先使用系统 doxygen；本主机还准备了局部 1.15.0 工具，不修改系统安装。
-其他主机需安装 Doxygen；公式图片还使用 LaTeX 工具链。
-本次生成已覆盖 52 个头文件并完成公式渲染，文档语法告警作为错误处理。
-这不代表每个函数说明都完整，更不能代替单元测试。
+脚本优先使用系统 Doxygen，也支持仓库 tmp 中准备好的局部工具。
+若提示找不到 Doxygen，安装后重试；公式渲染使用主机 LaTeX 工具链。
 
-例如附录 C 的偏置函数，调用者必须知道以下内容：
+以附录 C 的 \code{stepBiasWalk} 为例，先在 API 中找到声明，再对照这些字段：
 \begin{center}\small
-\begin{tabular}{lp{9.5cm}}\toprule
-字段 & 应解释的意义\\\midrule
-brief & 一次标量偏置演化，区别于每采样白噪声\\
-param & 当前偏置、密度、实际间隔和标准正态样本；逐项给出单位\\
-return & 更新后的偏置，保持原量纲；由调用方保存到下一步\\
-details / pre & 有限值、非负密度/时间、独立样本；该工具未改变基础模拟器\\\bottomrule
+\begin{tabular}{lp{10cm}}\toprule
+字段 & 阅读时要获得的信息\\\midrule
+brief & 一次标量偏置更新，说明函数解决的问题\\
+param & bias 是当前偏置；density 是偏置单位除以平方根秒；dt 是实际经过的秒数；unit\_noise 是标准正态样本\\
+return & 下一步偏置，单位与输入 bias 相同，调用方将它保存到下一次采样\\
+details / pre & 更新公式、独立样本要求，以及时间和密度的有效范围\\\bottomrule
 \end{tabular}
 \end{center}
-不要只把变量名翻译成中文。比如“dt：时间”不如“非负实际间隔，单位 s，缺测后不能仍用名义周期”明确。
-公式使用 Doxygen 数学语法，项目配置加载 amsmath，避免算子命令生成失败。
+随后到源文件找到式\eqref{eq:bias_step}，用 $\Delta t=0.01$ s、$\xi=1$ 手算一次调用。
+最后打开偏置演示，查看随机数如何产生、返回值如何保存。
+从“公式—声明—函数体—调用点”走一遍，就能看懂一个小模块怎样接入程序。
 
-\section{让实验报告可以被重新运行}
-报告模板位于仓库 docs 目录：
-\begin{lstlisting}
-docs/EXPERIMENT_REPORT_TEMPLATE.md
-docs/VALIDATION.md
-\end{lstlisting}
-前者是待填写模板，后者是本课程已经执行的验证记录，二者不能混淆。
-报告先写问题和通过标准，再列 Git 版本、构建方式、主机、参数文件、随机种子、模型、传感器与时钟。
-结果需包含总试验次数、全部失败、指标定义与对齐方式；给出原始数据及其生成命令。
+自己编写注释时，用输入的物理含义解释单位与前提。例如
+“dt：实际经过的时间，单位 s”比单写“dt：时间”更有帮助。
+数学可用 Doxygen 的行内或行间公式语法书写，再生成页面检查公式是否正确显示。
 
-若比较性能，分别列准备、内核、传输、消息与求解阶段，说明预热和计时区间；
-若比较轨迹，区分离散采样与连续证书。记录 PDF 散列和本次新增/修改页面的视觉复核结果，
-不需要反复检查无改动的旧章节。
+\section{把实验写成别人可以重做的步骤}
+可复制仓库中的报告模板：
+\begin{center}\code{docs/EXPERIMENT_REPORT_TEMPLATE.md}\end{center}
+先提出一个能比较的问题，例如“偏置密度加倍后，10 秒终点方差是否变为四倍”。
+写出模型预测，然后列出运行版本、参数、种子、时长与重复次数，提供生成原始数据的命令。
+结果中同时保留每组样本数、成功或失败状态、统计指标与单位，读者便能重算你的结论。
 
-\paragraph{选做练习}
-在生成的 API 中找到一个函数，指出其坐标系、单位、前提和失败方式。
-复制模板，填写附录 C 的两采样率实验；随后只改密度并重新测量。
-先预测方差应如何缩放，再用实际数据判断预测；模板中的空白项目不得冒充测量结果。
+性能实验按第 20 章分别记录准备、计算、传输和消息阶段，注明预热与计时边界；
+轨迹实验按第 16--19 章说明空间检查、动力学界、时间对齐和跟踪指标。
+当结果偏离预测时，先判断是输入、坐标、时间、数值误差还是模型条件发生了变化，
+再有针对性地修改下一组实验。
+
+\section{练习：重放同一段运动}
+\begin{enumerate}
+\item \textbf{代码 appD-1：}从混合话题列表中选出扫描与原始 IMU；缺少必要输入时说明缺失项。
+\item 对 0.2 rad/s、采集间隔 0.005 s 的陀螺数据，分别求 0.5 倍和 2 倍播放时的墙钟间隔与角度增量。
+\item 运行自动回放例子，读取 summary.json 和 bag 元数据，解释采集与存储时间的差异。
+\item 将一条 IMU 的协方差改动一个元素，预测字段摘要是否改变；说明为何检查时包含协方差与 frame。
+\item 画出回放 TF 树，标注每条边的发布者；更换传感器安装位置时应改哪两条边？
+\item 在 API 中找到偏置函数，从声明追到调用点；复制报告模板，填写附录 C 的两频率比较。
+\end{enumerate}
+练习入口与手算提示见 \code{exercises/appD/README.md}。
