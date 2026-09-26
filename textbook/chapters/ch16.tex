@@ -104,3 +104,69 @@ GCC 15.2、Eigen 3.4、C++17，统一 -O3、-fno-fast-math，无 LTO；预热 10
 \item \textbf{代码 ch16-1：}补全 Schur 块，和独立 $4\times4$ 密集方程的解比较。
 \item \textbf{实验：}改变段数与时长尺度，同时报告数值误差、失败状态及耗时，禁止只展示更快的一次。
 \end{enumerate}
+
+\clearpage
+\section{不改曲线，只换成 Bézier 控制点}
+将秒制多项式改用归一化时间 $s=t/T$。五次 Bernstein 基函数
+$B_j^5(s)=\binom{5}{j}s^j(1-s)^{5-j}$ 非负且和为一，因此
+\begin{equation}
+ p(s)=\sum_{j=0}^5P_j B_j^5(s),\qquad
+ P_j=\sum_{k=0}^j\frac{\binom{j}{k}}{\binom{5}{k}}c_kT^k.
+\end{equation}
+$P_j$ 是另一种表示的控制点；它们通常不在曲线上。若全部控制点位于同一个凸多边形，
+它们的任何凸组合都在其中，故整段曲线都在其中。
+这里的多边形必须先经过第十三章的\textbf{完整区域配置空间检查}，不能只检查多边形顶点。
+不能把“控制点处 ESDF 足够大”替换成该证明：一般自由空间不是凸集。
+
+速度与加速度也有控制点，其凸包分别包含整段导数：
+\begin{equation}
+ V_j=\frac5T(P_{j+1}-P_j),\qquad
+ A_j=\frac{20}{T^2}(P_{j+2}-2P_{j+1}+P_j).
+\end{equation}
+由范数凸性，$\max_j\|V_j\|$ 和 $\max_j\|A_j\|$ 是整个区间的上界。
+它们可能偏保守，但不是某几个轨迹采样点的最大值。
+
+\section{二分能缩紧界，不能改变事实}
+de Casteljau 递推把相邻控制点取平均，得到精确表示左右半段的新控制点。
+重复二分后，对每个小段作同样检查。曲线与时间未改变；位置凸包逐步缩紧，速度/加速度用对应小段时长计算。
+默认深度 5，每段检查 32 个子段；接口允许 0--10。
+\lstinputlisting[language=C++,linerange={bezier_certificate_begin-bezier_certificate_end},
+ includerangemarker=false]{../ros2_ws/src/motion2d/src/trajectory/bezier_bounds.cpp}
+certifyBezier 必须收到每段对应的已验证区域。所有半空间残差不大于 $10^{-9}$，且导数上界不超过物理上限加同样的数值容差，
+才报告 certified。$10^{-9}$ 是浮点比较容差，不是机器人避障裕量。
+未通过只说明该充分条件无法认证，也可能确实越界；不能据此断言曲线必然碰撞。
+
+\clearpage
+\section{加入控制点代价，再独立认证}
+沿用上一章的正时长变量与外层 BFGS，新增 optimizeSpline 选择实际第二种内核。
+两种实现共用同一份优化器和代价；没有复制一套配置工厂。
+对控制点的走廊残差、导数范数违反量加入三次正部惩罚。
+bezierCost 将梯度传回系数和时长，显式包含 $T^k$ 的导数；之后由样条伴随传回路点和时间。
+它是控制点代价之和，不是对时间的数值积分，权重也不能照搬上一章后就假设同尺度。
+
+\begin{lstlisting}[language=bash]
+ros2 run motion2d bezier_demo tmp/ch16_bezier
+/usr/bin/python3 scripts/plot_ch16_bezier.py
+\end{lstlisting}
+同一墙体栅格、初始路点/时长和端点；第三组额外使用控制点代价，走廊权重 50000、额外余量 0.04 m。
+三组的目标定义并不完全相同，\textbf{不把总代价大小用作横向优劣结论}，改看时长与约束检查。
+
+\begin{figure}[!ht]
+\centering\includegraphics[width=\linewidth]{figures/ch16_bezier.pdf}
+\caption{只使用轨迹采样软惩罚仍可能离开凸走廊；控制点惩罚把本次解推回可认证范围。
+青色曲线与其他曲线均从同一初值开始，后验认证独立于优化器状态。}
+\end{figure}
+
+控制点版本本次返回 converged，整段走廊最大残差为 $-0.03427$ m，并通过速度/加速度连续上界检查；
+原采样惩罚版本残差为正，认证失败。
+即使在地图上认证成功，也只证明\textbf{参考圆心曲线相对于这份固定栅格}满足所设条件。
+定位误差、追踪误差及地图更新需要额外裕量和后续在线处理。
+
+验证包括：Bernstein/de Casteljau 值与原多项式导数逐点一致；控制点代价的系数/时长差分；
+端点安全但中间越界的二次曲线反例；静止到静止 1 m、2 s 曲线的速度和加速度解析峰值。
+后者未细分时界较保守，细分后能认证速度 $\leq1$ m/s、加速度 $\leq1.5$ m/s$^2$。
+\begin{enumerate}
+\item \textbf{推导：}为什么控制点在凸走廊内是充分条件，却不是必要条件？
+\item \textbf{代码 ch16-2：}补全归一化基底映射中的二项式比例，保留 $T^k$。
+\item \textbf{实验：}从深度 0 增到 5，记录上界收紧和耗时变化；确认轨迹采样结果完全不变。
+\end{enumerate}

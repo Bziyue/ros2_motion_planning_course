@@ -1,5 +1,5 @@
 #include <gtest/gtest.h>
-#include "motion2d/trajectory/minco_optimizer.hpp"
+#include "motion2d/trajectory/trajectory_optimizer.hpp"
 #include "motion2d/trajectory/quintic.hpp"
 using namespace motion2d;
 TEST(TrajectoryCost, DirectCoefficientAndMovingTimeGradient) {
@@ -22,7 +22,7 @@ TEST(TrajectoryCost, DirectCoefficientAndMovingTimeGradient) {
   EXPECT_NEAR(fd,exact.times(0),1e-5*std::max(1.,std::abs(fd)));
 }
 TEST(Optimization, AnalyticSingleSegmentTimeOptimum) {
-  TranslationState a,b;b.position={1,0};MincoOptimizationConfig c;
+  TranslationState a,b;b.position={1,0};TrajectoryOptimizationConfig c;
   c.cost.speed_weight=0;c.cost.acceleration_weight=0;c.optimize_waypoints=false;
   c.solver.gradient_tolerance=1e-6;
   auto r=optimizeMinco(a,b,{}, {2},c);

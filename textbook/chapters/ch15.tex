@@ -156,7 +156,7 @@ $d(p)$ 用于可微软惩罚；独立检查仍使用第十二章的净空下界�
 令 $T_i=T_{\min}+e^{\tau_i}$，优化无约束变量 $\tau_i$。
 链式法则给出 $dK/d\tau_i=(dK/dT_i)(T_i-T_{\min})$：
 \lstinputlisting[language=C++,linerange={positive_time_begin-positive_time_end},
- includerangemarker=false]{../ros2_ws/src/motion2d/src/trajectory/minco_optimizer.cpp}
+ includerangemarker=false]{../ros2_ws/src/motion2d/src/trajectory/trajectory_optimizer.cpp}
 不把越界时间硬裁剪后假装梯度不变。指数溢出、线性求解失败、ESDF 越出有效域都使该试探步无效。
 BFGS 用 Armijo 回溯寻找有限且下降的步；逆 Hessian 更新使用实际变量差和梯度差。
 内层 MINCO 随段数线性增长，\textbf{外层教学版密集 BFGS 使用二次内存}，两者不要混淆。

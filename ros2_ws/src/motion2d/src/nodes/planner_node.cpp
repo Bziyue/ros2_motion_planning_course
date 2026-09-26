@@ -7,7 +7,7 @@
 #include <tf2_ros/buffer.hpp>
 #include <tf2_ros/transform_listener.hpp>
 #include "motion2d/planning/astar.hpp"
-#include "motion2d/trajectory/minco_optimizer.hpp"
+#include "motion2d/trajectory/trajectory_optimizer.hpp"
 #include "motion2d/ros/mapping_messages.hpp"
 #include "motion2d/ros/planning_messages.hpp"
 
@@ -173,7 +173,7 @@ private:
 
   InflationConfig config_;
   bool optimize_enabled_;
-  MincoOptimizationConfig optimization_;
+  TrajectoryOptimizationConfig optimization_;
   std::optional<Esdf2D> field_;
   bool corridor_enabled_, merge_convex_;
   double extension_;

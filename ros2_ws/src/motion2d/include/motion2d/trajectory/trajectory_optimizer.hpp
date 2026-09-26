@@ -5,15 +5,16 @@
 #include <optional>
 namespace motion2d {
 /** @brief Small teaching optimizer. Dense outer BFGS has quadratic memory. */
-struct MincoOptimizationConfig {
+struct TrajectoryOptimizationConfig {
   TrajectoryCostConfig cost;
   TrajectoryLimits limits;
   BfgsConfig solver;
+  bool bezier_penalties=false;  ///< Additional control-point soft costs (ch16).
   bool optimize_waypoints=true, optimize_times=true;
   double min_duration=.2;
 };
 /** @brief Last accepted iterate and diagnostics; no execution authorization. */
-struct MincoOptimizationResult {
+struct TrajectoryOptimizationResult {
   BfgsResult solver;
   std::optional<PolynomialTrajectory> curve;
   std::vector<Eigen::Vector2d> waypoints;
@@ -25,7 +26,11 @@ struct MincoOptimizationResult {
  * finite sampling cannot certify the continuous curve. Exceptions in trial
  * evaluations cause a rejected line-search step; invalid initial data is reported.
  */
-MincoOptimizationResult optimizeMinco(const TranslationState & start,const TranslationState & finish,
+TrajectoryOptimizationResult optimizeMinco(const TranslationState & start,const TranslationState & finish,
   const std::vector<Eigen::Vector2d> & interior,const std::vector<double> & durations,
-  const MincoOptimizationConfig & config,const std::vector<ConvexRegion> & regions={},const Esdf2D * field=nullptr);
+  const TrajectoryOptimizationConfig & config,const std::vector<ConvexRegion> & regions={},const Esdf2D * field=nullptr);
+/** @brief Same variables, cost and solver as optimizeMinco; use the independent Spline2D core. */
+TrajectoryOptimizationResult optimizeSpline(const TranslationState & start,const TranslationState & finish,
+  const std::vector<Eigen::Vector2d> & interior,const std::vector<double> & durations,
+  const TrajectoryOptimizationConfig & config,const std::vector<ConvexRegion> & regions={},const Esdf2D * field=nullptr);
 }

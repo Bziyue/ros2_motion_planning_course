@@ -17,3 +17,9 @@ bash scripts/benchmark_ch16.sh
 测试1–12段与MINCO系数/梯度一致，通用伴随通过软代价中心差分；MINCO另有独立KKT测试。
 当前实现保留6×6矩阵运算便于阅读，上游使用更专门化公式。性能只代表本机/此问题，不能由O(N)推出固定加速比。
 连续Bézier认证与优化共享接口随后补充。
+
+连续认证已实现：bezierMap把原曲线及导数转换为控制点，de Casteljau二分保持原曲线。
+certifyBezier要求每段对应已验证配置空间区域，检查全部位置半空间和速度/加速度控制点范数上界。
+默认5层二分、1e-9数值容差；这不是物理安全裕量，跟踪/定位误差不包含在证书内。
+`ros2 run motion2d bezier_demo tmp/ch16_bezier`对比初始、采样软惩罚、控制点惩罚；最后一组收敛且连续认证通过。
+三组目标定义不同，不比较总代价优劣。`/usr/bin/python3 scripts/plot_ch16_bezier.py`生成等比例几何与速度图。

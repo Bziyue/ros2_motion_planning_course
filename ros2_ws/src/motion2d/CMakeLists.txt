@@ -25,7 +25,7 @@ add_library(motion2d_core
   src/estimation/planar_ekf.cpp src/estimation/fusion_timeline.cpp src/estimation/pose_graph.cpp src/estimation/loop_closure.cpp src/estimation/keyframes.cpp
   src/planning/inflation.cpp src/planning/astar.cpp src/planning/path_simplifier.cpp src/planning/corridor.cpp
   src/trajectory/polynomial.cpp src/trajectory/quintic.cpp src/trajectory/execution.cpp src/trajectory/banded_lu.cpp src/trajectory/minco2d.cpp src/trajectory/trajectory_cost.cpp
-  src/optimization/bfgs.cpp src/trajectory/minco_optimizer.cpp src/trajectory/spline2d.cpp)
+  src/optimization/bfgs.cpp src/trajectory/trajectory_optimizer.cpp src/trajectory/spline2d.cpp src/trajectory/bezier_bounds.cpp)
 target_compile_features(motion2d_core PUBLIC cxx_std_17)
 target_compile_options(motion2d_core PRIVATE -Wall -Wextra -Wpedantic)
 target_include_directories(motion2d_core PUBLIC
@@ -189,6 +189,10 @@ add_executable(spline_demo src/examples/spline_demo.cpp)
 target_link_libraries(spline_demo PRIVATE motion2d_core)
 install(TARGETS spline_demo DESTINATION lib/motion2d)
 
+add_executable(bezier_demo src/examples/bezier_demo.cpp)
+target_link_libraries(bezier_demo PRIVATE motion2d_core)
+install(TARGETS bezier_demo DESTINATION lib/motion2d)
+
 if(BUILD_TESTING)
   find_package(ament_cmake_gtest REQUIRED)
   ament_add_gtest(test_trajectory_messages test/test_trajectory_messages.cpp src/ros/trajectory_messages.cpp)
@@ -196,6 +200,8 @@ if(BUILD_TESTING)
   target_link_libraries(test_trajectory_messages motion2d_core motion2d_interfaces::motion2d_interfaces__rosidl_typesupport_cpp)
   ament_add_gtest(test_trajectory_cost test/test_trajectory_cost.cpp)
   target_link_libraries(test_trajectory_cost motion2d_core)
+  ament_add_gtest(test_bezier test/test_bezier.cpp)
+  target_link_libraries(test_bezier motion2d_core)
   ament_add_gtest(test_spline test/test_spline.cpp)
   target_link_libraries(test_spline motion2d_core)
   ament_add_gtest(test_minco test/test_minco.cpp)
