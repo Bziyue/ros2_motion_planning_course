@@ -8,7 +8,9 @@
 
 附录包含数学回查、差速运动学、偏置随机游走、传感器 bag 回放、Doxygen 和实验报告。轮力矩/NMPC、逐束畸变、动态障碍、全局重定位与外部 SLAM 对照明确列为选做扩展。第 08 章以后的 ROS 功能已做无界面验收，RViz 配置已提供；本机图形问题尚未完成 GUI 验收，详见验证记录。
 
-[逐章教材重修进度](docs/EDITORIAL_REVIEW.md) · [教材 PDF](output/pdf/course.pdf) · [实施进度](docs/PROGRESS.md) · [主机验收记录](docs/VALIDATION.md)
+教材已完成第 01–20 章及附录 A–D 的逐章修订：补充数学推导、手算例子、原理图与关键代码导读，练习同步更新，并逐章复核 PDF。
+
+[逐章修订说明](docs/EDITORIAL_REVIEW.md) · [教材 PDF](output/pdf/course.pdf) · [实施进度](docs/PROGRESS.md) · [主机验收记录](docs/VALIDATION.md)
 
 选学入口见 [附录说明](chapters/appendices/README.md)；运行 `bash scripts/build_api.sh` 生成 API，实验可复制 [报告模板](docs/EXPERIMENT_REPORT_TEMPLATE.md)。
 
