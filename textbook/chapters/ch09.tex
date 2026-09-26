@@ -134,4 +134,117 @@ every last row/.style={after row=\bottomrule}]{data/ch09_filter.csv}
 \textbf{练习与验收：}手推 $F_{v\psi}$；完成角度残差练习；把注入偏置改为零后复跑，
 再把观测标准差减半，比较误差及拒绝数。测试还核对常加速度解析解、$F/G$ 中心差分、
 互协方差、离群点拒绝以及长时间更新后的协方差对称性与半正定性。
-在线时间对齐将在下一个功能接入，不用合成观测实验冒充真实雷达定位。
+下面接入真实扫描匹配输出，单独验证在线时间处理。
+
+\clearpage
+\section{校正发生在采样时刻，不是收到消息时}
+先运行在线版本：
+\begin{lstlisting}[language=bash]
+ros2 launch motion2d_bringup ch09.launch.py rviz:=false
+# Another terminal with the same ROS environment, from repository root:
+/usr/bin/python3 scripts/check_ch09.py
+\end{lstlisting}
+默认激光 10 Hz、IMU 200 Hz。配准需要时间，激光位姿送达时，滤波器可能已经处理了更新的 IMU。
+直接拿旧观测校正当前状态，会把消息延迟误当成运动误差。
+
+\begin{center}
+\begin{tikzpicture}[x=1cm,y=1cm,>=stealth]
+\draw[->] (0,0)--(10,0) node[right]{采样时间};
+\foreach \x/\t in {1/7,5/14,9/21} {
+  \draw (\x,.12)--(\x,-.12);
+  \node[below] at (\x,-.18) {IMU $\t$ ms};
+}
+\draw[->,draw=tealblue,thick] (2.7,1)--(2.7,.15);
+\node[above,text=tealblue] at (2.7,1) {激光 $10$ ms};
+\node[above] at (7.5,.6) {可能在 $21$ ms 后才送达};
+\end{tikzpicture}
+\end{center}
+例如激光时刻为 10 ms，两侧 IMU 为 7 和 14 ms。先用 7 ms 的样本推进到 10 ms，
+完成位姿校正，再用同一左侧样本推进到 14 ms，随后使用 14 ms 样本继续。
+所有区间长度先在整数纳秒内相减，最后乘 $10^{-9}$ 换算秒。
+
+\lstinputlisting[language=C++,linerange={fusion_replay_begin-fusion_replay_end},
+  includerangemarker=false]{../ros2_ws/src/motion2d/src/estimation/fusion_timeline.cpp}
+
+FusionTimeline 保存一个校正锚点及有限 IMU 队列。激光观测早于最近 IMU 时才可处理；
+晚于它则由 ROS 节点排队等待。延迟观测校正后，重放到最新 IMU 时刻。
+默认历史窗口 2 s，超出窗口的旧观测报告 laser\_too\_old，不伪造为“当前测量”。
+校正必须按激光采样顺序处理，重复帧不重复吸收信息。
+
+\textbf{近似边界：}一步内固定航向；被激光时刻切开的同一 IMU 样本在协方差传播中近似独立。
+缩小步长能改善均值积分，但不代表噪声模型严格一致。
+
+\textbf{练习 ch09-2：}补完 held\_duration.hpp，求预测区间与一个 IMU 保持区间的交集。
+
+\clearpage
+\section{高频预测与扫描位姿各走一个出口}
+\begin{center}\small
+\begin{tabular}{lll}\toprule
+消息 & 时刻与来源 & 使用者 \\\midrule
+\texttt{/odometry/lidar} & 扫描匹配，激光采样时刻 & 融合器 \\
+\texttt{/odometry/estimated} & IMU 预测，最新 IMU 时刻 & estimated 适配器 \\
+\texttt{/odometry/scan} & 激光时刻的校正位姿 & 观测建图 \\
+\texttt{/odometry} & 统一选择后的高频估计 & 跟踪控制与显示 \\\bottomrule
+\end{tabular}
+\end{center}
+为什么建图不直接订阅高频预测？同一激光时间的预测可能先到，而配准校正稍后才到。
+若把先到预测立即画进地图，该帧就失去了后来的校正。第九章 launch 将 mapping 的位姿输入
+重映射到专用的扫描位姿流；配准或 EKF 拒绝的帧不入图，后续成功帧仍可继续。
+
+高频输出在每个 IMU 时刻至多发一次；晚到校正对外体现于下一次 IMU 输出，
+不会为同一采样时间反复发布 TF。这里的“连续”表示持续高频传播，不保证校正时位姿完全无跳变。
+当前 map 与 odom 重合；下一章让回环更新 map 到 odom，而局部 odom 保持自己的运动历史。
+
+\begin{notebox}
+\textbf{失败有明确含义}\quad 超过 0.5 s 没有接受激光，报告 laser\_stale，仍可短时传播 IMU。
+相邻 IMU 间隔超过 0.1 s，则报告 imu\_gap 并失去初始化，等待新的激光起点。
+消息缺失时不能把上一位姿换一个新时间戳冒充已预测；未来控制器也不能无限使用已失效定位。
+\end{notebox}
+
+第一帧激光定义 odom 原点。初速先验仍为零、标准差 1 m/s，后续校正逐渐估计它；
+不能从首帧 IMU 倒推出真实初始速度。reset 清空偏置、协方差、锚点和历史；
+两个输入分别收到新原点时，保留先到的新试验样本。操作时先暂停，等待旧 DDS 队列排空。
+
+\textbf{常见错误：}提前使用右侧 IMU；只回滚位置而没回滚速度/协方差；用最新位姿匹配旧扫描；
+把激光回环校正直接覆盖底层 odom；将过小协方差理解成高精度保证。
+
+\textbf{ROS 验收：}在实际主机管线里检查 3 s 的 601 个 IMU 时刻，得到 30 个校正扫描/地图配对，
+首帧对齐后最大位置误差约 0.0400 m，主要来自初速尚未估计的初始阶段。
+输入订阅检查确认融合器和激光里程计没有真值、几何世界或 TF 输入；暂停不生成新样本，reset 能重播扫描校正值。
+另一个独立节点实验检查非对齐的 7/10/14/17/21 ms 时刻、两种 reset 顺序、扫描过期和 IMU 中断。
+
+移除 \texttt{rviz:=false} 可显示估计轨迹、扫描点云与观测栅格。
+本次使用真实 ROS 无界面验收；由于前述主机 OpenGL 截图及 reset 缓存问题，没有把 RViz 画面列为已通过。
+
+\clearpage
+\section{真实扫描：转得更快、少扫半秒}
+\begin{lstlisting}[language=bash]
+ros2 run motion2d lidar_imu_demo tmp/ch09_fusion
+/usr/bin/python3 scripts/plot_ch09_fusion.py
+\end{lstlisting}
+固定 world seed=42，距离噪声 seed=4242，IMU seed=6060。
+360 束、距离噪声 0.01 m、激光 10 Hz、IMU 200 Hz，圆轨迹半径 1 m，持续 10 s；
+3--3.5 s 不提供扫描，每次激光结果有 30 ms 交付延迟。使用第六章默认白噪声，无额外固定偏置。
+两个转速分别为 0.4 和 1.2 rad/s；真值只用来生成传感器与独立评估。
+
+\begin{figure}[h]
+\centering\includegraphics[width=\linewidth]{figures/ch09_fusion.pdf}
+\caption{实际射线与原始 IMU 回放，灰色区间缺扫。误差在全部可用 IMU 时刻统计，激光基线保持最新收到的位姿。}
+\end{figure}
+\begin{center}\small
+\pgfplotstabletypeset[col sep=comma,
+columns={omega,mode,position_rmse,yaw_rmse,dropout_rmse},
+columns/omega/.style={column name=$\omega$/rad/s},
+columns/mode/.style={column name=模式,string type,string replace*={held_lidar}{保持激光},string replace*={fusion}{融合}},
+columns/position_rmse/.style={column name=位置 RMSE/m,fixed,precision=4},
+columns/yaw_rmse/.style={column name=航向 RMSE/rad,fixed,precision=4},
+columns/dropout_rmse/.style={column name=缺扫 RMSE/m,fixed,precision=4},
+every head row/.style={before row=\toprule,after row=\midrule},
+every last row/.style={after row=\bottomrule}]{data/ch09_fusion.csv}
+\end{center}
+两个转速下激光分别拒绝 4、7 帧，EKF 均无额外拒绝。融合补偿了采样间运动和交付延迟；
+这不是声称 ICP 单帧精度被提高，也不是与带预测的其他激光算法的普遍比较。
+
+\textbf{本章练习与验收：}完成两道代码练习；改变转速、延迟或缺扫时长，连同拒绝数报告误差。
+检查即时和延迟校正重放后的状态/协方差一致，历史内存有界，拒绝观测不修改当前估计。
+本章使用 snapshot 扫描；逐束扫描畸变与去畸变保留为可选进阶。

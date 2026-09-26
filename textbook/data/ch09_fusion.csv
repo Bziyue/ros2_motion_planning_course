@@ -1,0 +1,5 @@
+omega,mode,position_rmse,yaw_rmse,dropout_rmse,lidar_rejected,ekf_rejected
+0.4,held_lidar,0.0505163,0.0502525,0.151776,4,0
+0.4,fusion,0.0043524,0.000349635,0.00298887,4,0
+1.2,held_lidar,0.152226,0.15355,0.443887,7,0
+1.2,fusion,0.0130768,0.000267361,0.00453353,7,0
