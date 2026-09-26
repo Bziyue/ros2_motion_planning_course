@@ -22,7 +22,7 @@ add_library(motion2d_core
   src/mapping/occupancy_grid.cpp src/mapping/distance_transform.cpp src/mapping/esdf.cpp src/evaluation/map_evaluation.cpp
   src/estimation/scan_matcher.cpp src/estimation/lidar_odometry.cpp src/estimation/imu_predictor.cpp
   src/estimation/planar_ekf.cpp src/estimation/fusion_timeline.cpp src/estimation/pose_graph.cpp src/estimation/loop_closure.cpp src/estimation/keyframes.cpp
-  src/planning/inflation.cpp src/planning/astar.cpp src/planning/path_simplifier.cpp)
+  src/planning/inflation.cpp src/planning/astar.cpp src/planning/path_simplifier.cpp src/planning/corridor.cpp)
 target_compile_features(motion2d_core PUBLIC cxx_std_17)
 target_compile_options(motion2d_core PRIVATE -Wall -Wextra -Wpedantic)
 target_include_directories(motion2d_core PUBLIC
@@ -161,8 +161,14 @@ add_executable(esdf_demo src/examples/esdf_demo.cpp)
 target_link_libraries(esdf_demo PRIVATE motion2d_core)
 install(TARGETS esdf_demo DESTINATION lib/motion2d)
 
+add_executable(corridor_demo src/examples/corridor_demo.cpp)
+target_link_libraries(corridor_demo PRIVATE motion2d_core)
+install(TARGETS corridor_demo DESTINATION lib/motion2d)
+
 if(BUILD_TESTING)
   find_package(ament_cmake_gtest REQUIRED)
+  ament_add_gtest(test_corridor test/test_corridor.cpp)
+  target_link_libraries(test_corridor motion2d_core)
   ament_add_gtest(test_esdf test/test_esdf.cpp)
   target_link_libraries(test_esdf motion2d_core)
   ament_add_gtest(test_planning_grid test/test_planning_grid.cpp)
