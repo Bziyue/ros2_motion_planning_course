@@ -1,0 +1,11 @@
+{
+  "clangd.arguments": [
+    "--compile-commands-dir=${workspaceFolder}/ros2_ws/build/motion2d",
+    "--query-driver=/usr/bin/c++",
+    "--background-index"
+  ],
+  "C_Cpp.default.compileCommands": "${workspaceFolder}/ros2_ws/build/motion2d/compile_commands.json",
+  "files.associations": {
+    "*.launch.py": "python"
+  }
+}

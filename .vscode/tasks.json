@@ -1,0 +1,35 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "ROS 2: build workspace",
+      "type": "shell",
+      "command": "source /opt/ros/lyrical/setup.zsh && colcon build --symlink-install --cmake-args -DCMAKE_BUILD_TYPE=RelWithDebInfo -DPython3_EXECUTABLE=/usr/bin/python3",
+      "options": {
+        "cwd": "${workspaceFolder}/ros2_ws",
+        "shell": {
+          "executable": "/usr/bin/zsh",
+          "args": ["-c"]
+        }
+      },
+      "problemMatcher": ["$gcc"],
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      }
+    },
+    {
+      "label": "ROS 2: launch chapter 01",
+      "type": "shell",
+      "command": "source /opt/ros/lyrical/setup.zsh && source install/setup.zsh && ros2 launch motion2d_bringup ch01.launch.py",
+      "options": {
+        "cwd": "${workspaceFolder}/ros2_ws",
+        "shell": {
+          "executable": "/usr/bin/zsh",
+          "args": ["-c"]
+        }
+      },
+      "problemMatcher": []
+    }
+  ]
+}

@@ -1,6 +1,10 @@
 cmake_minimum_required(VERSION 3.20)
 project(motion2d)
 
+# Keep an exact compiler invocation database for clangd and other C++ editors.
+# This is a development aid only; it does not change generated ROS targets.
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
 find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(visualization_msgs REQUIRED)

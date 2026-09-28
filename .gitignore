@@ -10,7 +10,11 @@ __pycache__/
 .pytest_cache/
 .venv/
 .idea/
-.vscode/
+# Keep the shared ROS 2 editor configuration, but ignore per-user VS Code state.
+.vscode/*
+!.vscode/
+!.vscode/settings.json
+!.vscode/tasks.json
 *.swp
 
 # LaTeX intermediates; reviewed PDFs in output/pdf/ are tracked.
